@@ -255,7 +255,7 @@ fn a_path_that_cannot_be_a_database_is_a_store_error() {
     let text = dir.run(&args(&["--db", "a-directory", "list"]));
     assert_eq!(text.code(), Some(10));
     assert!(
-        text.stderr.starts_with("runspore: store.io: "),
+        text.stderr.starts_with("spore: store.io: "),
         "{}",
         text.stderr
     );

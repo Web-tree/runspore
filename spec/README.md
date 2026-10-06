@@ -6,7 +6,7 @@ implementation. Where it is narrower than `docs/`, this directory wins for the M
 
 ## What the MVP is
 
-A single binary, `runspore`, and the Rust library behind it. A user writes a workflow
+A single binary, `spore`, and the Rust library behind it. A user writes a workflow
 as one JSON document, starts a run, and can kill the process at any moment. Restarting
 resumes the run from its last committed step. No completed step runs again. A step
 that was interrupted mid-effect is either repeated (when the workflow declares that
@@ -59,7 +59,7 @@ package signing. Each is additive under a later semantics version.
 - [kernel.md](kernel.md): workflow document, state, events, commands, the transition algorithm.
 - [store.md](store.md): store operations, atomicity, failure codes, required tests.
 - [host.md](host.md): engine loop, dispatch, activities, failpoints, wasm packaging.
-- [cli.md](cli.md): the `runspore` command surface and exit codes.
+- [cli.md](cli.md): the `spore` command surface and exit codes.
 
 The wire types are code: `crates/runspore-types`. Where prose and that crate disagree,
 the crate wins and the prose is a bug.
@@ -73,7 +73,7 @@ crates/runspore-component     kernel as a WebAssembly component (guest)
 crates/runspore-wasmtime      Reducer implemented by running that component
 crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
-crates/runspore-cli           the runspore binary and crash-recovery tests
+crates/runspore-cli           the spore binary and crash-recovery tests
 conformance/traces            golden kernel traces
 conformance/js                Node and Bun trace runners
 examples                      sample workflows

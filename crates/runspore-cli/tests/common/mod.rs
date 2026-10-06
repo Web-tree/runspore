@@ -1,4 +1,4 @@
-//! Drives the compiled `runspore` binary as a child process, one temp directory each.
+//! Drives the compiled `spore` binary as a child process, one temp directory each.
 
 #![allow(dead_code)]
 
@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
-pub const BIN: &str = env!("CARGO_BIN_EXE_runspore");
+pub const BIN: &str = env!("CARGO_BIN_EXE_spore");
 
 pub struct Dir {
     pub path: PathBuf,

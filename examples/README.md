@@ -1,6 +1,6 @@
 # Examples
 
-Three workflows for the `runspore` binary. The commands below were run in this order,
+Three workflows for the `spore` binary. The commands below were run in this order,
 in one shell, against a release build; each output block is what they printed. Run and
 invocation IDs are derived from the start key, so yours are the same.
 
@@ -21,8 +21,8 @@ Two `read-only` steps of two seconds each; `shout` receives the output of `greet
 step may take up to three attempts.
 
 ```sh
-runspore validate hello.json
-runspore run hello.json --key hello-1
+spore validate hello.json
+spore run hello.json --key hello-1
 ```
 
 ```text
@@ -41,9 +41,9 @@ flight up to `--grace-ms` (10 seconds by default) to finish, records their resul
 exits 130.
 
 ```sh
-runspore run hello.json --key hello-2 & sleep 1; kill -INT $!; wait $!; echo "exit $?"
-runspore run hello.json --key hello-2
-runspore events run_02dba8c4bbfa7115e5ac84527ad928f4
+spore run hello.json --key hello-2 & sleep 1; kill -INT $!; wait $!; echo "exit $?"
+spore run hello.json --key hello-2
+spore events run_02dba8c4bbfa7115e5ac84527ad928f4
 ```
 
 ```text
@@ -74,9 +74,9 @@ seconds by default) runs out, then retries it, because a `read-only` step is saf
 repeat. Recorded steps do not run again.
 
 ```sh
-runspore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!; echo "exit $?"
-runspore run hello.json --key hello-3
-runspore events run_59be2f5a2cd74bff8b99b6ca86bc5aa9
+spore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!; echo "exit $?"
+spore run hello.json --key hello-3
+spore events run_59be2f5a2cd74bff8b99b6ca86bc5aa9
 ```
 
 ```text
@@ -99,14 +99,14 @@ is the second attempt. `greet` ran once.
 
 `check` fails until `rework` has run, then the run waits for an `approval` signal. `run`
 exits 3 while the run waits. `signal` can come from any process; the next `run` (or a
-`runspore worker` that is already running) continues from there.
+`spore worker` that is already running) continues from there.
 
 ```sh
-runspore run review-loop.json --key review-1; echo "exit $?"
-runspore events run_698d808071a554a19eaf1cc0c578af57
-runspore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
-runspore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
-runspore run review-loop.json --key review-1
+spore run review-loop.json --key review-1; echo "exit $?"
+spore events run_698d808071a554a19eaf1cc0c578af57
+spore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
+spore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
+spore run review-loop.json --key review-1
 ```
 
 ```text
@@ -138,9 +138,9 @@ One `unsafe` step that appends to `deploy.log` and then sleeps for three seconds
 the process while it runs:
 
 ```sh
-runspore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!; echo "exit $?"
+spore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!; echo "exit $?"
 cat deploy.log
-runspore run unsafe-deploy.json --key deploy-1; echo "exit $?"
+spore run unsafe-deploy.json --key deploy-1; echo "exit $?"
 ```
 
 ```text
@@ -162,10 +162,10 @@ the invocation: `--complete <outcome>` when the effect happened, `--retry` to ru
 again as attempt 2, `--fail <message>` to fail the run.
 
 ```sh
-runspore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
-runspore run unsafe-deploy.json --key deploy-1
+spore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
+spore run unsafe-deploy.json --key deploy-1
 cat deploy.log
-runspore list
+spore list
 ```
 
 ```text

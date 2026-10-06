@@ -1,4 +1,4 @@
-//! `runspore`: the engine, the SQLite store and the kernel component in one process.
+//! `spore`, the Runspore command line: the engine, the SQLite store and the kernel component in one process.
 //! It never listens on a network. Commands, options, exit codes and JSON output follow
 //! `spec/cli.md`.
 
@@ -60,7 +60,7 @@ fn report_error(json_mode: bool, fail: &Fail) -> ExitCode {
                             "error": {"code": fail.code, "message": fail.message}});
         println!("{object}");
     } else {
-        eprintln!("runspore: {}: {}", fail.code, fail.message);
+        eprintln!("spore: {}: {}", fail.code, fail.message);
     }
     ExitCode::from(fail.exit)
 }

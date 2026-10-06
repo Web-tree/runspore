@@ -1,6 +1,6 @@
 [package]
 name = "runspore-cli"
-description = "The runspore binary: engine, SQLite store and kernel component in one process"
+description = "The spore binary of Runspore: engine, SQLite store and kernel component in one process"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [[bin]]
-name = "runspore"
+name = "spore"
 path = "src/main.rs"
 
 [dependencies]

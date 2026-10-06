@@ -1,6 +1,6 @@
 # CLI 0.1
 
-One binary, `runspore`. It embeds the kernel component, the SQLite store, and the
+One binary, `spore`, the Runspore command line. It embeds the kernel component, the SQLite store, and the
 engine. It never listens on a network.
 
 ## Global options

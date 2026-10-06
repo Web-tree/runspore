@@ -2,7 +2,7 @@
 
 Runspore is an embedded durable workflow runtime designed around a deterministic Rust/WebAssembly graph kernel and replaceable transactional storage.
 
-**Status: MVP implemented.** One binary, `runspore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. Node and Bun are verified at kernel level only; there is no JS host. Not implemented yet: timers, fork and join, child workflows, compensation, cancellation, `reconcilable` effects, input and output schemas, a compiler or YAML/DOT frontends, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Website: [runspore.com](https://runspore.com).
+**Status: MVP implemented.** One binary, `spore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. Node and Bun are verified at kernel level only; there is no JS host. Not implemented yet: timers, fork and join, child workflows, compensation, cancellation, `reconcilable` effects, input and output schemas, a compiler or YAML/DOT frontends, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Website: [runspore.com](https://runspore.com).
 
 ```text
 event + state → deterministic kernel → new state + commands
@@ -23,7 +23,7 @@ demo=$(mktemp -d) && cp examples/*.json "$demo" && cd "$demo"
 Run a workflow of two steps to completion. The database is `./runspore.db`.
 
 ```sh
-runspore run hello.json --key hello-1
+spore run hello.json --key hello-1
 ```
 
 ```text
@@ -37,8 +37,8 @@ result     {"output":{"message":"hello"}}
 Kill the process during the second step and run the same key again. The first step does not run again; the second is retried after its lease (10 seconds by default) runs out.
 
 ```sh
-runspore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!
-runspore run hello.json --key hello-3
+spore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!
+spore run hello.json --key hello-3
 ```
 
 ```text
@@ -52,9 +52,9 @@ result     {"output":{"message":"hello"}}
 A run that waits for a signal exits 3. Deliver the signal from any process and continue:
 
 ```sh
-runspore run review-loop.json --key review-1; echo "exit $?"
-runspore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
-runspore run review-loop.json --key review-1
+spore run review-loop.json --key review-1; echo "exit $?"
+spore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
+spore run review-loop.json --key review-1
 ```
 
 ```text
@@ -75,10 +75,10 @@ result     {"output":{"approval":"approved","check":"checks pass\n"}}
 An `unsafe` step interrupted after it started is never repeated on its own. The run parks in `needs-intervention` (exit 4) until an operator resolves the invocation:
 
 ```sh
-runspore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!
-runspore run unsafe-deploy.json --key deploy-1; echo "exit $?"
-runspore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
-runspore run unsafe-deploy.json --key deploy-1
+spore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!
+spore run unsafe-deploy.json --key deploy-1; echo "exit $?"
+spore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
+spore run unsafe-deploy.json --key deploy-1
 cat deploy.log
 ```
 
@@ -113,7 +113,7 @@ The [contracts](contracts/README.md) directory includes the reducer and telemetr
 
 - The kernel gives byte-identical results natively, through Wasmtime, in Node and in Bun: 48 golden traces plus generated corpora. Run `conformance/js/check.sh`.
 - The SQLite store passes the adapter-independent conformance suite and a crash test at every store failpoint.
-- The `runspore` binary, aborted at each of 19 failpoints and killed at 40 points through a run, recovers: no completed step runs again, and an interrupted `unsafe` step parks the run until an operator resolves it. Run `cargo test -p runspore-cli`.
+- The `spore` binary, aborted at each of 19 failpoints and killed at 40 points through a run, recovers: no completed step runs again, and an interrupted `unsafe` step parks the run until an operator resolves it. Run `cargo test -p runspore-cli`.
 
 Not yet done: a soak test, a security review, any target beyond one host with one SQLite file.
 

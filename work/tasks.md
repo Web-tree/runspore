@@ -60,4 +60,4 @@ Left for later, in rough priority:
 6. Engine: `run_until_parked` after `shutdown` never returns for a run that still needs an activity; a missing package fails the whole tick instead of quarantining one run.
 7. Store: Q03 finds its crash helper by newest file; test databases are left in the temp directory.
 
-Decided 2026-10-06: MIT licence, domain runspore.com, repository Web-tree/runspore. Human-only: a shorter CLI name (research in docs/research/cli-name.md), security review, soak testing, real browser and Cloudflare targets.
+Decided 2026-10-06: MIT licence, domain runspore.com, repository Web-tree/runspore. CLI binary renamed to `spore` (research in docs/research/cli-name.md). Human-only: security review, soak testing, real browser and Cloudflare targets.

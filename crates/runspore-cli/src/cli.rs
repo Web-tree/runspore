@@ -27,11 +27,7 @@ pub const FORMAT: &str = "runspore.cli/0.1";
 const EXIT_INTERRUPTED: u8 = 130;
 
 #[derive(Parser)]
-#[command(
-    name = "runspore",
-    version,
-    about = "Embedded durable workflow runtime"
-)]
+#[command(name = "spore", version, about = "Embedded durable workflow runtime")]
 pub struct Cli {
     /// Database file.
     #[arg(
