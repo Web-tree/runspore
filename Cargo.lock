@@ -834,6 +834,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runspore-trace"
+version = "0.1.0"
+dependencies = [
+ "runspore-kernel",
+ "runspore-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "runspore-types"
 version = "0.1.0"
 dependencies = [

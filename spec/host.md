@@ -47,6 +47,7 @@ process on its own.
 | `lease_ms` | 10000 | Attempt lease |
 | `heartbeat_ms` | 3000 | Lease renewal interval |
 | `poll_ms` | 200 | Idle sleep in `serve` |
+| `shutdown_grace_ms` | 10000 | How long `serve` waits for in-flight attempts on shutdown |
 | `max_concurrent_activities` | 4 | In-flight attempts |
 | `turns_per_run` | 32 | Transitions per run per tick |
 | `limits` | `Limits::default()` | Frozen kernel budget |
@@ -62,7 +63,8 @@ process on its own.
   `ids::event_for_signal(message_id)`.
 - `resolve(key, request_id, invocation_id, resolution)`: `append_event` with event ID
   `ids::event_for_resolution(request_id)`.
-- `release(key)`: `release_run`.
+- `release(key)`: `release_run`, with a request ID derived from the quarantine it
+  lifts, so repeating it is a duplicate.
 - Read-through views: `get_run`, `list_runs`, `list_events`, `list_invocations`.
 
 Request IDs for these are derived from their idempotency key (start key, message ID,
@@ -77,9 +79,13 @@ One bounded pass. It never blocks on an activity.
 2. **Coordinate.** For each key of `scan_ready`, up to `turns_per_run` times:
    `load_turn`; fetch the package (cached by digest); call `reducer.transition`;
    - on a decision: `commit_turn` with request ID
-     `ids::commit_request(revision + 1, event_id)`. `stale` means another coordinator
-     won: drop the decision and move on. `unavailable` or `unknown-commit`: retry the
-     identical request.
+     `ids::commit_request(revision + 1, event_id)`. `stale`, or a `duplicate` receipt,
+     means another coordinator won: drop the decision and move on. `conflict` /
+     `request.digest-mismatch` means another coordinator committed a different
+     decision for the same event (version skew or a nondeterministic reducer): drop
+     the decision and count it in the tick report as `diverged`. `unavailable` or
+     `unknown-commit`: retry the identical request. A turn counts only when the
+     receipt is `applied`.
    - on a failure: `quarantine_run` with its code and details.
    The decision's commands are **never** acted on directly. Only committed work,
    read back through `scan_due`, is dispatched.
