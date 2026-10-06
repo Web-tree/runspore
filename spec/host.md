@@ -100,7 +100,10 @@ shutdown it stops claiming and waits up to `shutdown_grace_ms` for in-flight att
 It then signals the rest to stop and waits once more; an attempt whose runner returns
 is finished normally with what the runner reported (a stopped command reports
 `unknown`), so the next worker does not wait for a lease. Attempts that still have not
-returned are aborted and left to lease expiry.
+returned are aborted and left to lease expiry. A final pass then sweeps and coordinates
+without dispatching, so results recorded during the drain are applied before the
+process exits. The same sequence is available as `shutdown()`; after it the engine
+never claims again.
 
 `run_until_parked(key)` ticks until that run is terminal, `waiting`,
 `needs-intervention`, or quarantined, and nothing of it is in flight.
