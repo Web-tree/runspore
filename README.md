@@ -2,13 +2,104 @@
 
 Runspore is an embedded durable workflow runtime designed around a deterministic Rust/WebAssembly graph kernel and replaceable transactional storage.
 
-**Status: architecture and draft contracts.** The runtime is not implemented. Package and domain availability for the name have not been established.
+**Status: MVP implemented.** One binary, `runspore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. Node and Bun are verified at kernel level only; there is no JS host. Not implemented yet: timers, fork and join, child workflows, compensation, cancellation, `reconcilable` effects, input and output schemas, a compiler or YAML/DOT frontends, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Package and domain availability for the name have not been established.
 
 ```text
 event + state → deterministic kernel → new state + commands
 ```
 
 Hosts atomically persist the transition and dispatch commands as activities. Non-deterministic outcomes are recorded; ambiguous external effects require idempotency or reconciliation.
+
+## Quickstart
+
+From the repository root, build the binary and work in a scratch directory with copies of the [examples](examples/README.md):
+
+```sh
+cargo build --release -p runspore-cli
+export PATH="$PWD/target/release:$PATH"
+demo=$(mktemp -d) && cp examples/*.json "$demo" && cd "$demo"
+```
+
+Run a workflow of two steps to completion. The database is `./runspore.db`.
+
+```sh
+runspore run hello.json --key hello-1
+```
+
+```text
+run        run_1ed55d2b7e22541f12a4d93233ea1f12
+start key  hello-1
+status     completed
+revision   3
+result     {"output":{"message":"hello"}}
+```
+
+Kill the process during the second step and run the same key again. The first step does not run again; the second is retried after its lease (10 seconds by default) runs out.
+
+```sh
+runspore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!
+runspore run hello.json --key hello-3
+```
+
+```text
+run        run_59be2f5a2cd74bff8b99b6ca86bc5aa9
+start key  hello-3
+status     completed
+revision   4
+result     {"output":{"message":"hello"}}
+```
+
+A run that waits for a signal exits 3. Deliver the signal from any process and continue:
+
+```sh
+runspore run review-loop.json --key review-1; echo "exit $?"
+runspore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
+runspore run review-loop.json --key review-1
+```
+
+```text
+run        run_698d808071a554a19eaf1cc0c578af57
+start key  review-1
+status     waiting
+revision   4
+position   approve (approve/1)
+exit 3
+signal approval applied (message ID approve-1)
+run        run_698d808071a554a19eaf1cc0c578af57
+start key  review-1
+status     completed
+revision   5
+result     {"output":{"approval":"approved","check":"checks pass\n"}}
+```
+
+An `unsafe` step interrupted after it started is never repeated on its own. The run parks in `needs-intervention` (exit 4) until an operator resolves the invocation:
+
+```sh
+runspore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!
+runspore run unsafe-deploy.json --key deploy-1; echo "exit $?"
+runspore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
+runspore run unsafe-deploy.json --key deploy-1
+cat deploy.log
+```
+
+```text
+run        run_d3f771834c9dca1abe857c4307ef9b6c
+start key  deploy-1
+status     needs-intervention
+revision   2
+position   deploy (deploy/1)
+invocation inv_365cb523af61e7de1ded53399d6ee056 attempt 1 unknown
+exit 4
+resolution applied (request ID fix-1)
+run        run_d3f771834c9dca1abe857c4307ef9b6c
+start key  deploy-1
+status     completed
+revision   3
+result     {"output":{"deployed":"ok"}}
+deployed inv_365cb523af61e7de1ded53399d6ee056
+```
+
+Commands, exit codes and JSON output: [spec/cli.md](spec/cli.md).
 
 ## Documentation
 

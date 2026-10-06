@@ -173,6 +173,17 @@ fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
     assert_eq!(dir.effects().len(), 1);
 }
 
+#[test]
+fn every_example_validates() {
+    let dir = Dir::new("examples");
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for name in ["hello.json", "review-loop.json", "unsafe-deploy.json"] {
+        let path = examples.join(name);
+        let out = dir.run(&["--native-kernel", "validate", path.to_str().unwrap()]);
+        assert_eq!(out.code(), Some(0), "{name}: {}", out.stderr);
+    }
+}
+
 /// Five steps that each return a 60 KB string: the fifth result takes the snapshot
 /// past the kernel's 256 KiB state budget.
 fn oversized() -> Value {

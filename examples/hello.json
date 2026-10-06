@@ -3,9 +3,9 @@
   "name": "hello",
   "start": "greet",
   "actions": {
-    "greet": {"kind": "command", "effect": "read-only", "output": "json",
+    "greet": {"kind": "command", "effect": "read-only", "output": "json", "retry": {"maxAttempts": 3},
               "argv": ["/bin/sh", "-c", "sleep 2; printf '{\"greeting\": \"hello\"}'"]},
-    "shout": {"kind": "command", "effect": "read-only", "output": "json",
+    "shout": {"kind": "command", "effect": "read-only", "output": "json", "retry": {"maxAttempts": 3},
               "argv": ["/bin/sh", "-c", "sleep 2; cat"]}
   },
   "nodes": {
