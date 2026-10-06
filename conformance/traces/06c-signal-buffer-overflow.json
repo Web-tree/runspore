@@ -1,7 +1,7 @@
 {
   "format": "runspore.trace/0.1",
   "name": "signal-buffer-overflow",
-  "description": "The buffer holds 64 signals. snapshotRaw supplies the snapshot the kernel produces after 64 `noise` signals (sequences 2 to 65); the 65th signal is dropped with signal.buffer-overflow, and a later one is dropped even though the parked waiter wants it, because the overflow rule comes first.",
+  "description": "The buffer holds 64 signals. snapshotRaw supplies the snapshot the kernel produces after 64 `noise` signals (sequences 2 to 65); the 65th signal is dropped with signal.buffer-overflow, and a later `go` signal is still taken by the parked waiter, because a signal the waiter wants never enters the buffer, so a full buffer cannot starve it.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
     "format": "runspore.workflow/0.1",
@@ -962,15 +962,18 @@
       },
       "expect": {
         "snapshot": {
-          "activations": 2,
+          "activations": 3,
           "format": "runspore.state/0.1",
           "input": null,
           "invocation": null,
           "lastAcceptedAtMs": "4000",
           "lastSequence": "68",
-          "nodes": {"work": {"outcome": "ok", "output": null, "visit": 1}},
-          "position": {"activationId": "gate/1", "nodeId": "gate", "visit": 1},
-          "result": null,
+          "nodes": {
+            "gate": {"outcome": "received", "output": null, "visit": 1},
+            "work": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": null,
+          "result": {"output": null},
           "runId": "run_signal_overflow",
           "semantics": "0.1",
           "signals": [
@@ -1375,16 +1378,14 @@
               "sequence": "65"
             }
           ],
-          "status": "waiting",
+          "status": "completed",
           "tenant": "default",
-          "visits": {"gate": 1, "work": 1}
+          "visits": {"done": 1, "gate": 1, "work": 1}
         },
-        "snapshotDigest": "sha256:fb17e1e73b54b73fbaba012c6ce8e3ab1849f25617dab9d3ab25847c6790416a",
+        "snapshotDigest": "sha256:7bdece2e11ba04fcea4243c50b8fbc285f637456dfc291f273544dc4bd3f5ae5",
         "commands": [],
-        "diagnostics": [
-          {"code": "signal.buffer-overflow", "nodeId": null, "details": {"eventId": "sig:go-2"}}
-        ],
-        "decisionDigest": "sha256:c6c158388b8d788cb1547416ea490a333415392fed7a0f11a79dd41f24d40528"
+        "diagnostics": [],
+        "decisionDigest": "sha256:9c1162b4850315ad312d13194ead96a0c3a9cb71f01bd716700b73e08663d9bc"
       }
     }
   ]

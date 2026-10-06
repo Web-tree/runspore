@@ -42,6 +42,15 @@ struct Activity<'a> {
     policy: &'a ActionPolicy,
 }
 
+/// The await-signal node the run is parked at: its node, the visit, the signal name
+/// it waits for, and its routes.
+struct Waiter<'a> {
+    node_id: &'a str,
+    visit: u32,
+    signal: &'a str,
+    outcomes: &'a BTreeMap<String, String>,
+}
+
 pub(crate) struct Machine<'a> {
     graph: &'a Graph,
     limits: Limits,
@@ -124,27 +133,31 @@ impl<'a> Machine<'a> {
         })
     }
 
-    /// A full buffer drops the signal. Otherwise it is appended, and a parked waiter
-    /// gets to consume.
+    /// A signal the parked waiter waits for is taken directly, so a full buffer never
+    /// starves it. Any other signal is appended, or dropped when the buffer is full.
     fn on_signal(&mut self, envelope: &Envelope, signal: SignalReceived) -> Result<(), Failure> {
-        if self.state.signals.len() >= MAX_BUFFERED_SIGNALS {
-            let details = object([("eventId", Value::String(envelope.event_id.clone()))]);
-            return self.diagnose(code::SIGNAL_BUFFER_OVERFLOW, None, details);
-        }
-        self.state.signals.push(BufferedSignal {
+        let arrived = BufferedSignal {
             event_id: envelope.event_id.clone(),
             sequence: envelope.sequence,
             name: signal.name,
             outcome: signal.outcome,
             data: signal.data,
-        });
-        if self.state.status != RunStatus::Waiting {
-            return Ok(());
+        };
+        if self.state.status == RunStatus::Waiting {
+            let waiter = self.waiter()?;
+            if arrived.name == waiter.signal {
+                return match self.take(&waiter, arrived)? {
+                    Some(target) => self.enter(target),
+                    None => Ok(()),
+                };
+            }
         }
-        match self.consume()? {
-            Some(target) => self.enter(target),
-            None => Ok(()),
+        if self.state.signals.len() >= MAX_BUFFERED_SIGNALS {
+            let details = object([("eventId", Value::String(arrived.event_id))]);
+            return self.diagnose(code::SIGNAL_BUFFER_OVERFLOW, None, details);
         }
+        self.state.signals.push(arrived);
+        Ok(())
     }
 
     /// A result applies only to the attempt the state authorizes; anything else is stale.
@@ -394,53 +407,71 @@ impl<'a> Machine<'a> {
     /// Consume (7.4), at the await-signal node the run is parked at: take matching
     /// signals earliest first until one routes. Returns the node to enter, if any.
     fn consume(&mut self) -> Result<Option<&'a str>, Failure> {
+        let waiter = self.waiter()?;
+        loop {
+            let Some(index) = self
+                .state
+                .signals
+                .iter()
+                .position(|buffered| buffered.name == waiter.signal)
+            else {
+                return Ok(None);
+            };
+            let taken = self.state.signals.remove(index);
+            if let Some(target) = self.take(&waiter, taken)? {
+                return Ok(Some(target));
+            }
+        }
+    }
+
+    /// The await-signal node a waiting run is parked at.
+    fn waiter(&self) -> Result<Waiter<'a>, Failure> {
         let graph = self.graph;
         let Some(position) = &self.state.position else {
             return Err(failure::invariant("a waiting run has no position"));
         };
-        let visit = position.visit;
         let Some((node_id, Node::AwaitSignal { signal, outcomes })) = graph.node(&position.node_id)
         else {
             return Err(failure::invariant(
                 "a waiting run is not at an await-signal node",
             ));
         };
+        Ok(Waiter {
+            node_id,
+            visit: position.visit,
+            signal,
+            outcomes,
+        })
+    }
 
-        loop {
-            let Some(index) = self
-                .state
-                .signals
-                .iter()
-                .position(|buffered| buffered.name == *signal)
-            else {
-                return Ok(None);
-            };
-            let taken = self.state.signals.remove(index);
-            self.count_microstep()?;
-            let outcome = taken
-                .outcome
-                .unwrap_or_else(|| OUTCOME_RECEIVED.to_string());
-            match outcomes.get(&outcome) {
-                Some(target) => {
-                    self.state.nodes.insert(
-                        node_id.to_string(),
-                        NodeResult {
-                            visit,
-                            outcome,
-                            output: taken.data,
-                        },
-                    );
-                    return Ok(Some(target.as_str()));
-                }
-                None => {
-                    let details = object([
-                        ("eventId", Value::String(taken.event_id)),
-                        ("outcome", Value::String(outcome)),
-                    ]);
-                    self.diagnose(code::SIGNAL_OUTCOME_UNROUTED, Some(node_id), details)?;
-                }
-            }
-        }
+    /// Takes one signal at the waiter for one microstep: it either records the node's
+    /// result and returns the route, or is dropped with `signal.outcome-unrouted`.
+    fn take(
+        &mut self,
+        waiter: &Waiter<'a>,
+        taken: BufferedSignal,
+    ) -> Result<Option<&'a str>, Failure> {
+        self.count_microstep()?;
+        let outcome = taken
+            .outcome
+            .unwrap_or_else(|| OUTCOME_RECEIVED.to_string());
+        let Some(target) = waiter.outcomes.get(&outcome) else {
+            let details = object([
+                ("eventId", Value::String(taken.event_id)),
+                ("outcome", Value::String(outcome)),
+            ]);
+            self.diagnose(code::SIGNAL_OUTCOME_UNROUTED, Some(waiter.node_id), details)?;
+            return Ok(None);
+        };
+        self.state.nodes.insert(
+            waiter.node_id.to_string(),
+            NodeResult {
+                visit: waiter.visit,
+                outcome,
+                output: taken.data,
+            },
+        );
+        Ok(Some(target.as_str()))
     }
 
     /// A success: record the node's result, clear the invocation, follow the route.
