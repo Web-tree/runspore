@@ -53,12 +53,16 @@ impl Default for EngineConfig {
     }
 }
 
+/// Unique per call: engines created in one process within one clock tick differ by
+/// the counter.
 fn process_nonce() -> String {
+    static CALLS: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or_default();
-    format!("{:x}-{nanos:x}", std::process::id())
+    let n = CALLS.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{nanos:x}-{n:x}", std::process::id())
 }
 
 /// The result of `start`.

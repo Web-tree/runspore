@@ -56,13 +56,13 @@ kernel decides.
 | `commit_turn` | `ids::commit_request(revision + 1, eventId)` |
 | `expire_attempt` | `expire/<attemptId>` |
 | `finish_attempt` | `finish/<attemptId>` |
-| `claim_attempt`, `heartbeat`, `quarantine_run` | `<op>/<subject>/<process nonce>/<counter>` |
-| `record_late_evidence` | `late/<attemptId>/<process nonce>` |
+| `claim_attempt`, `heartbeat`, `quarantine_run` | `<op>/<subject>/<engine nonce>/<counter>` |
+| `record_late_evidence` | `late/<attemptId>/<engine nonce>` |
 
 Client operations derive their IDs from the client's idempotency key, so a retry is a
 duplicate. Engine-internal operations that may legitimately repeat (a second claim of
 the same invocation, a second quarantine at the same revision) get a unique ID per
-process; only a retry of the identical request reuses one. Every request is retried
+engine (the nonce is unique per `Engine::new`, also within one process); only a retry of the identical request reuses one. Every request is retried
 unchanged on `unavailable` and, where the store may have committed, `unknown-commit`.
 
 ## Limits
