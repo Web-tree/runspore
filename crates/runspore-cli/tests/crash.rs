@@ -191,9 +191,15 @@ fn events(dir: &Dir) -> Vec<Value> {
     out.json()["events"].as_array().unwrap().clone()
 }
 
-/// The five H6 assertions for a recovered run; `accepted` holds the nodes whose result
-/// was in the snapshot when the process died.
-fn check(dir: &Dir, reference: &Reference, accepted: &BTreeSet<String>) -> Result<(), String> {
+/// What was durable when the process died: the nodes whose result was in the snapshot,
+/// and the effects performed so far.
+struct Crash {
+    accepted: BTreeSet<String>,
+    effects: Vec<common::Effect>,
+}
+
+/// The five H6 assertions for a recovered run.
+fn check(dir: &Dir, reference: &Reference, crash: &Crash) -> Result<(), String> {
     let status = invoke(dir, None, &["status", &run_id(dir)]).json();
     if status["status"] != "completed"
         || status["result"] != reference.result
@@ -205,8 +211,9 @@ fn check(dir: &Dir, reference: &Reference, accepted: &BTreeSet<String>) -> Resul
     for effect in dir.effects() {
         by_node.entry(effect.node.clone()).or_default().push(effect);
     }
-    for node in accepted.iter().filter(|n| *n != "approve") {
-        if by_node.get(node).map_or(0, Vec::len) != 1 {
+    for node in crash.accepted.iter().filter(|n| *n != "approve") {
+        let before = crash.effects.iter().filter(|e| &e.node == node).count();
+        if by_node.get(node).map_or(0, Vec::len) != before {
             return Err(format!(
                 "{node} had an accepted result and ran again: {by_node:?}"
             ));
@@ -247,14 +254,18 @@ fn check(dir: &Dir, reference: &Reference, accepted: &BTreeSet<String>) -> Resul
     Ok(())
 }
 
-fn accepted_nodes(dir: &Dir) -> BTreeSet<String> {
+fn crashed(dir: &Dir) -> Crash {
     let out = invoke(dir, None, &["status", &run_id(dir)]);
-    match out.code() {
+    let accepted = match out.code() {
         Some(0) => out.json()["nodes"]
             .as_object()
             .map(|m| m.keys().cloned().collect())
             .unwrap_or_default(),
         _ => BTreeSet::new(),
+    };
+    Crash {
+        accepted,
+        effects: dir.effects(),
     }
 }
 
@@ -285,12 +296,12 @@ fn failpoint_scenario(
         Ok(true) => {}
         Err(e) => return Some(Err(format!("before the crash: {e}"))),
     }
-    let accepted = accepted_nodes(&dir);
-    Some(drive(&dir, None, 0).and_then(|crashed| {
-        if crashed {
+    let crash = crashed(&dir);
+    Some(drive(&dir, None, 0).and_then(|aborted| {
+        if aborted {
             return Err("aborted without a failpoint".into());
         }
-        check(&dir, reference, &accepted)
+        check(&dir, reference, &crash)
     }))
 }
 
@@ -404,10 +415,10 @@ fn kill_scenario(reference: &Reference, delay: Duration) -> Result<(), String> {
     std::thread::sleep(delay);
     let _ = child.kill();
     let _ = child.wait();
-    let accepted = accepted_nodes(&dir);
+    let crash = crashed(&dir);
     match drive(&dir, None, 0) {
         Ok(false) => {
-            check(&dir, reference, &accepted).map_err(|e| format!("kill after {delay:?}: {e}"))
+            check(&dir, reference, &crash).map_err(|e| format!("kill after {delay:?}: {e}"))
         }
         other => Err(format!("kill after {delay:?}: recovery {other:?}")),
     }
