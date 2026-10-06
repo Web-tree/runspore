@@ -423,4 +423,9 @@ async fn serve_finishes_an_attempt_that_returns_after_the_stop_signal() {
     assert_eq!(results[0]["status"], "success");
     assert_eq!(results[0]["output"], "finished anyway");
     assert_eq!(audits(&path), 0);
+    let view = engine.get_run(&key).await.unwrap().unwrap();
+    assert_eq!(
+        view.status, "completed",
+        "the drained result was not applied"
+    );
 }

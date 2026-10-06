@@ -18,7 +18,7 @@ use runspore_store_sqlite::SqliteStore;
 use runspore_types::digest::{self, ids};
 use runspore_types::model::Resolution;
 use runspore_types::reducer::{Limits, Reducer};
-use runspore_types::store::{RunKey, RunView, Store};
+use runspore_types::store::{InvocationStatus, RunKey, RunView, Store};
 use runspore_wasmtime::WasmtimeReducer;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
@@ -699,27 +699,107 @@ async fn a_command_stopped_by_shutdown_is_finished_and_an_unsafe_run_parks_at_on
         shutdown_grace_ms: 300,
         ..EngineConfig::default()
     };
-    let clock = ManualClock::new(T0);
-    let stopping = kernel_engine(
-        store(&path, Some(clock.clone())),
+    let engine = kernel_engine(
+        store(&path, Some(ManualClock::new(T0))),
         Arc::new(NativeReducer),
         NativeRunner::new(),
         config,
     );
-    let key = stopping
+    let key = engine
         .start(&workflow, json!({}), "stopped")
         .await
         .unwrap()
         .key;
-    stopping.serve(std::future::ready(())).await.unwrap();
-    assert_eq!(stopping.in_flight(), 0);
-    let reported = results(&stopping, &key).await;
+    assert_eq!(engine.tick().await.unwrap().dispatched, 1);
+    engine.shutdown().await;
+    assert_eq!(engine.in_flight(), 0);
+    let reported = results(&engine, &key).await;
     assert_eq!(reported.len(), 1, "the stopped attempt was not finished");
     assert_eq!(reported[0]["status"], "unknown");
     assert_eq!(reported[0]["error"]["code"], "command.stopped");
-
-    let next = native(&path, Some(clock), NativeRunner::new());
-    let view = next.run_until_parked(&key).await.unwrap();
+    let view = engine.get_run(&key).await.unwrap().unwrap();
     assert_eq!(view.status, "needs-intervention");
-    assert_eq!(results(&next, &key).await.len(), 1, "a lease had to expire");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_applies_the_drained_result_and_claims_nothing_new() {
+    let path = temp_db("shutdown");
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.1",
+        "name": "two-steps",
+        "start": "slow",
+        "actions": {
+            "slow": {"kind": "native", "function": "slow", "effect": "idempotent"},
+            "next": {"kind": "native", "function": "next", "effect": "idempotent"}
+        },
+        "nodes": {
+            "slow": {"kind": "activity", "action": "slow", "outcomes": {"ok": "next"}},
+            "next": {"kind": "activity", "action": "next", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete"}
+        }
+    }))
+    .unwrap();
+    let (entered_tx, mut entered_rx) = mpsc::unbounded_channel::<()>();
+    let nexts = Arc::new(AtomicUsize::new(0));
+    let count = nexts.clone();
+    let functions = NativeRunner::new()
+        .function("slow", move |ctx, _input| {
+            let _ = entered_tx.send(());
+            async move {
+                ctx.stopped().await;
+                ok(json!({"slow": "done"}))
+            }
+        })
+        .function("next", move |_ctx, _input| {
+            count.fetch_add(1, Ordering::SeqCst);
+            async { ok(Value::Null) }
+        });
+    let config = EngineConfig {
+        shutdown_grace_ms: 20,
+        ..EngineConfig::default()
+    };
+    let engine = kernel_engine(
+        store(&path, Some(ManualClock::new(T0))),
+        Arc::new(NativeReducer),
+        functions,
+        config,
+    );
+    let key = engine
+        .start(&workflow, json!({}), "shutdown")
+        .await
+        .unwrap()
+        .key;
+    tokio::select! {
+        parked = engine.run_until_parked(&key) => panic!("parked early: {parked:?}"),
+        _ = entered_rx.recv() => {}
+    }
+    engine.shutdown().await;
+
+    let view = engine.get_run(&key).await.unwrap().unwrap();
+    assert_eq!(
+        view.applied_sequence + 1,
+        view.next_sequence,
+        "a result is pending"
+    );
+    assert_eq!(view.status, "running");
+    let state = state(&view);
+    assert_eq!(state["position"]["nodeId"], "next");
+    assert_eq!(state["nodes"]["slow"]["output"], json!({"slow": "done"}));
+    let next = engine
+        .list_invocations(&key)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.node_id == "next")
+        .expect("the next step was scheduled");
+    assert_eq!(next.status, InvocationStatus::Pending);
+    assert!(next.not_before_ms <= T0, "the next step is not due");
+    assert_eq!(engine.tick().await.unwrap(), TickReport::default());
+    engine.shutdown().await;
+    assert_eq!(
+        nexts.load(Ordering::SeqCst),
+        0,
+        "a step was claimed after shutdown"
+    );
+    assert_eq!(engine.in_flight(), 0);
 }

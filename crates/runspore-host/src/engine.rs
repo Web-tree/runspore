@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -117,6 +117,9 @@ struct Inner {
     inflight: Mutex<HashSet<(RunKey, String)>>,
     tasks: Mutex<JoinSet<()>>,
     settled: Notify,
+    /// Set by `shutdown`: no attempt is claimed from then on.
+    closing: AtomicBool,
+    /// Fires every in-flight attempt's stop signal.
     shutdown: watch::Sender<bool>,
 }
 
@@ -278,6 +281,7 @@ impl Engine {
                 inflight: Mutex::new(HashSet::new()),
                 tasks: Mutex::new(JoinSet::new()),
                 settled: Notify::new(),
+                closing: AtomicBool::new(false),
                 shutdown,
             }),
         }
@@ -484,7 +488,7 @@ impl Engine {
                 break;
             }
         }
-        if *inner.shutdown.borrow() {
+        if inner.closing.load(Ordering::SeqCst) {
             return Ok(report);
         }
         for item in inner.scan_due().await? {
@@ -501,10 +505,7 @@ impl Engine {
     }
 
     /// Ticks until `shutdown` resolves, sleeping `poll_ms` after a tick that did
-    /// nothing. Then stops claiming, waits up to `shutdown_grace_ms` for in-flight
-    /// attempts, signals the rest to stop and waits up to `shutdown_grace_ms` again.
-    /// An attempt whose runner returns is finished with what it reported, so the next
-    /// worker need not wait for its lease; the rest are aborted and left to lease expiry.
+    /// nothing, then calls `Engine::shutdown`.
     pub async fn serve(&self, shutdown: impl Future<Output = ()>) -> Result<(), HostError> {
         let inner = &self.inner;
         tokio::pin!(shutdown);
@@ -522,13 +523,29 @@ impl Engine {
                 () = inner.settled.notified(), if idle => {}
             }
         }
+        self.shutdown().await;
+        Ok(())
+    }
+
+    /// Stops the engine for good: from now on no attempt is claimed, by this call or
+    /// any later `tick`. Waits up to `shutdown_grace_ms` for in-flight attempts,
+    /// signals the rest to stop and waits up to `shutdown_grace_ms` again; an attempt
+    /// whose runner returns is finished with what it reported. Attempts still running
+    /// are aborted and left to lease expiry. A last tick then sweeps and coordinates,
+    /// so the results just recorded are applied; its errors are ignored. Repeating the
+    /// call is harmless.
+    pub async fn shutdown(&self) {
+        let inner = &self.inner;
+        inner.closing.store(true, Ordering::SeqCst);
         let grace = Duration::from_millis(inner.config.shutdown_grace_ms);
         inner.drain(grace).await;
         inner.shutdown.send_replace(true);
         inner.drain(grace).await;
         let mut tasks = std::mem::take(&mut *lock(&inner.tasks));
         tasks.abort_all();
-        Ok(())
+        drop(tasks);
+        lock(&inner.inflight).clear();
+        let _ = self.tick().await;
     }
 
     /// Ticks until the run is terminal, `waiting`, `needs-intervention` or quarantined,
@@ -737,14 +754,15 @@ impl Inner {
         retry(true, || self.store.heartbeat(request.clone())).await
     }
 
-    /// Claims one due invocation and starts its attempt in the background.
+    /// Claims one due invocation and starts its attempt in the background, unless the
+    /// engine is shutting down.
     async fn dispatch(
         this: &Arc<Self>,
         key: RunKey,
         invocation_id: String,
     ) -> Result<bool, HostError> {
         let slot = (key.clone(), invocation_id.clone());
-        if lock(&this.inflight).contains(&slot) {
+        if this.closing.load(Ordering::SeqCst) || lock(&this.inflight).contains(&slot) {
             return Ok(false);
         }
         let request = ClaimAttempt {
