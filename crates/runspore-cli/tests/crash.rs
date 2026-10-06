@@ -230,7 +230,7 @@ fn check(dir: &Dir, reference: &Reference, accepted: &BTreeSet<String>) -> Resul
     let events = events(dir);
     let mut revisions = Vec::new();
     for (i, event) in events.iter().enumerate() {
-        if event["sequence"] != (i + 1).to_string() {
+        if event["sequence"].as_str() != Some((i + 1).to_string().as_str()) {
             return Err(format!("sequence gap at {i}: {event}"));
         }
         match event["consumedRevision"].as_str() {
