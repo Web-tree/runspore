@@ -1,0 +1,25 @@
+{
+  "format": "runspore.workflow/0.1",
+  "name": "review-loop",
+  "start": "check",
+  "limits": {"maxVisitsPerNode": 3},
+  "actions": {
+    "check": {"kind": "command", "effect": "read-only", "outcomes": ["ok", "red"],
+              "exitOutcomes": {"1": "red"},
+              "argv": ["/bin/sh", "-c", "if test -f \"review-$RUNSPORE_RUN_ID.fixed\"; then echo checks pass; else echo checks fail; exit 1; fi"]},
+    "rework": {"kind": "command", "effect": "idempotent", "retry": {"maxAttempts": 3},
+               "argv": ["/bin/sh", "-c", "touch \"review-$RUNSPORE_RUN_ID.fixed\"; echo reworked"]}
+  },
+  "nodes": {
+    "check": {"kind": "activity", "action": "check",
+              "outcomes": {"ok": "approve", "red": "rework"}},
+    "rework": {"kind": "activity", "action": "rework", "outcomes": {"ok": "check"}},
+    "approve": {"kind": "await-signal", "signal": "approval",
+                "outcomes": {"approved": "done", "rejected": "rejected"}},
+    "done": {"kind": "complete",
+             "output": {"check": {"$get": ["nodes", "check", "output", "stdout"]},
+                        "approval": {"$get": ["nodes", "approve", "outcome"]}}},
+    "rejected": {"kind": "fail",
+                 "error": {"code": "review.rejected", "message": "the reviewer rejected the change"}}
+  }
+}
