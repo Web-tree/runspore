@@ -600,3 +600,45 @@ async fn a_loop_ends_failed_at_its_visit_limit_without_spinning() {
         assert_eq!(engine.tick().await.unwrap(), TickReport::default());
     }
 }
+
+#[tokio::test]
+async fn two_command_activities_pass_output_through_a_mapping() {
+    let path = temp_db("commands");
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.1",
+        "name": "commands",
+        "start": "make",
+        "actions": {
+            "make": {"kind": "command", "effect": "read-only", "output": "json",
+                     "argv": ["/bin/sh", "-c", "printf '{\"greeting\": \"hello\"}'"]},
+            "echo": {"kind": "command", "effect": "read-only", "output": "json",
+                     "argv": ["/bin/cat"]}
+        },
+        "nodes": {
+            "make": {"kind": "activity", "action": "make", "outcomes": {"ok": "echo"}},
+            "echo": {"kind": "activity", "action": "echo",
+                     "input": {"message": {"$get": ["nodes", "make", "output", "greeting"]}},
+                     "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete", "output": {"$get": ["nodes", "echo", "output"]}}
+        }
+    }))
+    .unwrap();
+    let engine = native(&path, None, NativeRunner::new());
+    let key = engine
+        .start(&workflow, json!({}), "commands")
+        .await
+        .unwrap()
+        .key;
+    let view = engine.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.status, "completed");
+    assert_eq!(
+        state(&view)["result"]["output"],
+        json!({"message": "hello"})
+    );
+    let statuses: Vec<Value> = results(&engine, &key)
+        .await
+        .into_iter()
+        .map(|r| r["status"].clone())
+        .collect();
+    assert_eq!(statuses, vec![json!("success"), json!("success")]);
+}
