@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 type Step = dyn Fn(&TransitionRequest) -> Result<Decision, Failure> + Send + Sync;
 
 /// A reducer that answers with whatever its closure decides.
-struct Scripted(Box<Step>);
+pub struct Scripted(pub Box<Step>);
 
 impl Reducer for Scripted {
     fn describe(&self) -> Descriptor {
@@ -54,7 +54,7 @@ fn run_key(request: &TransitionRequest) -> RunKey {
 }
 
 /// `run.started` schedules node `a`; anything else completes the run.
-fn one_step(request: &TransitionRequest) -> Result<Decision, Failure> {
+pub fn one_step(request: &TransitionRequest) -> Result<Decision, Failure> {
     if request.input_event.kind == "run.started" {
         let (command, _) = schedule(&run_key(request), "a", 0);
         Ok(decision(request, "running", vec![command]))
@@ -63,9 +63,9 @@ fn one_step(request: &TransitionRequest) -> Result<Decision, Failure> {
     }
 }
 
-const WORKFLOW: &[u8] = br#"{"actions": {"echo": {"kind": "native", "function": "echo"}}}"#;
+pub const WORKFLOW: &[u8] = br#"{"actions": {"echo": {"kind": "native", "function": "echo"}}}"#;
 
-fn temp_db(name: &str) -> PathBuf {
+pub fn temp_db(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("runspore-host-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -87,7 +87,7 @@ fn engine(
     )
 }
 
-fn counting_echo(count: Arc<AtomicUsize>) -> NativeRunner {
+pub fn counting_echo(count: Arc<AtomicUsize>) -> NativeRunner {
     NativeRunner::new().function("echo", move |_ctx, input| {
         count.fetch_add(1, Ordering::SeqCst);
         async move {
@@ -99,7 +99,7 @@ fn counting_echo(count: Arc<AtomicUsize>) -> NativeRunner {
     })
 }
 
-async fn results(engine: &Engine, key: &RunKey) -> Vec<Value> {
+pub async fn results(engine: &Engine, key: &RunKey) -> Vec<Value> {
     let events = engine.list_events(key, 0, 100).await.unwrap().items;
     events
         .iter()
