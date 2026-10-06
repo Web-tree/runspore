@@ -8,9 +8,9 @@ Questions that need Max collect in [questions/](questions/README.md).
 | ID | Package | Owns | Depends on | Status | Branch |
 | --- | --- | --- | --- | --- | --- |
 | P0 | Contract freeze: spec and `runspore-types` | `spec/`, `crates/runspore-types` | — | done 2026-10-06 | main |
-| K | Kernel and golden traces | `crates/runspore-kernel`, `crates/runspore-trace`, `conformance/traces` | P0 | pending | |
-| S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | pending | |
-| C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | pending | |
+| K | Kernel and golden traces | `crates/runspore-kernel`, `crates/runspore-trace`, `conformance/traces` | P0 | running since 2026-10-06 | |
+| S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | running since 2026-10-06 | |
+| C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | running since 2026-10-06 | |
 | H | Engine and activity runners | `crates/runspore-host` | K, S | pending | |
 | X | Cross-host determinism: Wasmtime, Node, Bun | `conformance/js`, tests in `crates/runspore-wasmtime` | K, C | pending | |
 | E | CLI, examples, crash-recovery suite | `crates/runspore-cli`, `examples` | H, C | pending | |
@@ -31,3 +31,4 @@ Questions that need Max collect in [questions/](questions/README.md).
   the README quickstart runs as written.
 
 ## Log
+- 2026-10-06: P0 frozen on main (7f42cf8). Wave 1 launched: K, S, C, each an Opus agent in its own worktree.
