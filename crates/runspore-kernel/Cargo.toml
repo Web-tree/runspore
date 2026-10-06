@@ -1,0 +1,15 @@
+[package]
+name = "runspore-kernel"
+description = "Deterministic, import-free graph reducer: state plus one event produces a new state and ordered commands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+runspore-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
