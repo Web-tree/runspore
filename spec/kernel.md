@@ -259,7 +259,7 @@ or `outcome-undeclared`.
 
 **Consume** (at an await-signal node) — find the earliest buffered signal whose name
 equals `node.signal`. None: stay `waiting`. Otherwise remove it and count one
-microstep. Its outcome is `signal.outcome`, or `received` when absent. If the node
+microstep (over the budget is the same `budget.microsteps` failure as in *enter*). Its outcome is `signal.outcome`, or `received` when absent. If the node
 does not route that outcome: diagnostic `signal.outcome-unrouted` (details
 `{"eventId", "outcome"}`) and look for the next matching signal. Otherwise record
 `nodes[node] = {visit, outcome, output: signal.data}` and *enter* the target.
