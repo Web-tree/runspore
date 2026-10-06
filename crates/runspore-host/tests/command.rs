@@ -20,7 +20,9 @@ fn ctx(stop: watch::Receiver<bool>) -> ActivityContext {
 
 async fn run(action: Value, input: Value) -> ActivityOutput {
     let (_stop, rx) = watch::channel(false);
-    CommandRunner.validate("act", &action).expect("valid action");
+    CommandRunner
+        .validate("act", &action)
+        .expect("valid action");
     CommandRunner.run(&ctx(rx), &action, &input).await
 }
 
@@ -44,7 +46,11 @@ fn unknown(output: &ActivityOutput) -> &str {
 
 #[tokio::test]
 async fn spawn_failure_is_retryable() {
-    let out = run(json!({"kind": "command", "argv": ["/no/such/program"]}), json!({})).await;
+    let out = run(
+        json!({"kind": "command", "argv": ["/no/such/program"]}),
+        json!({}),
+    )
+    .await;
     assert_eq!(failure(&out).0, "command.spawn");
     assert!(failure(&out).1);
 }
@@ -53,12 +59,24 @@ async fn spawn_failure_is_retryable() {
 async fn exit_zero_and_mapped_exit_codes_succeed() {
     let out = run(sh("printf hi"), json!({})).await;
     let expected = json!({"exitCode": 0, "stdout": "hi"});
-    assert_eq!(out, ActivityOutput::Success { outcome: "ok".into(), output: expected });
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: expected
+        }
+    );
     let mut action = sh("exit 1");
     action["exitOutcomes"] = json!({"1": "red"});
     action["output"] = json!("none");
     let out = run(action, json!({})).await;
-    assert_eq!(out, ActivityOutput::Success { outcome: "red".into(), output: Value::Null });
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "red".into(),
+            output: Value::Null
+        }
+    );
 }
 
 #[tokio::test]
@@ -94,7 +112,10 @@ async fn timeout_is_unknown_and_kills_the_whole_group() {
     action["timeoutMs"] = json!("500");
     let out = run(action, json!({})).await;
     assert_eq!(unknown(&out), "command.timeout");
-    let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+    let pid = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .to_string();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while alive(&pid) && std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -134,14 +155,26 @@ async fn json_output_must_be_in_the_canonical_domain() {
     let mut action = sh("echo '{\"a\": [1]}'");
     action["output"] = json!("json");
     let out = run(action, json!({})).await;
-    assert_eq!(out, ActivityOutput::Success { outcome: "ok".into(), output: json!({"a": [1]}) });
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: json!({"a": [1]})
+        }
+    );
 }
 
 #[tokio::test]
 async fn stdin_carries_the_canonical_input() {
     let out = run(sh("cat"), json!({"b": 2, "a": "x"})).await;
     let expected = json!({"exitCode": 0, "stdout": "{\"a\":\"x\",\"b\":2}"});
-    assert_eq!(out, ActivityOutput::Success { outcome: "ok".into(), output: expected });
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: expected
+        }
+    );
 }
 
 #[tokio::test]
@@ -153,7 +186,13 @@ async fn runspore_variables_and_env_are_set() {
     action["env"] = json!({"CI": "1"});
     let out = run(action, json!({})).await;
     let expected = json!({"exitCode": 0, "stdout": "run-1|node-a|inv-1|2|effect-1|1"});
-    assert_eq!(out, ActivityOutput::Success { outcome: "ok".into(), output: expected });
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: expected
+        }
+    );
 }
 
 #[test]
@@ -161,7 +200,9 @@ fn validate_rejects_undeclared_exit_outcomes_and_bad_fields() {
     let mut action = sh("true");
     action["exitOutcomes"] = json!({"2": "purple"});
     assert!(CommandRunner.validate("act", &action).is_err());
-    assert!(CommandRunner.validate("act", &json!({"kind": "command", "argv": []})).is_err());
+    assert!(CommandRunner
+        .validate("act", &json!({"kind": "command", "argv": []}))
+        .is_err());
     let mut action = sh("true");
     action["output"] = json!("xml");
     assert!(CommandRunner.validate("act", &action).is_err());

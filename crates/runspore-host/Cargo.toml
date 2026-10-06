@@ -20,6 +20,7 @@ runspore-store-sqlite = { path = "../runspore-store-sqlite" }
 runspore-store-conformance = { path = "../runspore-store-conformance" }
 runspore-kernel.workspace = true
 runspore-wasmtime = { path = "../runspore-wasmtime" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [lints]
 workspace = true

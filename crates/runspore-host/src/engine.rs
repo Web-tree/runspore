@@ -653,8 +653,14 @@ impl Inner {
                 diagnostics: decision.diagnostics,
             };
             match retry(true, || self.store.commit_turn(request.clone())).await {
-                Ok(_) => report.turns += 1,
-                Err(f) if f.kind == StoreFailureKind::Stale => return Ok(()),
+                Ok(receipt) if receipt.disposition == Disposition::Applied => report.turns += 1,
+                Ok(_) => {}
+                Err(f)
+                    if f.kind == StoreFailureKind::Stale
+                        || is(&f, StoreFailureKind::Conflict, "request.digest-mismatch") =>
+                {
+                    return Ok(())
+                }
                 Err(f) => return Err(f.into()),
             }
             failpoint::hit("host.turn.after-commit");

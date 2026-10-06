@@ -831,6 +831,7 @@ dependencies = [
  "runspore-store-sqlite",
  "runspore-types",
  "runspore-wasmtime",
+ "rusqlite",
  "serde",
  "serde_json",
  "thiserror",
