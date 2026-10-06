@@ -1,0 +1,26 @@
+[package]
+name = "runspore-store-sqlite"
+description = "SQLite adapter for the Runspore store protocol."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+runspore-types.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+[dev-dependencies]
+runspore-store-conformance = { path = "../runspore-store-conformance" }
+tokio.workspace = true
+
+[[bin]]
+name = "runspore-store-sqlite-crash"
+path = "src/bin/crash.rs"
+test = false
+
+[lints]
+workspace = true
