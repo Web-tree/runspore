@@ -14,6 +14,10 @@ _Avoid_: pipeline, flow, "current workflow" (that is a run)
 One execution of a workflow, with its own identity and state.
 _Avoid_: workflow instance, job, session
 
+**External step**:
+A step whose work is done by an actor outside the worker, such as a person, a script or a Claude session, and reported back to the run.
+_Avoid_: manual step, agent step (that is one use of it)
+
 ### Claude Code integration
 
 **Mod**:
@@ -28,5 +32,5 @@ An agent step performed by a separate Claude process that the worker starts.
 _Avoid_: subprocess step
 
 **In-session step**:
-An agent step performed by the Claude session the person is working in, which reports the outcome back to the run.
+An external step performed by the Claude session the person is working in, which reports the outcome back to the run.
 _Avoid_: controlled mode, agent-driven step
