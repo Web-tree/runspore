@@ -152,6 +152,72 @@ async fn h2_the_losing_coordinator_dispatches_nothing() {
     assert_eq!(results(&b, &started.key).await.len(), 1);
 }
 
+/// A reducer that parks every run in `waiting` with a snapshot carrying `tag`.
+fn tagged(tag: &'static str) -> impl Fn(&TransitionRequest) -> Result<Decision, Failure> {
+    move |request| {
+        let seq = request.input_event.sequence;
+        let state = json!({"status": "waiting", "seq": seq, "tag": tag});
+        let snapshot = canonical::encode(&state).unwrap();
+        Ok(Decision {
+            snapshot_digest: digest::state(&snapshot),
+            snapshot,
+            commands: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_different_decision_for_a_committed_event_is_counted_as_diverged() {
+    let path = temp_db("diverged");
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let gate = Mutex::new(Some((entered_tx, go_rx)));
+    let ours = tagged("a");
+    let slow = move |request: &TransitionRequest| {
+        if let Some((entered, go)) = gate.lock().unwrap().take() {
+            entered.send(()).unwrap();
+            go.recv().unwrap();
+        }
+        ours(request)
+    };
+    let a = engine(
+        Arc::new(SqliteStore::open(&path).unwrap()),
+        slow,
+        counting_echo(Arc::default()),
+        EngineConfig::default(),
+    );
+    let b = engine(
+        Arc::new(SqliteStore::open(&path).unwrap()),
+        tagged("b"),
+        counting_echo(Arc::default()),
+        EngineConfig::default(),
+    );
+    let key = b.start(WORKFLOW, json!({}), "diverged").await.unwrap().key;
+    let loser = tokio::spawn(async move { a.tick().await.unwrap() });
+    tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(b.tick().await.unwrap().turns, 1);
+    go_tx.send(()).unwrap();
+    let report = loser.await.unwrap();
+    assert_eq!(
+        report,
+        TickReport {
+            diverged: 1,
+            ..TickReport::default()
+        }
+    );
+    assert!(report.did_work());
+    let view = b.get_run(&key).await.unwrap().unwrap();
+    assert_eq!(view.revision, 1);
+    let snapshot: Value = serde_json::from_slice(&view.snapshot.unwrap()).unwrap();
+    assert_eq!(
+        snapshot["tag"], "b",
+        "the diverging decision replaced the committed one"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn h3_a_lost_lease_stops_the_runner_and_keeps_late_evidence() {
     let path = temp_db("h3");

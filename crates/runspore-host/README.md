@@ -10,10 +10,13 @@ decides a branch, a retry or an outcome route. Unix only (process groups).
 1. **Sweep**: `expire_attempt` for each due lease. `lease.lost` / `lease.not-due` mean
    someone else got there first.
 2. **Coordinate**: for each ready run, up to `turns_per_run` times: `load_turn`, call
-   the reducer, `commit_turn`. A `stale` commit (or `request.digest-mismatch`, see
-   below) means another coordinator won; the decision is dropped. A kernel `Failure`
-   quarantines the run with its code and details; a quarantined run is invisible to
-   `scan_ready`, so it is never retried until `release`.
+   the reducer, `commit_turn`. A turn counts only when the receipt is `applied`. A
+   `stale` failure or a `duplicate` receipt means another coordinator won; the
+   decision is dropped. `conflict` / `request.digest-mismatch` means another
+   coordinator committed a different decision for the same event (version skew or a
+   nondeterministic reducer); the decision is dropped and counted as `diverged`. A
+   kernel `Failure` quarantines the run with its code and details; a quarantined run
+   is invisible to `scan_ready`, so it is never retried until `release`.
 3. **Dispatch**: for each due invocation, while fewer than
    `max_concurrent_activities` are in flight: `claim_attempt`, then run the attempt
    as a background task. Commands in a decision are never acted on directly.
@@ -24,9 +27,10 @@ the runner's stop signal; the attempt then records its result with
 is only used after a heartbeat on it is `applied`.
 
 `serve(shutdown)` repeats `tick`. On shutdown it stops claiming, waits up to
-`lease_ms` for in-flight attempts, then fires every remaining attempt's stop signal,
-waits up to `lease_ms` again and returns. Attempts stopped this way are not
-finished: their leases expire and the kernel decides.
+`shutdown_grace_ms` for in-flight attempts, then fires every remaining attempt's stop
+signal, waits up to `shutdown_grace_ms` again for their runners to return, and
+returns. Attempts stopped this way are not finished: their leases expire and the
+kernel decides.
 
 ## Failpoints
 

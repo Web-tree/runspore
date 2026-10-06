@@ -29,6 +29,7 @@ pub struct EngineConfig {
     pub lease_ms: u64,
     pub heartbeat_ms: u64,
     pub poll_ms: u64,
+    pub shutdown_grace_ms: u64,
     pub max_concurrent_activities: usize,
     pub turns_per_run: u32,
     pub limits: Limits,
@@ -43,6 +44,7 @@ impl Default for EngineConfig {
             lease_ms: 10_000,
             heartbeat_ms: 3_000,
             poll_ms: 200,
+            shutdown_grace_ms: 10_000,
             max_concurrent_activities: 4,
             turns_per_run: 32,
             limits: Limits::default(),
@@ -71,14 +73,18 @@ pub struct StartOutcome {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TickReport {
     pub expired: usize,
+    /// Commits whose receipt was `applied`.
     pub turns: usize,
     pub quarantined: usize,
+    /// Decisions refused because another coordinator committed a different decision
+    /// for the same event.
+    pub diverged: usize,
     pub dispatched: usize,
 }
 
 impl TickReport {
     pub fn did_work(&self) -> bool {
-        self.expired + self.turns + self.quarantined + self.dispatched > 0
+        self.expired + self.turns + self.quarantined + self.diverged + self.dispatched > 0
     }
 }
 
@@ -437,8 +443,9 @@ impl Engine {
     }
 
     /// Ticks until `shutdown` resolves, sleeping `poll_ms` after a tick that did
-    /// nothing. Then stops claiming, waits up to `lease_ms` for in-flight attempts,
-    /// signals the rest to stop and returns without finishing them: their leases expire.
+    /// nothing. Then stops claiming, waits up to `shutdown_grace_ms` for in-flight
+    /// attempts, signals the rest to stop, waits up to `shutdown_grace_ms` again for
+    /// their runners to return, and returns without finishing them: their leases expire.
     pub async fn serve(&self, shutdown: impl Future<Output = ()>) -> Result<(), HostError> {
         let inner = &self.inner;
         tokio::pin!(shutdown);
@@ -456,7 +463,7 @@ impl Engine {
                 () = inner.settled.notified(), if idle => {}
             }
         }
-        let grace = Duration::from_millis(inner.config.lease_ms);
+        let grace = Duration::from_millis(inner.config.shutdown_grace_ms);
         inner.drain(grace).await;
         inner.shutdown.send_replace(true);
         inner.drain(grace).await;
@@ -655,11 +662,10 @@ impl Inner {
             match retry(true, || self.store.commit_turn(request.clone())).await {
                 Ok(receipt) if receipt.disposition == Disposition::Applied => report.turns += 1,
                 Ok(_) => {}
-                Err(f)
-                    if f.kind == StoreFailureKind::Stale
-                        || is(&f, StoreFailureKind::Conflict, "request.digest-mismatch") =>
-                {
-                    return Ok(())
+                Err(f) if f.kind == StoreFailureKind::Stale => return Ok(()),
+                Err(f) if is(&f, StoreFailureKind::Conflict, "request.digest-mismatch") => {
+                    report.diverged += 1;
+                    return Ok(());
                 }
                 Err(f) => return Err(f.into()),
             }
