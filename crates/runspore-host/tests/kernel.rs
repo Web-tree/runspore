@@ -9,15 +9,15 @@ use std::sync::{Arc, Mutex};
 
 use common::*;
 use runspore_host::{
-    ActivityContext, ActivityOutput, ActivityRegistry, Engine, EngineConfig, NativeRunner,
-    TickReport,
+    validate_workflow, ActivityContext, ActivityOutput, ActivityRegistry, Engine, EngineConfig,
+    NativeRunner, TickReport,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_conformance::ManualClock;
 use runspore_store_sqlite::SqliteStore;
-use runspore_types::digest::ids;
+use runspore_types::digest::{self, ids};
 use runspore_types::model::Resolution;
-use runspore_types::reducer::Reducer;
+use runspore_types::reducer::{Limits, Reducer};
 use runspore_types::store::{RunKey, RunView, Store};
 use runspore_wasmtime::WasmtimeReducer;
 use serde_json::{json, Value};
@@ -641,4 +641,85 @@ async fn two_command_activities_pass_output_through_a_mapping() {
         .map(|r| r["status"].clone())
         .collect();
     assert_eq!(statuses, vec![json!("success"), json!("success")]);
+}
+
+#[tokio::test]
+async fn validate_workflow_checks_what_start_checks_without_a_store() {
+    let registry = ActivityRegistry::with_builtins(work(Arc::default(), |_| ok(Value::Null)));
+    let validate = |doc: &Value| {
+        let bytes = serde_json::to_vec(doc).unwrap();
+        validate_workflow(&NativeReducer, &registry, Limits::default(), &bytes)
+    };
+    let valid: Value = serde_json::from_slice(&single("idempotent", 1)).unwrap();
+    let package = validate(&valid).unwrap();
+    let path = temp_db("validate");
+    let engine = native(&path, None, work(Arc::default(), |_| ok(Value::Null)));
+    let key = engine
+        .start(&single("idempotent", 1), json!({}), "validate")
+        .await
+        .unwrap()
+        .key;
+    let view = engine.get_run(&key).await.unwrap().unwrap();
+    assert_eq!(digest::package(&package), view.package_digest);
+
+    let mut unregistered = valid.clone();
+    unregistered["actions"]["work"]["kind"] = json!("teleport");
+    assert_eq!(
+        validate(&unregistered).unwrap_err().code(),
+        "action.kind-unregistered"
+    );
+    let mut misconfigured = valid.clone();
+    misconfigured["actions"]["work"]["function"] = json!("missing");
+    assert_eq!(
+        validate(&misconfigured).unwrap_err().code(),
+        "action.invalid"
+    );
+    let mut invalid = valid;
+    invalid["start"] = json!("nowhere");
+    assert_eq!(validate(&invalid).unwrap_err().code(), "workflow.invalid");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_command_stopped_by_shutdown_is_finished_and_an_unsafe_run_parks_at_once() {
+    let path = temp_db("stopped-command");
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.1",
+        "name": "hang",
+        "start": "hang",
+        "actions": {
+            "hang": {"kind": "command", "effect": "unsafe", "argv": ["/bin/sleep", "30"]}
+        },
+        "nodes": {
+            "hang": {"kind": "activity", "action": "hang", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete"}
+        }
+    }))
+    .unwrap();
+    let config = EngineConfig {
+        shutdown_grace_ms: 300,
+        ..EngineConfig::default()
+    };
+    let clock = ManualClock::new(T0);
+    let stopping = kernel_engine(
+        store(&path, Some(clock.clone())),
+        Arc::new(NativeReducer),
+        NativeRunner::new(),
+        config,
+    );
+    let key = stopping
+        .start(&workflow, json!({}), "stopped")
+        .await
+        .unwrap()
+        .key;
+    stopping.serve(std::future::ready(())).await.unwrap();
+    assert_eq!(stopping.in_flight(), 0);
+    let reported = results(&stopping, &key).await;
+    assert_eq!(reported.len(), 1, "the stopped attempt was not finished");
+    assert_eq!(reported[0]["status"], "unknown");
+    assert_eq!(reported[0]["error"]["code"], "command.stopped");
+
+    let next = native(&path, Some(clock), NativeRunner::new());
+    let view = next.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.status, "needs-intervention");
+    assert_eq!(results(&next, &key).await.len(), 1, "a lease had to expire");
 }
