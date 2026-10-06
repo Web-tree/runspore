@@ -17,6 +17,13 @@ must do; `docs/07-durable-execution.md` gives the reasoning and invariants I1 to
 4. **A failure leaves no trace**, including no receipt.
 5. Digests are verified: `Evidence.digest` must equal `digest::body(body)`, else
    `conflict` / `evidence.digest-mismatch`.
+6. Where an operation returns an earlier value as `duplicate` because of a natural key
+   (a start key in `create_run`, an event ID in `append_event`), it writes nothing,
+   including no receipt for the new request ID.
+
+Codes any operation may return: `unavailable` / `store.busy` or `store.io` (retry the
+identical request), `corrupt` / `store.corrupt`, and `conflict` / `cursor.invalid` for
+a scan cursor the store did not issue.
 
 Failure codes are part of the contract. `kind` is in parentheses.
 
@@ -81,6 +88,8 @@ Writes, atomically:
     number `attempt − 1` (`conflict` / `invocation.retry-invalid`). Set it `pending`
     with the new attempt number and `notBeforeMs`.
   - any other kind: `incompatible` / `command.unknown-kind`.
+  - a payload that does not decode as its kind's type: `conflict` /
+    `command.payload-invalid`.
 
 Returns `{key, revision, appliedSequence, decisionDigest}`.
 
@@ -165,7 +174,8 @@ and are idempotent on an already matching state.
 - The schema carries a version. Opening a newer version fails with `incompatible` /
   `schema.too-new`. An empty file is initialized.
 - `capabilities()`: protocol `0.1`, `multiworkerClaims = true` (same host),
-  `persistentWakeup = false`, `transactionScope = "database"`.
+  `persistentWakeup = false`, `transactionScope = "database"`,
+  `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
 - The schema is internal to the adapter and documented in its README. Unique
   constraints, not application checks alone, back I2, I3, and fence uniqueness.
 

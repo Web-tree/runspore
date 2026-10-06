@@ -9,7 +9,7 @@ Questions that need Max collect in [questions/](questions/README.md).
 | --- | --- | --- | --- | --- | --- |
 | P0 | Contract freeze: spec and `runspore-types` | `spec/`, `crates/runspore-types` | — | done 2026-10-06 | main |
 | K | Kernel and golden traces | `crates/runspore-kernel`, `crates/runspore-trace`, `conformance/traces` | P0 | running since 2026-10-06 | |
-| S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | running since 2026-10-06 | pkg-S |
+| S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | done 2026-10-06, verified and merged | pkg-S |
 | C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | running since 2026-10-06 | |
 | H | Engine and activity runners | `crates/runspore-host` | K, S | pending | |
 | X | Cross-host determinism: Wasmtime, Node, Bun | `conformance/js`, tests in `crates/runspore-wasmtime` | K, C | pending | |
@@ -33,3 +33,4 @@ Questions that need Max collect in [questions/](questions/README.md).
 ## Log
 - 2026-10-06: P0 frozen on main (7f42cf8). Wave 1 launched: K, S, C, each an Opus agent in its own worktree.
 - 2026-10-06 13:44: K and S each fanned out to nested sub-agents and stopped; neither left a file, and S's worktree was removed as unchanged. Max: new agents start only on Opus. S worktree recreated on branch `pkg-S`; K and S resumed with "do it yourself, start no sub-agents, do not hand back before committing". C continues.
+- 2026-10-06 13:58: S verified on disk (fmt, clippy, 14 conformance + 3 SQLite tests, code read) and merged to main. Its four spec gaps (payload-invalid code, generic store codes, capability values, natural-key duplicates write no receipt) are folded into spec/store.md.
