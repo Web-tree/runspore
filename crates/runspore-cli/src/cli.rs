@@ -22,7 +22,8 @@ use crate::view;
 
 pub const FORMAT: &str = "runspore.cli/0.1";
 
-/// Exit code when `run` or `worker --until-parked` is interrupted before the run parks.
+/// Exit code after a graceful shutdown on SIGINT or SIGTERM: for `worker` always, for
+/// `run` and `worker --until-parked` when the run had not parked yet.
 const EXIT_INTERRUPTED: u8 = 130;
 
 #[derive(Parser)]
@@ -210,7 +211,11 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Worker { run: None, .. } => {
             let mut stop = Interrupts::install()?;
             engine.serve(stop.wait()).await?;
-            done(json!({"stopped": true}), "worker stopped".into())
+            Ok(Output {
+                json: json!({"interrupted": true}),
+                text: "worker stopped".into(),
+                exit: EXIT_INTERRUPTED,
+            })
         }
         Command::Status { run_id } => {
             let view = existing(&engine, run_id).await?;
@@ -370,8 +375,8 @@ async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, bool), Fail
     Ok((start_key, outcome.created))
 }
 
-/// `run_until_parked`, or on SIGINT/SIGTERM a graceful shutdown that leaves the run to
-/// the next worker.
+/// `run_until_parked`, or on SIGINT/SIGTERM `Engine::shutdown`, which applies the
+/// results of the attempts it drains and leaves the rest of the run to the next worker.
 async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
     let mut stop = Interrupts::install()?;
     let parked = tokio::select! {
@@ -384,7 +389,7 @@ async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
             (view, exit)
         }
         None => {
-            engine.serve(std::future::ready(())).await?;
+            engine.shutdown().await;
             (existing(engine, &key.run).await?, EXIT_INTERRUPTED)
         }
     };

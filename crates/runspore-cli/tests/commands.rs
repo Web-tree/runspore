@@ -289,61 +289,73 @@ fn a_worker_and_a_separate_signal_process_share_one_database() {
         nix::sys::signal::SIGTERM,
     )
     .unwrap();
-    assert!(worker.wait().unwrap().success());
+    assert_eq!(worker.wait().unwrap().code(), Some(130));
 }
 
+/// SIGINT to `run` and to `worker` while a 30-second idempotent step is in flight:
+/// the process stops the command, exits 130 within twice the grace period plus a
+/// margin, and has already applied the stopped attempt, so attempt 2 is authorized
+/// before any other worker starts. A second worker then performs it.
 #[test]
 fn sigint_stops_a_worker_within_the_grace_period_and_another_finishes() {
-    let dir = Dir::new("sigint");
-    dir.write("flow.json", &flow("30", "idempotent"));
-    let mut worker = dir.spawn(&args(&[
-        "--grace-ms",
-        "300",
-        "run",
-        "flow.json",
-        "--key",
-        "s",
-    ]));
-    while dir.effects().is_empty() {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let sent = Instant::now();
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(worker.id() as i32),
-        nix::sys::signal::SIGINT,
-    )
-    .unwrap();
-    let exit = worker.wait().unwrap();
-    assert!(
-        sent.elapsed() < Duration::from_millis(300 * 2 + 1500),
-        "took {:?}",
-        sent.elapsed()
-    );
-    assert_eq!(exit.code(), Some(130));
-    dir.write("flow.json", &flow("30", "idempotent"));
-    let next = dir
-        .run(&args(&["--json", "start", "flow.json", "--key", "s"]))
-        .json();
-    std::fs::write(
-        dir.file("flow.json"),
-        serde_json::to_vec_pretty(&flow("30", "idempotent")).unwrap(),
-    )
-    .unwrap();
-    let run = next["runId"].as_str().unwrap();
-    let mut finisher = dir.spawn(&args(&["worker", "--run", run, "--until-parked"]));
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while dir.effects().len() < 2 {
+    for (name, command) in [
+        ("sigint-run", &["run", "flow.json", "--key", "s"][..]),
+        ("sigint-worker", &["worker"][..]),
+    ] {
+        let dir = Dir::new(name);
+        dir.write("flow.json", &flow("30", "idempotent"));
+        let run = dir
+            .run(&args(&["--json", "start", "flow.json", "--key", "s"]))
+            .json()["runId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mut argv = vec!["--grace-ms", "300"];
+        argv.extend_from_slice(command);
+        let mut worker = dir.spawn(&args(&argv));
+        while dir.effects().is_empty() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let sent = Instant::now();
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(worker.id() as i32),
+            nix::sys::signal::SIGINT,
+        )
+        .unwrap();
+        let exit = worker.wait().unwrap();
         assert!(
-            Instant::now() < deadline,
-            "the second worker did not retry the step"
+            sent.elapsed() < Duration::from_millis(300 * 2 + 1500),
+            "{name} took {:?}",
+            sent.elapsed()
         );
-        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(exit.code(), Some(130), "{name}");
+        let status = dir.run(&args(&["--json", "status", &run])).json();
+        assert_eq!(
+            (
+                &status["status"],
+                &status["invocation"]["attempt"],
+                &status["invocation"]["state"]
+            ),
+            (&json!("running"), &json!(2), &json!("scheduled")),
+            "{name}: {status}"
+        );
+
+        let mut finisher = dir.spawn(&args(&["worker", "--run", &run, "--until-parked"]));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while dir.effects().len() < 2 {
+            assert!(
+                Instant::now() < deadline,
+                "{name}: the second worker did not retry the step"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = finisher.kill();
+        let _ = finisher.wait();
+        let effects = dir.effects();
+        assert_eq!(
+            (effects[0].key.clone(), effects[1].attempt),
+            (effects[1].key.clone(), 2),
+            "{name}"
+        );
     }
-    let _ = finisher.kill();
-    let _ = finisher.wait();
-    let effects = dir.effects();
-    assert_eq!(
-        (effects[0].key.clone(), effects[1].attempt),
-        (effects[1].key.clone(), 2)
-    );
 }
