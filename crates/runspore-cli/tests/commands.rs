@@ -173,6 +173,83 @@ fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
     assert_eq!(dir.effects().len(), 1);
 }
 
+/// Five steps that each return a 60 KB string: the fifth result takes the snapshot
+/// past the kernel's 256 KiB state budget.
+fn oversized() -> Value {
+    let argv = json!([
+        "/bin/sh",
+        "-c",
+        r#"printf '{"blob": "%s"}' $(yes x | head -n 60000 | tr -d '\n')"#
+    ]);
+    let steps = ["a", "b", "c", "d", "e", "done"];
+    let mut nodes = json!({"done": {"kind": "complete"}});
+    for pair in steps.windows(2) {
+        nodes[pair[0]] =
+            json!({"kind": "activity", "action": "fetch", "outcomes": {"ok": pair[1]}});
+    }
+    json!({
+        "format": "runspore.workflow/0.1", "name": "oversized", "start": "a",
+        "actions": {"fetch": {"kind": "command", "effect": "read-only", "output": "json", "argv": argv}},
+        "nodes": nodes
+    })
+}
+
+#[test]
+fn a_run_over_the_state_budget_is_quarantined_until_released() {
+    let dir = Dir::new("quarantine");
+    dir.write("flow.json", &oversized());
+    let run = ["--json", "run", "flow.json", "--key", "q"];
+    let out = dir.run(&args(&run));
+    let status = out.json();
+    assert_eq!(
+        (out.code(), status["quarantine"]["code"].clone()),
+        (Some(5), json!("budget.state-bytes"))
+    );
+    let run_id = status["runId"].as_str().unwrap();
+    let listed = dir.run(&args(&["--json", "list"])).json();
+    assert_eq!(listed["runs"][0]["quarantined"], true);
+
+    let release = dir.run(&args(&["--json", "release", run_id]));
+    assert_eq!(
+        (release.code(), release.json()["disposition"].clone()),
+        (Some(0), json!("applied"))
+    );
+    let lifted = dir.run(&args(&["--json", "status", run_id])).json();
+    assert_eq!(lifted["quarantine"], Value::Null);
+    // The same transition fails the same way: the run is quarantined again.
+    assert_eq!(dir.run(&args(&run)).code(), Some(5));
+}
+
+#[test]
+fn a_path_that_cannot_be_a_database_is_a_store_error() {
+    let dir = Dir::new("store-error");
+    dir.write("flow.json", &flow("0", "idempotent"));
+    std::fs::create_dir(dir.file("a-directory")).unwrap();
+    std::fs::write(dir.file("not-a-database"), "plain text\n").unwrap();
+    for (db, code) in [
+        ("a-directory", "store.io"),
+        ("not-a-database", "store.corrupt"),
+    ] {
+        for command in [&["list"][..], &["run", "flow.json"]] {
+            let mut argv = vec!["--json", "--db", db];
+            argv.extend_from_slice(command);
+            let out = dir.run(&args(&argv));
+            assert_eq!(
+                (out.code(), out.json()["error"]["code"].clone()),
+                (Some(10), json!(code)),
+                "{argv:?}"
+            );
+        }
+    }
+    let text = dir.run(&args(&["--db", "a-directory", "list"]));
+    assert_eq!(text.code(), Some(10));
+    assert!(
+        text.stderr.starts_with("runspore: store.io: "),
+        "{}",
+        text.stderr
+    );
+}
+
 #[test]
 fn a_worker_and_a_separate_signal_process_share_one_database() {
     let dir = Dir::new("two");
