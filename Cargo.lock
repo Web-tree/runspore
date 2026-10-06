@@ -929,6 +929,7 @@ dependencies = [
  "runspore-store-sqlite",
  "runspore-types",
  "runspore-wasmtime",
+ "rusqlite",
  "serde_json",
  "tokio",
 ]
