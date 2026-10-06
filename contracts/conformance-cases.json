@@ -1,0 +1,28 @@
+{
+  "format": "workflow-conformance-plan-0.1",
+  "status": "scenario definitions; not executable tests",
+  "cases": [
+    {"id":"C01","scenario":"Two coordinators read the same revision and event","assertions":["Exactly one decision commits","Losing computation publishes no commands"]},
+    {"id":"C02","scenario":"Database commits but success acknowledgement is lost","assertions":["Same operation ID returns same receipt","No new command or claim identity is allocated"]},
+    {"id":"C03","scenario":"Receipt lookup is absent while original transaction is still in flight","assertions":["Identical resubmission serializes with original","One mutation survives","Different digest conflicts"]},
+    {"id":"C04","scenario":"Provider performs effect then connection drops","assertions":["Idempotent binding reuses effect key","Reconcilable binding queries stable identity","Unsafe binding pauses unknown"]},
+    {"id":"C05","scenario":"Old worker completes after lease expiry or takeover","assertions":["Completion cannot advance graph","Evidence retained","No assumption stale worker stopped externally"]},
+    {"id":"C06","scenario":"Heartbeat arrives at or after lease deadline","assertions":["Lease is not resurrected","Time is evaluated under authoritative lock"]},
+    {"id":"C07","scenario":"Same event ID arrives with different body","assertions":["Conflict returned","Original body and sequence unchanged"]},
+    {"id":"C08","scenario":"Signal arrives before waiter activation","assertions":["Signal is retained within declared policy","Earliest matching buffered item is consumed once"]},
+    {"id":"C09","scenario":"Overdue timer is accepted after an external signal","assertions":["No retroactive reordering","Strict deadline policy checks signal acceptance time"]},
+    {"id":"C10","scenario":"Cancellation accepted while ordinary tasks are queued","assertions":["Accepted differs from effective","Effective commit closes dispatch gate","Compensation and reconciliation remain possible"]},
+    {"id":"C11","scenario":"Agent restarts after a brokered tool effect","assertions":["Tool operation identity survives attempts","Unknown mapping requires reconciliation","Schema repair cannot repeat effect"]},
+    {"id":"C12","scenario":"Approval consumed then worker crashes before effect dispatch","assertions":["Receipt binds same logical operation","No second operation inherits approval","Revocation checked before new dispatch"]},
+    {"id":"C13","scenario":"Remote runner acknowledges task then disconnects","assertions":["Delivery ACK is not success","Durable result outbox retries completion","No unguarded duplicate process"]},
+    {"id":"C14","scenario":"Cloudflare initialization ACK is lost","assertions":["Registry reservation preexists run","Sweeper retries exact initialization","No live run lacks registry entry"]},
+    {"id":"C15","scenario":"Canonical keys include supplementary Unicode characters","assertions":["Rust and JS follow JCS UTF-16 ordering","Same canonical digest"]},
+    {"id":"C16","scenario":"Pure segment exceeds fixed budget","assertions":["No partial business result or effects commit","Run pauses resource-limit","No infinite automatic retry"]},
+    {"id":"C17","scenario":"Restore backup older than externally performed effects","assertions":["Namespace starts paused","Effect identities retained","Reconciliation precedes dispatch"]},
+    {"id":"C18","scenario":"Browser closes or local storage is evicted","assertions":["No promise of closed-browser progress","Missing data reported","Export or server authority is explicit"]},
+    {"id":"C19","scenario":"PR head changes after review or approval","assertions":["Approval invalidated","Broker enforces provider-side head precondition","Queue acceptance is not merge completion"]},
+    {"id":"C20","scenario":"Same graph and accepted events across hosts","assertions":["Same snapshots and command digests","Pinned semantic limits","No effects during replay"]},
+    {"id":"C21","scenario":"Telemetry exporter fails or extension floods attributes","assertions":["Bounded buffers","No graph behavior changes","Dropped count increments","Secrets not exported"]},
+    {"id":"C22","scenario":"Terminal graph still has uncertain external work","assertions":["Graph remains terminal","Effects-settled remains false","Reconciliation is visible and authorized"]}
+  ]
+}

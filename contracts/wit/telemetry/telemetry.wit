@@ -1,0 +1,44 @@
+package runspore:telemetry@0.1.0;
+
+// Host-side and activity extension only. Reducer has no telemetry imports.
+interface observability {
+  type context-handle = u64;
+  type span-handle = u64;
+  enum severity { trace, debug, info, warn, error }
+  enum completion { ok, error, cancelled }
+  record attribute { key: string, value: string }
+  record rejection { code: string }
+
+  // Names, attributes, cardinality, payload sizes and rate are host constrained.
+  begin-span: func(
+    parent: option<context-handle>,
+    operation: string,
+    attributes: list<attribute>
+  ) -> result<span-handle, rejection>;
+  add-event: func(
+    span: span-handle,
+    name: string,
+    attributes: list<attribute>
+  ) -> result<_, rejection>;
+  end-span: func(span: span-handle, status: completion);
+  log: func(
+    context: option<context-handle>,
+    level: severity,
+    code: string,
+    attributes: list<attribute>
+  );
+  add-counter: func(
+    registered-metric: string,
+    value: u64,
+    attributes: list<attribute>
+  ) -> result<_, rejection>;
+  record-histogram: func(
+    registered-metric: string,
+    value: u64,
+    attributes: list<attribute>
+  ) -> result<_, rejection>;
+}
+
+world telemetry-provider {
+  export observability;
+}

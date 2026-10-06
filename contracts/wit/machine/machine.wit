@@ -1,0 +1,83 @@
+package runspore:machine@0.1.0;
+
+// Proposed ABI. No imports: the host resolves graph/artifact references.
+interface reducer {
+  record identity {
+    package-digest: string,
+    kernel-digest: string,
+    semantics-version: string,
+    codec-version: string,
+  }
+
+  record envelope {
+    event-id: string,
+    sequence: u64,
+    accepted-at-ms: u64,
+    kind: string,
+    // Canonical JSON following the separately versioned event schema.
+    payload: list<u8>,
+  }
+
+  record limits {
+    microsteps: u32,
+    expression-operations: u32,
+    max-state-bytes: u32,
+    max-command-count: u32,
+  }
+
+  record request {
+    identity: identity,
+    graph: list<u8>,
+    // None is legal only with a Started event.
+    snapshot: option<list<u8>>,
+    input-event: envelope,
+    frozen-limits: limits,
+  }
+
+  record command {
+    command-id: string,
+    activation-id: string,
+    kind: string,
+    payload: list<u8>,
+  }
+
+  record diagnostic {
+    code: string,
+    node-id: option<string>,
+    details: list<u8>,
+  }
+
+  record decision {
+    snapshot: list<u8>,
+    snapshot-digest: string,
+    commands: list<command>,
+    diagnostics: list<diagnostic>,
+  }
+
+  enum failure-kind {
+    invalid-input,
+    incompatible-version,
+    resource-limit,
+    invariant-violation,
+  }
+
+  record failure {
+    kind: failure-kind,
+    code: string,
+    details: string,
+  }
+
+  record descriptor {
+    abi-version: string,
+    semantics-version: string,
+    graph-format-version: string,
+    codec-version: string,
+  }
+
+  describe: func() -> descriptor;
+  transition: func(input: request) -> result<decision, failure>;
+}
+
+world machine {
+  export reducer;
+}

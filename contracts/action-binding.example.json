@@ -1,0 +1,45 @@
+{
+  "format": "workflow-action-binding-draft-0.1",
+  "bindingId": "github.ensure-pr",
+  "contract": {
+    "id": "github.pull-request.ensure",
+    "version": "1.0.0",
+    "inputSchema": {
+      "type": "object",
+      "required": ["repositoryId", "headRef", "baseRef", "title"],
+      "properties": {
+        "repositoryId": {"type": "string"},
+        "headRef": {"type": "string"},
+        "baseRef": {"type": "string"},
+        "title": {"type": "string", "maxLength": 256}
+      },
+      "additionalProperties": false
+    },
+    "outcomes": {
+      "ready": {
+        "type": "object",
+        "required": ["pullRequestId", "headSha"],
+        "properties": {
+          "pullRequestId": {"type": "string"},
+          "headSha": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "adapter": "registered:github-broker@1",
+  "implementationDigest": "REPLACE_WITH_VERIFIED_ARTIFACT_DIGEST",
+  "executionProfile": "network-broker",
+  "requiredCapabilities": ["github.pull-request.create:configured-repository"],
+  "recovery": {
+    "mode": "reconcilable",
+    "identity": "logical-invocation-id",
+    "reconcile": "registered:github-find-exact-pr@1",
+    "unknownPolicy": "pause",
+    "note": "A not-found response is insufficient while an earlier attempt can still act."
+  },
+  "retry": {"maxAttempts": 3, "initialDelayMs": "1000", "maxDelayMs": "30000"},
+  "timeout": {"attemptMs": "60000", "totalMs": "300000"},
+  "secretReferences": ["broker/github-task-token"],
+  "limits": {"maxInputBytes": 65536, "maxOutputBytes": 65536, "maxLogBytes": 131072}
+}
