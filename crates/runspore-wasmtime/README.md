@@ -80,13 +80,14 @@ fault.
 ## Measurements
 
 Measured on this machine (Apple Silicon, macOS, release build) with the **stub
-kernel**, whose `transition` returns a fixed failure. These are measurements, not
+kernel**, whose `transition` returns a fixed failure, over five consecutive runs while other
+builds kept the load average between 18 and 28. These are measurements, not
 guarantees, and will change when the real kernel lands.
 
 | Quantity | Value |
 | --- | --- |
 | Kernel component size | 32 549 bytes |
-| Cold first call: engine, compile, `describe`, one transition | 20.1 ms |
-| Warm transition, fresh instance per call (mean of 10 000) | 16.3 µs |
+| Cold first call: engine, compile, `describe`, one transition | 19–25 ms |
+| Warm transition, fresh instance per call (mean of 10 000) | 16–26 µs |
 
 Reproduce with `cargo run --release -p runspore-wasmtime --example overhead`.
