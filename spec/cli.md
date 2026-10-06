@@ -28,6 +28,8 @@ engine. It never listens on a network.
 | `release <runId>` | Lifts a quarantine |
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
+`worker --run` and `--until-parked` are only valid together. `release` on a run that is
+not quarantined succeeds and changes nothing.
 
 ## Exit codes
 
@@ -40,6 +42,7 @@ engine. It never listens on a network.
 | 4 | The run needs intervention |
 | 5 | The run is quarantined |
 | 10 | Store or internal error |
+| 130 | Interrupted by SIGINT or SIGTERM after a graceful shutdown |
 
 ## JSON output
 
