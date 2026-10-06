@@ -678,3 +678,48 @@ async fn validate_workflow_checks_what_start_checks_without_a_store() {
     invalid["start"] = json!("nowhere");
     assert_eq!(validate(&invalid).unwrap_err().code(), "workflow.invalid");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_command_stopped_by_shutdown_is_finished_and_an_unsafe_run_parks_at_once() {
+    let path = temp_db("stopped-command");
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.1",
+        "name": "hang",
+        "start": "hang",
+        "actions": {
+            "hang": {"kind": "command", "effect": "unsafe", "argv": ["/bin/sleep", "30"]}
+        },
+        "nodes": {
+            "hang": {"kind": "activity", "action": "hang", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete"}
+        }
+    }))
+    .unwrap();
+    let config = EngineConfig {
+        shutdown_grace_ms: 300,
+        ..EngineConfig::default()
+    };
+    let clock = ManualClock::new(T0);
+    let stopping = kernel_engine(
+        store(&path, Some(clock.clone())),
+        Arc::new(NativeReducer),
+        NativeRunner::new(),
+        config,
+    );
+    let key = stopping
+        .start(&workflow, json!({}), "stopped")
+        .await
+        .unwrap()
+        .key;
+    stopping.serve(std::future::ready(())).await.unwrap();
+    assert_eq!(stopping.in_flight(), 0);
+    let reported = results(&stopping, &key).await;
+    assert_eq!(reported.len(), 1, "the stopped attempt was not finished");
+    assert_eq!(reported[0]["status"], "unknown");
+    assert_eq!(reported[0]["error"]["code"], "command.stopped");
+
+    let next = native(&path, Some(clock), NativeRunner::new());
+    let view = next.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.status, "needs-intervention");
+    assert_eq!(results(&next, &key).await.len(), 1, "a lease had to expire");
+}

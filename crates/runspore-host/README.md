@@ -35,9 +35,11 @@ a non-retryable `failure`.
 
 `serve(shutdown)` repeats `tick`. On shutdown it stops claiming, waits up to
 `shutdown_grace_ms` for in-flight attempts, then fires every remaining attempt's stop
-signal, waits up to `shutdown_grace_ms` again for their runners to return, and
-returns. Attempts stopped this way are not finished: their leases expire and the
-kernel decides.
+signal and waits up to `shutdown_grace_ms` again. An attempt whose runner returns is
+finished with what the runner reported (a stopped `command` reports `unknown` /
+`command.stopped`), so the kernel decides at once instead of after a lease. Attempts
+that still have not returned are aborted, unfinished: their leases expire. Only a lost
+lease skips `finish_attempt`.
 
 ## Failpoints
 

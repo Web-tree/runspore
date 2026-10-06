@@ -502,8 +502,9 @@ impl Engine {
 
     /// Ticks until `shutdown` resolves, sleeping `poll_ms` after a tick that did
     /// nothing. Then stops claiming, waits up to `shutdown_grace_ms` for in-flight
-    /// attempts, signals the rest to stop, waits up to `shutdown_grace_ms` again for
-    /// their runners to return, and returns without finishing them: their leases expire.
+    /// attempts, signals the rest to stop and waits up to `shutdown_grace_ms` again.
+    /// An attempt whose runner returns is finished with what it reported, so the next
+    /// worker need not wait for its lease; the rest are aborted and left to lease expiry.
     pub async fn serve(&self, shutdown: impl Future<Output = ()>) -> Result<(), HostError> {
         let inner = &self.inner;
         tokio::pin!(shutdown);
@@ -802,7 +803,7 @@ impl Inner {
             stop_rx,
         );
         let mut lost = false;
-        let mut abandoned = false;
+        let mut stopping = false;
         let output = match self.resolve_action(&attempt.key, &claim).await {
             Err(Unrunnable::Abandon) => return,
             Err(Unrunnable::Fail(output)) => output,
@@ -816,7 +817,7 @@ impl Inner {
                 loop {
                     tokio::select! {
                         output = &mut run => break output,
-                        _ = beat.tick(), if !lost && !abandoned => {
+                        _ = beat.tick(), if !lost => {
                             if let Err(f) = self.heartbeat(&attempt).await {
                                 if f.kind == StoreFailureKind::Stale {
                                     lost = true;
@@ -824,8 +825,8 @@ impl Inner {
                                 }
                             }
                         }
-                        () = async { let _ = shutdown.wait_for(|s| *s).await; }, if !abandoned => {
-                            abandoned = true;
+                        () = async { let _ = shutdown.wait_for(|s| *s).await; }, if !stopping => {
+                            stopping = true;
                             stop.send_replace(true);
                         }
                     }
@@ -861,9 +862,6 @@ impl Inner {
         let Ok(evidence) = evidence(&result) else {
             return;
         };
-        if abandoned && !lost {
-            return;
-        }
         if !lost {
             let Ok(mutation) = mutation(
                 "finish_attempt",

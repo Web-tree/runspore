@@ -397,3 +397,30 @@ async fn serve_finishes_in_flight_attempts_on_shutdown() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["status"], "success");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serve_finishes_an_attempt_that_returns_after_the_stop_signal() {
+    let path = temp_db("serve-stop");
+    let clock = ManualClock::new(1_000_000);
+    let store = Arc::new(SqliteStore::open_with_clock(&path, clock).unwrap());
+    let native = NativeRunner::new().function("echo", move |ctx, _input| async move {
+        ctx.stopped().await;
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: json!("finished anyway"),
+        }
+    });
+    let config = EngineConfig {
+        shutdown_grace_ms: 20,
+        ..EngineConfig::default()
+    };
+    let engine = engine(store, one_step, native, config);
+    let key = engine.start(WORKFLOW, json!({}), "stop").await.unwrap().key;
+    engine.serve(std::future::ready(())).await.unwrap();
+    assert_eq!(engine.in_flight(), 0);
+    let results = results(&engine, &key).await;
+    assert_eq!(results.len(), 1, "the stopped attempt was not finished");
+    assert_eq!(results[0]["status"], "success");
+    assert_eq!(results[0]["output"], "finished anyway");
+    assert_eq!(audits(&path), 0);
+}
