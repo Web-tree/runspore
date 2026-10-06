@@ -1,0 +1,27 @@
+[package]
+name = "runspore-cli"
+description = "The runspore binary: engine, SQLite store and kernel component in one process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "runspore"
+path = "src/main.rs"
+
+[dependencies]
+runspore-types.workspace = true
+runspore-kernel.workspace = true
+runspore-host = { path = "../runspore-host" }
+runspore-store-sqlite = { path = "../runspore-store-sqlite" }
+runspore-wasmtime = { path = "../runspore-wasmtime" }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+nix = { version = "0.31.3", features = ["signal"] }
+
+[lints]
+workspace = true
