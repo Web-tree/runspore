@@ -24,7 +24,14 @@ world `machine` from `contracts/wit/machine/machine.wit`.
   Memory is bounded. A fuel or epoch watchdog stops a runaway guest.
 - A trap, a watchdog stop, or an out-of-memory condition is reported as
   `Failure { kind: InvariantViolation, code: "host.trap" | "host.watchdog" | "host.memory" }`.
-  It is never turned into a business outcome.
+  It is never turned into a business outcome. If memory growth was refused during the
+  call the code is `host.memory`; else running out of fuel is `host.watchdog`; any
+  other engine error, including a failed instantiation, is `host.trap`.
+- The watchdog is fuel, which is counted, not timed: a request stops at the same point
+  on every machine.
+- `describe` is called once when the reducer is constructed and cached; a failure
+  there fails construction.
+- The component exports exactly `runspore:machine/reducer@0.1.0`.
 - `kernel_digest()` is `digest::hash("kernel", [component bytes])`.
 
 ## 2. Engine
