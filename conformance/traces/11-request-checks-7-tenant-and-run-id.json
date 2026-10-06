@@ -1,0 +1,131 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-7-tenant-and-run-id",
+  "description": "Check 7: RunStarted.tenant and runId match [A-Za-z0-9_.-]{1,128}; a space, an empty string, a slash, or 129 characters fails with event.invalid. A sequence error (check 6) is reported first. The widest legal names are accepted.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-7-tenant-and-run-id",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_7", "tenant": "acme corp"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "runs/7", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": null,
+          "runId": "run_check_7",
+          "tenant": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+        }
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "2",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_7", "tenant": "acme corp"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": null,
+          "runId": "Run-7.a_b",
+          "tenant": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttAz09_.-"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_4a2b4f312fc2a6ff820dffc0b82ff0ca",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "Run-7.a_b",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttAz09_.-",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:9404435cff8a268d21f3012e3353be591a64422c06ac30fbd00a58629899153e",
+        "commands": [
+          {
+            "commandId": "cmd_0ad2ccdbfd658c778dd1be62a21e94c1",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_4a2b4f312fc2a6ff820dffc0b82ff0ca",
+              "input": null,
+              "invocationId": "inv_4a2b4f312fc2a6ff820dffc0b82ff0ca",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:6974f705f768eec8dee22a63932d04d0e8d1509b1605fe15a3d865e815183a7f"
+      }
+    }
+  ]
+}

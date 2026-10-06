@@ -1,0 +1,189 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "mapping-missing-path",
+  "description": "The second activity's input projects a member the first activity's output does not have. The node is admitted and counted, then the run ends failed with mapping.missing-path naming the node and the path; no command is emitted. A later event is ignored.",
+  "workflow": {
+    "actions": {
+      "fetch": {"argv": ["fetch"], "effect": "read-only", "kind": "command"},
+      "render": {"argv": ["render"], "effect": "pure", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.1",
+    "name": "mapping-missing-path",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "render", "output"]}},
+      "fetch": {
+        "action": "fetch",
+        "input": {"url": {"$get": ["input", "url"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "render"}
+      },
+      "render": {
+        "action": "render",
+        "input": {
+          "author": {"$get": ["nodes", "fetch", "output", "meta", "author"]},
+          "first": {"$get": ["nodes", "fetch", "output", "items", 0]},
+          "title": {"$get": ["nodes", "fetch", "output", "title"]}
+        },
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "fetch"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": {"url": "https://example.test/a"},
+          "runId": "run_missing_path",
+          "tenant": "default"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"url": "https://example.test/a"},
+          "invocation": {
+            "actionId": "fetch",
+            "activationId": "fetch/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ba13acc950f7b11c56d489190b08353b519f5ff98e00b48554d876df7aa4b32b",
+            "invocationId": "inv_4465a85f383b8f246fc97d8b9970f11d",
+            "nodeId": "fetch",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "fetch/1", "nodeId": "fetch", "visit": 1},
+          "result": null,
+          "runId": "run_missing_path",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"fetch": 1}
+        },
+        "snapshotDigest": "sha256:57f5ddb64c48ea166fc726b3e4cc74cdffd9baab9ece88a9bf2d341cc76e0a5a",
+        "commands": [
+          {
+            "commandId": "cmd_ef28708987bcda64a56e9a0b065dd093",
+            "activationId": "fetch/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "fetch",
+              "activationId": "fetch/1",
+              "attempt": 1,
+              "effectKey": "inv_4465a85f383b8f246fc97d8b9970f11d",
+              "input": {"url": "https://example.test/a"},
+              "invocationId": "inv_4465a85f383b8f246fc97d8b9970f11d",
+              "nodeId": "fetch",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:1fb9eacd2cc7ad55aa7780c95bce6b1e6a945b5e2fc0a4b4152a0dd2395e5382"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_4465a85f383b8f246fc97d8b9970f11d.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_4465a85f383b8f246fc97d8b9970f11d.1",
+          "invocationId": "inv_4465a85f383b8f246fc97d8b9970f11d",
+          "output": {"items": [], "title": "Hello"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"url": "https://example.test/a"},
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {
+            "fetch": {"outcome": "ok", "output": {"items": [], "title": "Hello"}, "visit": 1}
+          },
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.missing-path",
+              "details": {"path": ["nodes", "fetch", "output", "meta", "author"]},
+              "message": "mapping path does not resolve",
+              "nodeId": "render"
+            }
+          },
+          "runId": "run_missing_path",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"fetch": 1, "render": 1}
+        },
+        "snapshotDigest": "sha256:6c870a451f99b4697d6ef94ab56149999030f59e3d9476714652b357636be4fa",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4d7d6be68939ea5b1886d114e46260f8918849a3fd4ab393fff0ba32b5845471"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "3",
+        "acceptedAtMs": "3000",
+        "kind": "signal.received",
+        "payload": {"name": "anything"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"url": "https://example.test/a"},
+          "invocation": null,
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "3",
+          "nodes": {
+            "fetch": {"outcome": "ok", "output": {"items": [], "title": "Hello"}, "visit": 1}
+          },
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.missing-path",
+              "details": {"path": ["nodes", "fetch", "output", "meta", "author"]},
+              "message": "mapping path does not resolve",
+              "nodeId": "render"
+            }
+          },
+          "runId": "run_missing_path",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"fetch": 1, "render": 1}
+        },
+        "snapshotDigest": "sha256:0a000adc93ad369453d4daaffc224d3c8ba0c65afdd39c78828a05e229fe2992",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "event.ignored-terminal",
+            "nodeId": null,
+            "details": {"kind": "signal.received"}
+          }
+        ],
+        "decisionDigest": "sha256:204d81ae05f22796fa517eadd9ed5a932dfa0db046b47afe5a802d80ad204026"
+      }
+    }
+  ]
+}

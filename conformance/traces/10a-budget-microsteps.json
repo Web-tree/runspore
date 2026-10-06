@@ -1,0 +1,236 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "budget-microsteps",
+  "description": "Budget of 4 microsteps (C16). With two signals buffered, the result would enter gate1, consume, enter gate2, consume and enter finish: five microsteps, so the transition fails with budget.microsteps and commits nothing. The next event reuses sequence 4 and its snapshot shows the invocation still scheduled and both signals still buffered; the result then fails again.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "budget-microsteps",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "finish": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}},
+      "gate1": {"kind": "await-signal", "outcomes": {"received": "gate2"}, "signal": "go"},
+      "gate2": {"kind": "await-signal", "outcomes": {"received": "finish"}, "signal": "go"},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "gate1"}}
+    },
+    "start": "work"
+  },
+  "limits": {"microsteps": 4},
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_budget_microsteps", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_microsteps",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:3b5daa20da3554c8ec657ba685d8b480ea6ffdf057def69905f0867a96880ca0",
+        "commands": [
+          {
+            "commandId": "cmd_3c6b756f8dcc4b5730c2fcb420d6d668",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+              "input": null,
+              "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:2480ef5a3355cd8711be927a1782c6d78d98f54a0a4707d989becf22b9ba388b"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "signal.received",
+        "payload": {"name": "go"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_microsteps",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "go", "outcome": null, "sequence": "2"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:0257bdbe5ee24323cbd65fa70ac84fca66e5c14debf6b093097140d2a2ff792a",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:71432de25ab8fb944a35caf853543c5a431ba5e0f233ab198ca52bf3b9f78f6a"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-2",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "signal.received",
+        "payload": {"name": "go"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_microsteps",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "go", "outcome": null, "sequence": "2"},
+            {"data": null, "eventId": "sig:m-2", "name": "go", "outcome": null, "sequence": "3"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:211f30a3833dfb9fd7e07e5490b5b794989b91de61da8716d2ef66724bfcaf2c",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:dca5d055023e6f4a4dee4c6d327e97cacd3417011fad689114b2cb1a32dd8cbe"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_3ff7f85a1c2982b488b1b9ed60e96d67.1",
+        "sequence": "4",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67.1",
+          "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+          "status": "success"
+        }
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.microsteps"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-3",
+        "sequence": "4",
+        "acceptedAtMs": "2100",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2100",
+          "lastSequence": "4",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_microsteps",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "go", "outcome": null, "sequence": "2"},
+            {"data": null, "eventId": "sig:m-2", "name": "go", "outcome": null, "sequence": "3"},
+            {"data": null, "eventId": "sig:m-3", "name": "note", "outcome": null, "sequence": "4"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:5a8cf86d021215cb1c5c9ac79d2b8f038303aa0c0d861aaf8b4cdaf6402996be",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4600d948bd217859b121d381052c7d3013132e6cfc4bb6580af0de8aa8a3bb29"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_3ff7f85a1c2982b488b1b9ed60e96d67.1",
+        "sequence": "5",
+        "acceptedAtMs": "2200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67.1",
+          "invocationId": "inv_3ff7f85a1c2982b488b1b9ed60e96d67",
+          "status": "success"
+        }
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.microsteps"}}
+    }
+  ]
+}

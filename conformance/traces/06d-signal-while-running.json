@@ -1,0 +1,217 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "signal-while-running",
+  "description": "Signals accepted while an activity runs are only buffered: no command, no diagnostic, the invocation untouched. Absent outcome and data are stored as null. Nothing waits for them, so they are still buffered when the run completes.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "signal-while-running",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_signal_running", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_5b515d165d5092f50bb1bf766e92349a",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_signal_running",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:00dc45b751a58e6b2226d230202987f660b32faec7c7a437144a3fc2d4ea0302",
+        "commands": [
+          {
+            "commandId": "cmd_075a1443aa4c404bff449a23043ab57b",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_5b515d165d5092f50bb1bf766e92349a",
+              "input": null,
+              "invocationId": "inv_5b515d165d5092f50bb1bf766e92349a",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:60f94ba6d55cb458a8fd54849ff3bfa8e7d9afe7fe47fe09c418948b9f16faa0"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "1500",
+        "kind": "signal.received",
+        "payload": {"data": {"by": "ana"}, "name": "approval", "outcome": "approved"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_5b515d165d5092f50bb1bf766e92349a",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1500",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_signal_running",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": {"by": "ana"},
+              "eventId": "sig:m-1",
+              "name": "approval",
+              "outcome": "approved",
+              "sequence": "2"
+            }
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:8a01fdd4118603fb3c33e1a127d2fd8212ef9e390a4f38f0a070caa84c6fedff",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:f0beae3d930be1d668669b268c4c0baac539c95c28d01364207ea13c7c376851"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-2",
+        "sequence": "3",
+        "acceptedAtMs": "1600",
+        "kind": "signal.received",
+        "payload": {"name": "ping"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_5b515d165d5092f50bb1bf766e92349a",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1600",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_signal_running",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": {"by": "ana"},
+              "eventId": "sig:m-1",
+              "name": "approval",
+              "outcome": "approved",
+              "sequence": "2"
+            },
+            {"data": null, "eventId": "sig:m-2", "name": "ping", "outcome": null, "sequence": "3"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:223c2471ab6c859a4740f353f14885995e5b7120e29882a1193e5fd170a69f7b",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:ecfc10fa5058ee35f8837e6c614a6c7dd92c2fd967a35bb91818c953947b2013"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_5b515d165d5092f50bb1bf766e92349a.1",
+        "sequence": "4",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_5b515d165d5092f50bb1bf766e92349a.1",
+          "invocationId": "inv_5b515d165d5092f50bb1bf766e92349a",
+          "output": {"n": 1},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "4",
+          "nodes": {"work": {"outcome": "ok", "output": {"n": 1}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"n": 1}},
+          "runId": "run_signal_running",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": {"by": "ana"},
+              "eventId": "sig:m-1",
+              "name": "approval",
+              "outcome": "approved",
+              "sequence": "2"
+            },
+            {"data": null, "eventId": "sig:m-2", "name": "ping", "outcome": null, "sequence": "3"}
+          ],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:d3371e3a8c03a0be4fa1841b2eda5879c99cbf42d14bd57f8908689250ec95de",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:bcf223eab0f04fd9d11755b3d99f2b8f460f84d701dafd753ea7f347096e22b1"
+      }
+    }
+  ]
+}

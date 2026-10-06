@@ -1,0 +1,95 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "budget-command-count",
+  "description": "Budget of 0 commands. Parking at the await-signal start node emits none and is accepted; the signal that would route to the activity emits one schedule command, so the transition fails with budget.command-count and commits nothing. An unrelated signal reusing sequence 2 shows the waiter still parked.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "budget-command-count",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "gate": {"kind": "await-signal", "outcomes": {"received": "work"}, "signal": "go"},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "gate"
+  },
+  "limits": {"maxCommandCount": 0},
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_budget_commands", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "gate/1", "nodeId": "gate", "visit": 1},
+          "result": null,
+          "runId": "run_budget_commands",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"gate": 1}
+        },
+        "snapshotDigest": "sha256:21abdfb76a79f8495acd407a0bba1675422689cbdbb91f8340fff630ad1525f2",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4604d7796c601319758c992bb64e4b34a982f7c20827974234b4dd2cf6ccd1d9"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "go"}
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.command-count"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-2",
+        "sequence": "2",
+        "acceptedAtMs": "2100",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "gate/1", "nodeId": "gate", "visit": 1},
+          "result": null,
+          "runId": "run_budget_commands",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-2", "name": "note", "outcome": null, "sequence": "2"}
+          ],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"gate": 1}
+        },
+        "snapshotDigest": "sha256:bbc4659cbab941e15374e301e9babb9ad737fe99ac1103d3c3d74c19c9d9bfc0",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:8b973220051ac413e9d07608730c14fe421c4f7879f84344ced1b92e2a2ce2e2"
+      }
+    }
+  ]
+}

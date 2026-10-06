@@ -1,0 +1,281 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "events-after-terminal",
+  "description": "Once the run is completed every event kind is consumed with event.ignored-terminal: the status, result and buffer never change, only lastSequence and lastAcceptedAtMs advance.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "unsafe", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "events-after-terminal",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_terminal", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_6c08e3e65de744717f31410c01e27f4a",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_terminal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:653ee04f248c2cef831a32bc816bdb49fc1fdf7d96e1c5e758a233c4b26b6fff",
+        "commands": [
+          {
+            "commandId": "cmd_50751f19181034589dedd8ec8f0d9469",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_6c08e3e65de744717f31410c01e27f4a",
+              "input": null,
+              "invocationId": "inv_6c08e3e65de744717f31410c01e27f4a",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:32b2e35cca4fd758d3af5bb58f2ea43f8ca6e1b7e1b768f6c3006441cb2b6236"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_6c08e3e65de744717f31410c01e27f4a.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_6c08e3e65de744717f31410c01e27f4a.1",
+          "invocationId": "inv_6c08e3e65de744717f31410c01e27f4a",
+          "output": {"n": 1},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {"work": {"outcome": "ok", "output": {"n": 1}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"n": 1}},
+          "runId": "run_terminal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:ae654671ce81fc53a5239660b21aaebd1a9d3b1bbd6b3c3263ba3af563f2c6bd",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:789e3a39ef05d612095d165dcf125e4d26251786c15e452661c43793177f03d8"
+      }
+    },
+    {
+      "event": {
+        "eventId": "late:inv_6c08e3e65de744717f31410c01e27f4a.1",
+        "sequence": "3",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_6c08e3e65de744717f31410c01e27f4a.1",
+          "error": null,
+          "invocationId": "inv_6c08e3e65de744717f31410c01e27f4a",
+          "outcome": null,
+          "output": null,
+          "retryable": true,
+          "status": "expired"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "3",
+          "nodes": {"work": {"outcome": "ok", "output": {"n": 1}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"n": 1}},
+          "runId": "run_terminal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:618b5f750c82db990e1899c523566f03a1fa7d5f3241e9804b2be82816b0e452",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "event.ignored-terminal",
+            "nodeId": null,
+            "details": {"kind": "activity.result"}
+          }
+        ],
+        "decisionDigest": "sha256:ba75a2c0e2bfa0b3910e92b0e48de0dbd5f9560258b098275bcea2fccb33e205"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "4",
+        "acceptedAtMs": "4000",
+        "kind": "signal.received",
+        "payload": {"data": null, "name": "approval", "outcome": "approved"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "4000",
+          "lastSequence": "4",
+          "nodes": {"work": {"outcome": "ok", "output": {"n": 1}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"n": 1}},
+          "runId": "run_terminal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:843d56ad0fffa828ae7057ca307f74a95e3b0d79a2691b56f7a064a211d40d8b",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "event.ignored-terminal",
+            "nodeId": null,
+            "details": {"kind": "signal.received"}
+          }
+        ],
+        "decisionDigest": "sha256:d9cc1b8948fef571e2ab81a95bf03e016a0b7223e7e2c931ffa43e998cbef7ae"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-1",
+        "sequence": "5",
+        "acceptedAtMs": "5000",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_6c08e3e65de744717f31410c01e27f4a",
+          "resolution": {"action": "retry"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "5000",
+          "lastSequence": "5",
+          "nodes": {"work": {"outcome": "ok", "output": {"n": 1}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"n": 1}},
+          "runId": "run_terminal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:76caee1282a84b85dfa6d2305d3c87f189fed6e9f6daf660939d8bbfef3c89a5",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "event.ignored-terminal",
+            "nodeId": null,
+            "details": {"kind": "invocation.resolved"}
+          }
+        ],
+        "decisionDigest": "sha256:ba72825ec43dc1023896438d59bde4a7db5d7eafb4b8cd01f28ee340c3cf9148"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-2",
+        "sequence": "6",
+        "acceptedAtMs": "4500",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_6c08e3e65de744717f31410c01e27f4a",
+          "resolution": {
+            "action": "fail",
+            "error": {"code": "operator.failed", "message": "too late"}
+          }
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "5000",
+          "lastSequence": "6",
+          "nodes": {"work": {"outcome": "ok", "output": {"n": 1}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"n": 1}},
+          "runId": "run_terminal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:8f49619ea51695cba72870b7bbe1e8bcfa85d28226aba567419926d13295d72b",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "event.ignored-terminal",
+            "nodeId": null,
+            "details": {"kind": "invocation.resolved"}
+          }
+        ],
+        "decisionDigest": "sha256:0b994f6d4353fc8e5bc34fb4c02499747a22e57b42c42f92085b550639593b68"
+      }
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "budget-state-bytes",
+  "description": "Budget of 706 state bytes: the first snapshot is 556 bytes. A signal carrying 200 bytes of data would push the snapshot over the budget, so the transition fails with budget.state-bytes and commits nothing; a small signal reusing sequence 2 is accepted and the large one is absent from the buffer.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "budget-state-bytes",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "finish": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}},
+      "gate1": {"kind": "await-signal", "outcomes": {"received": "gate2"}, "signal": "go"},
+      "gate2": {"kind": "await-signal", "outcomes": {"received": "finish"}, "signal": "go"},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "gate1"}}
+    },
+    "start": "work"
+  },
+  "limits": {"maxStateBytes": 706},
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_budget_state", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_6401ef7359d9f7535a00798b10710c6c",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_state",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:06c6319f925a0b6bd5beafe196fa773b0deb430c029668a3d4b2eb0a37659b07",
+        "commands": [
+          {
+            "commandId": "cmd_8dd80663a38f46f9aa4898634d58d6ab",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_6401ef7359d9f7535a00798b10710c6c",
+              "input": null,
+              "invocationId": "inv_6401ef7359d9f7535a00798b10710c6c",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:bb9a4b02694b4bdfb9ded29586569882cb55c92a60220f76a0d80d47315afb74"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-big",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "signal.received",
+        "payload": {
+          "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "name": "note"
+        }
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.state-bytes"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-small",
+        "sequence": "2",
+        "acceptedAtMs": "1200",
+        "kind": "signal.received",
+        "payload": {"data": "x", "name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_6401ef7359d9f7535a00798b10710c6c",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_state",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": "x",
+              "eventId": "sig:m-small",
+              "name": "note",
+              "outcome": null,
+              "sequence": "2"
+            }
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:34cd64fb27d90530427fcf6236523f8a0a6ad3492a71a7b59abdcb41917ce0be",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:6ea952a9d8c02adf899f3d6c982e36e221f3e5254312511376ddb8aca8109dae"
+      }
+    }
+  ]
+}

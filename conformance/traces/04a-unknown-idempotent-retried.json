@@ -1,0 +1,182 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "unknown-idempotent-retried",
+  "description": "An unknown result on an idempotent action is retried: attempt 2 is authorized after the backoff with the same invocation ID and effect key under a new command ID, and its success completes the run.",
+  "workflow": {
+    "actions": {
+      "upload": {
+        "argv": ["upload"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"backoffMs": "200", "maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "name": "unknown-idempotent-retried",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "upload", "output"]}},
+      "upload": {
+        "action": "upload",
+        "input": {"file": {"$get": ["input", "file"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "upload"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"file": "a.bin"}, "runId": "run_unknown_idem", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"file": "a.bin"},
+          "invocation": {
+            "actionId": "upload",
+            "activationId": "upload/1",
+            "attempt": 1,
+            "inputDigest": "sha256:0e797a4e6c44fb5b6f88e32b341d46dee82bd9c11e418b6e3d63918467176d15",
+            "invocationId": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+            "nodeId": "upload",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "upload/1", "nodeId": "upload", "visit": 1},
+          "result": null,
+          "runId": "run_unknown_idem",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"upload": 1}
+        },
+        "snapshotDigest": "sha256:b3d0fee8ae8f38793ba31db710e2e97d060f32ffa9ce82c82ff4bdcd3a925626",
+        "commands": [
+          {
+            "commandId": "cmd_f565c0111b7d8574e9ce72ad144195ba",
+            "activationId": "upload/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "upload",
+              "activationId": "upload/1",
+              "attempt": 1,
+              "effectKey": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+              "input": {"file": "a.bin"},
+              "invocationId": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+              "nodeId": "upload",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:94edc868bd834c7b56432d59a4d78d2f720f4261bb723998f598bef576af92a2"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_d1f5c923d1938b46cc7b66644c3a2a30.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_d1f5c923d1938b46cc7b66644c3a2a30.1",
+          "error": {"code": "host.timeout", "message": "no reply from provider"},
+          "invocationId": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+          "status": "unknown"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"file": "a.bin"},
+          "invocation": {
+            "actionId": "upload",
+            "activationId": "upload/1",
+            "attempt": 2,
+            "inputDigest": "sha256:0e797a4e6c44fb5b6f88e32b341d46dee82bd9c11e418b6e3d63918467176d15",
+            "invocationId": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+            "nodeId": "upload",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "upload/1", "nodeId": "upload", "visit": 1},
+          "result": null,
+          "runId": "run_unknown_idem",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"upload": 1}
+        },
+        "snapshotDigest": "sha256:a9ed24df63bb1ad8e60946fdae5be71e3abe5b627593b900bd427f962bef888c",
+        "commands": [
+          {
+            "commandId": "cmd_18dc346ebbb74d362421026ce383140a",
+            "activationId": "upload/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 2,
+              "invocationId": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+              "notBeforeMs": "2200"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "upload", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:960edb1e3d6dced89b3143bded1a2ff324d364237995822a21f9d87a780e3ef8"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_d1f5c923d1938b46cc7b66644c3a2a30.2",
+        "sequence": "3",
+        "acceptedAtMs": "2300",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_d1f5c923d1938b46cc7b66644c3a2a30.2",
+          "invocationId": "inv_d1f5c923d1938b46cc7b66644c3a2a30",
+          "output": {"etag": "e-1"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"file": "a.bin"},
+          "invocation": null,
+          "lastAcceptedAtMs": "2300",
+          "lastSequence": "3",
+          "nodes": {"upload": {"outcome": "ok", "output": {"etag": "e-1"}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"etag": "e-1"}},
+          "runId": "run_unknown_idem",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "upload": 1}
+        },
+        "snapshotDigest": "sha256:b52f247a48cada8f8303f441d8006f1a6cf3610907a240ee7cab85b52531d124",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:9fbf9f55a348ff135ecae3c9634668d25e7e6321a65434375f2add47ff32dcc9"
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W06-limits",
+  "description": "W06: the review-loop example of spec/kernel.md with one change: maxVisitsPerNode is 1001, above the allowed 1..=1000. Validation runs on every transition before anything that depends on the graph, so both run.started and a later event without a snapshot fail with invalid-input / workflow.invalid.",
+  "workflow": {
+    "actions": {
+      "build": {
+        "argv": ["make"],
+        "effect": "idempotent",
+        "kind": "command",
+        "outcomes": ["ok", "red"],
+        "retry": {"backoffMs": "500", "maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 1001},
+    "name": "validation-W06-limits",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "build"},
+        "signal": "approval"
+      },
+      "broken": {"error": {"code": "build.broken", "message": "never passed"}, "kind": "fail"},
+      "build": {
+        "action": "build",
+        "input": {"repo": {"$get": ["input", "repo"]}},
+        "kind": "activity",
+        "outcomes": {"failed": "broken", "ok": "approve", "red": "build"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "build", "output"]}}
+    },
+    "start": "build"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"repo": "r"}, "runId": "run_w06_limits", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "1",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "approval", "outcome": "approved"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}

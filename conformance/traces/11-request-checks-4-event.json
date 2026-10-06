@@ -1,0 +1,239 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-4-event",
+  "description": "Check 4: the event kind must be known (event.unknown-kind) and the payload must be the canonical encoding of that kind's type (event.invalid). payloadRaw feeds bytes that are valid JSON but not canonical: whitespace, unsorted keys, a duplicate key, a non-integer number. Each failure leaves the run untouched.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-4-event",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "e-1",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "timer.fired",
+        "payload": {}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.unknown-kind"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"input\": null, \"runId\": \"run_check_4\", \"tenant\": \"default\"}"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"tenant\":\"default\",\"runId\":\"run_check_4\",\"input\":null}"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"input\":null,\"runId\":\"run_check_4\",\"runId\":\"run_check_4\",\"tenant\":\"default\"}"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"input\":1.5,\"runId\":\"run_check_4\",\"tenant\":\"default\"}"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"input\":null,\"tenant\":\"default\"}"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"input\":null,\"runId\":\"run_check_4\",\"tenant\":\"default\",\"priority\":1}"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "not json"
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payloadRaw": "{\"input\":null,\"runId\":\"run_check_4\",\"tenant\":\"default\"}"
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_bea7f2d915ad5635fc35a67ac9578870",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_4",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:32413c3252a315ecb7dc1298b616952345a82bf4e52450ccb510e06e0e1bbeee",
+        "commands": [
+          {
+            "commandId": "cmd_9dc96e36e2b4ae95cd7504165f8ca566",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_bea7f2d915ad5635fc35a67ac9578870",
+              "input": null,
+              "invocationId": "inv_bea7f2d915ad5635fc35a67ac9578870",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:d5c6797778731c00ba6c31828229b5b6ff1931a4322aa7dcb780aa5f0abec28e"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_bea7f2d915ad5635fc35a67ac9578870.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_bea7f2d915ad5635fc35a67ac9578870.1",
+          "invocationId": "inv_bea7f2d915ad5635fc35a67ac9578870",
+          "status": "maybe"
+        }
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note", "priority": 1}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "res:op-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_bea7f2d915ad5635fc35a67ac9578870",
+          "resolution": {"action": "shrug"}
+        }
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "e-2",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "run.cancelled",
+        "payload": {}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.unknown-kind"}}
+    },
+    {
+      "event": {
+        "eventId": "att:inv_bea7f2d915ad5635fc35a67ac9578870.1",
+        "sequence": "2",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_bea7f2d915ad5635fc35a67ac9578870.1",
+          "invocationId": "inv_bea7f2d915ad5635fc35a67ac9578870",
+          "output": 1,
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "2",
+          "nodes": {"work": {"outcome": "ok", "output": 1, "visit": 1}},
+          "position": null,
+          "result": {"output": 1},
+          "runId": "run_check_4",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:54875fb856e3445989c2599f2993464dae28a0014b4b7de9e3bab2eb18c4eeac",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4e326ad16da34f75bb23facf9beacf088bce665bfdf7a9332809fbf1138c9aa2"
+      }
+    }
+  ]
+}
