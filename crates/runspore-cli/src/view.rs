@@ -48,12 +48,18 @@ pub fn status_text(view: &RunView) -> String {
         view.key.run, view.start_key, view.status, view.revision
     );
     if let Some(p) = s["position"].as_object() {
-        text += &format!("position   {} ({})\n", p["nodeId"], p["activationId"]);
+        text += &format!(
+            "position   {} ({})\n",
+            p["nodeId"].as_str().unwrap_or_default(),
+            p["activationId"].as_str().unwrap_or_default()
+        );
     }
     if let Some(i) = s["invocation"].as_object() {
         text += &format!(
             "invocation {} attempt {} {}\n",
-            i["invocationId"], i["attempt"], i["state"]
+            i["invocationId"].as_str().unwrap_or_default(),
+            i["attempt"],
+            i["state"].as_str().unwrap_or_default()
         );
     }
     if !s["result"].is_null() {

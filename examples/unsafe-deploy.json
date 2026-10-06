@@ -1,0 +1,13 @@
+{
+  "format": "runspore.workflow/0.1",
+  "name": "unsafe-deploy",
+  "start": "deploy",
+  "actions": {
+    "deploy": {"kind": "command", "effect": "unsafe",
+               "argv": ["/bin/sh", "-c", "echo \"deployed $RUNSPORE_EFFECT_KEY\" >> deploy.log; sleep 3"]}
+  },
+  "nodes": {
+    "deploy": {"kind": "activity", "action": "deploy", "outcomes": {"ok": "done"}},
+    "done": {"kind": "complete", "output": {"deployed": {"$get": ["nodes", "deploy", "outcome"]}}}
+  }
+}

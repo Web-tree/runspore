@@ -26,10 +26,19 @@ pub const FORMAT: &str = "runspore.cli/0.1";
 const EXIT_INTERRUPTED: u8 = 130;
 
 #[derive(Parser)]
-#[command(name = "runspore", version, about = "Embedded durable workflow runtime")]
+#[command(
+    name = "runspore",
+    version,
+    about = "Embedded durable workflow runtime"
+)]
 pub struct Cli {
     /// Database file.
-    #[arg(long, global = true, env = "RUNSPORE_DB", default_value = "./runspore.db")]
+    #[arg(
+        long,
+        global = true,
+        env = "RUNSPORE_DB",
+        default_value = "./runspore.db"
+    )]
     pub db: PathBuf,
     /// Print one JSON object on stdout instead of text.
     #[arg(long, global = true)]
@@ -175,7 +184,11 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Validate { .. } => unreachable!("handled above"),
         Command::Start(args) => {
             let (key, created) = start(&engine, args).await?;
-            let text = format!("{} run {} (start key {key})", started(created), key_run(&engine, &key));
+            let text = format!(
+                "{} run {} (start key {key})",
+                started(created),
+                key_run(&engine, &key)
+            );
             done(
                 json!({"runId": key_run(&engine, &key), "startKey": key, "created": created}),
                 text,
@@ -213,10 +226,19 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             id,
         } => {
             let key = existing(&engine, run_id).await?.key;
-            let data = data.as_deref().map(|d| parse_json("--data", d)).transpose()?;
+            let data = data
+                .as_deref()
+                .map(|d| parse_json("--data", d))
+                .transpose()?;
             let message_id = id.clone().unwrap_or_else(|| generated("msg"));
             let receipt = engine
-                .signal(&key, &message_id, name, outcome.clone(), data.unwrap_or(Value::Null))
+                .signal(
+                    &key,
+                    &message_id,
+                    name,
+                    outcome.clone(),
+                    data.unwrap_or(Value::Null),
+                )
                 .await?;
             let disposition = disposition(&receipt.disposition);
             done(
@@ -280,7 +302,8 @@ fn reducer(cli: &Cli) -> Result<Arc<dyn Reducer>, Fail> {
     if cli.native_kernel {
         return Ok(Arc::new(NativeReducer));
     }
-    let reducer = WasmtimeReducer::new().map_err(|e| Fail::internal("kernel.load", e.to_string()))?;
+    let reducer =
+        WasmtimeReducer::new().map_err(|e| Fail::internal("kernel.load", e.to_string()))?;
     Ok(Arc::new(reducer))
 }
 
@@ -307,7 +330,12 @@ fn engine(cli: &Cli) -> Result<Engine, Fail> {
     config.heartbeat_ms = cli.heartbeat_ms.unwrap_or(config.heartbeat_ms);
     config.poll_ms = cli.poll_ms.unwrap_or(config.poll_ms);
     config.shutdown_grace_ms = cli.grace_ms.unwrap_or(config.shutdown_grace_ms);
-    Ok(Engine::new(Arc::new(store), reducer(cli)?, registry(), config))
+    Ok(Engine::new(
+        Arc::new(store),
+        reducer(cli)?,
+        registry(),
+        config,
+    ))
 }
 
 fn engine_key(engine: &Engine, run: &str) -> RunKey {
@@ -332,9 +360,8 @@ async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, bool), Fail
         (Some(text), _) => parse_json("--input", text)?,
         (None, Some(path)) => {
             let bytes = read_file(path)?;
-            serde_json::from_slice(&bytes).map_err(|e| {
-                Fail::usage("json.invalid", format!("{}: {e}", path.display()))
-            })?
+            serde_json::from_slice(&bytes)
+                .map_err(|e| Fail::usage("json.invalid", format!("{}: {e}", path.display())))?
         }
         (None, None) => json!({}),
     };
@@ -393,8 +420,15 @@ async fn list(engine: &Engine) -> Result<Output, Fail> {
     let text: Vec<String> = runs
         .iter()
         .map(|r| {
-            let quarantined = if r.quarantine.is_some() { " quarantined" } else { "" };
-            format!("{}  {:<18}{quarantined}  {}", r.key.run, r.status, r.start_key)
+            let quarantined = if r.quarantine.is_some() {
+                " quarantined"
+            } else {
+                ""
+            };
+            format!(
+                "{}  {:<18}{quarantined}  {}",
+                r.key.run, r.status, r.start_key
+            )
         })
         .collect();
     let json: Vec<Value> = runs
@@ -411,9 +445,9 @@ async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {
     let key = existing(engine, run).await?.key;
     let mut records = Vec::new();
     loop {
-        let after = records.last().map_or(0, |r: &runspore_types::store::EventRecord| {
-            r.event.sequence
-        });
+        let after = records
+            .last()
+            .map_or(0, |r: &runspore_types::store::EventRecord| r.event.sequence);
         let page = engine.list_events(&key, after, 100).await?;
         let more = page.next.is_some() && !page.items.is_empty();
         records.extend(page.items);
