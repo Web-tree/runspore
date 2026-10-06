@@ -1,0 +1,13 @@
+{
+  "name": "runspore-conformance-js",
+  "private": true,
+  "type": "module",
+  "description": "Replays compiled kernel traces through the jco-transpiled kernel component under Node and Bun.",
+  "scripts": {
+    "transpile": "jco transpile build/export/component.wasm --instantiation async --name kernel --out-dir build/transpiled",
+    "check": "./check.sh"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.36.1"
+  }
+}
