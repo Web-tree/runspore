@@ -1,0 +1,24 @@
+[package]
+name = "runspore-wasmtime"
+description = "Reducer that runs the Runspore kernel component through Wasmtime, one fresh instance per transition."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+build = "build/main.rs"
+
+[dependencies]
+runspore-types.workspace = true
+wasmtime = { version = "49.0.2", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
+
+[build-dependencies]
+wit-component = { version = "0.261.0", default-features = false }
+
+[dev-dependencies]
+runspore-kernel.workspace = true
+serde_json.workspace = true
+wasmparser = { version = "0.261.0", default-features = false, features = ["std", "component-model"] }
+wit-component = { version = "0.261.0", default-features = false }
+
+[lints]
+workspace = true
