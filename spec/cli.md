@@ -10,6 +10,7 @@ engine. It never listens on a network.
 | `--db <path>` | `$RUNSPORE_DB`, else `./runspore.db` | Database file |
 | `--json` | off | One JSON object on stdout instead of text |
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
+| `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
 
 ## Commands
 

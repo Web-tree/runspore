@@ -63,6 +63,9 @@ process on its own.
   `ids::event_for_signal(message_id)`.
 - `resolve(key, request_id, invocation_id, resolution)`: `append_event` with event ID
   `ids::event_for_resolution(request_id)`.
+- `validate_workflow(reducer, activities, limits, workflow_json)`: the checks of
+  `start` up to and including the dry transition, with no store involved. Returns the
+  canonical package bytes. `start` uses it.
 - `release(key)`: `release_run`, with a request ID derived from the quarantine it
   lifts, so repeating it is a duplicate.
 - Read-through views: `get_run`, `list_runs`, `list_events`, `list_invocations`.
@@ -93,8 +96,11 @@ One bounded pass. It never blocks on an activity.
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
 
 `serve(shutdown)` repeats `tick`, sleeping `poll_ms` when a tick did nothing. On
-shutdown it stops claiming, waits for in-flight attempts up to a grace period, and
-returns; attempts still running are left to lease expiry.
+shutdown it stops claiming and waits up to `shutdown_grace_ms` for in-flight attempts.
+It then signals the rest to stop and waits once more; an attempt whose runner returns
+is finished normally with what the runner reported (a stopped command reports
+`unknown`), so the next worker does not wait for a lease. Attempts that still have not
+returned are aborted and left to lease expiry.
 
 `run_until_parked(key)` ticks until that run is terminal, `waiting`,
 `needs-intervention`, or quarantined, and nothing of it is in flight.

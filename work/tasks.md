@@ -11,9 +11,9 @@ Questions that need Max collect in [questions/](questions/README.md).
 | K | Kernel and golden traces | `crates/runspore-kernel`, `crates/runspore-trace`, `conformance/traces` | P0 | done 2026-10-06, verified and merged | worktree-agent-a515f322a7eeef774 |
 | S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | done 2026-10-06, verified and merged | pkg-S |
 | C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | done 2026-10-06, verified and merged | worktree-agent-ab051d9354ed47950 |
-| H | Engine and activity runners | `crates/runspore-host` | K, S | running since 2026-10-06 14:08 (engine parts that need no kernel first) | |
+| H | Engine and activity runners | `crates/runspore-host` | K, S | done 2026-10-06, verified and merged; follow-up (validate_workflow, finish on shutdown) running | worktree-agent-ae3e3822be5e46fe6 |
 | X | Cross-host determinism: Wasmtime, Node, Bun | `conformance/js`, tests in `crates/runspore-wasmtime` | K, C | running since 2026-10-06 14:24 | |
-| E | CLI, examples, crash-recovery suite | `crates/runspore-cli`, `examples` | H, C | pending | |
+| E | CLI, examples, crash-recovery suite | `crates/runspore-cli`, `examples` | H, C | running since 2026-10-06 14:50 | |
 
 ## Done-when
 
@@ -40,3 +40,4 @@ Questions that need Max collect in [questions/](questions/README.md).
 - 2026-10-06 14:24: X launched (Opus, no nested agents) against the merged kernel, trace crate and component.
 - 2026-10-06 14:27: H's first agent ran out of context right after merging main; its work is committed on `worktree-agent-ae3e3822be5e46fe6`. A fresh Opus agent (pkg-H2-host-finish) continues in the same worktree: spec alignment, abandon-on-unreadable, shared test helpers, full-run tests with the real kernel.
 - 2026-10-06 14:36: K closed. Signal-starvation fix reviewed as a diff; 48 golden traces (9 hand-derived, 39 blessed and read), 30 codes each expected by a trace, 10,000 generated traces. `cargo test --workspace` on main: 225 passed. Open kernel notes kept for later: budgets bound what is committed, not the work; kernel-local codes should move to runspore-types at its next change.
+- 2026-10-06 14:48: H verified (engine tick, coordinate and attempt code read; 30 host tests incl. H1 over 20 racing iterations and native-vs-wasm identical bytes) and merged; `cargo test --workspace` on main: 255 passed. Follow-up sent to the H agent: store-free `validate_workflow`, and finishing stopped attempts on shutdown instead of abandoning them. E launched.
