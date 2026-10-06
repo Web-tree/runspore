@@ -5,6 +5,10 @@
 //!   compiled with `runspore_trace::compile`;
 //! - `traces/generated/<name>.json`: the traces of seeds `GENERATED_SEEDS`,
 //!   generated against `NativeReducer` and compiled the same way;
+//! - `<trace>.details.json` beside each trace: per step, the `Failure.details`
+//!   the native kernel returned, or `null` for a decision. The compiled format
+//!   leaves details out because the trace runner does not compare them; the
+//!   JavaScript runners do, so a details-only divergence is still found;
 //! - `manifest.json`: the component's SHA-256 and kernel digest, the trace
 //!   files in replay order, and the trace and step counts.
 //!
@@ -21,7 +25,7 @@ use runspore_kernel::NativeReducer;
 use runspore_trace::generate::DEFAULT_MAX_STEPS;
 use runspore_trace::{compile, generate, load, run_compiled, CompiledTrace};
 use runspore_types::digest;
-use runspore_types::reducer::Reducer;
+use runspore_types::reducer::{Envelope, Reducer, TransitionRequest};
 use runspore_wasmtime::{WasmtimeReducer, COMPONENT};
 use sha2::{Digest, Sha256};
 
@@ -80,11 +84,16 @@ fn export(golden: &Path, out: &Path) -> Result<(), String> {
     for (file, trace) in &traces {
         let text = serde_json::to_string(trace).map_err(|e| format!("{file}: {e}"))?;
         write(&out.join(file), text.as_bytes())?;
+        let details = serde_json::to_string(&failure_details(trace)).map_err(|e| e.to_string())?;
+        write(&out.join(details_file(file)), details.as_bytes())?;
     }
     let manifest = serde_json::json!({
         "componentSha256": component_sha256,
         "kernelDigest": kernel_digest,
-        "traces": traces.iter().map(|(file, _)| file).collect::<Vec<_>>(),
+        "traces": traces
+            .iter()
+            .map(|(file, _)| serde_json::json!({"trace": file, "failureDetails": details_file(file)}))
+            .collect::<Vec<_>>(),
         "traceCount": traces.len(),
         "stepCount": steps,
     });
@@ -100,6 +109,46 @@ fn export(golden: &Path, out: &Path) -> Result<(), String> {
     }
     println!("wrote {}", out.display());
     Ok(())
+}
+
+fn details_file(trace_file: &str) -> String {
+    format!("{}.details.json", trace_file.trim_end_matches(".json"))
+}
+
+/// Replays `trace` natively with the loop documented in
+/// `runspore_trace::compile` and returns each step's `Failure.details`, or
+/// `None` for a decision.
+fn failure_details(trace: &CompiledTrace) -> Vec<Option<String>> {
+    let mut snapshot: Option<Vec<u8>> = None;
+    let mut details = Vec::with_capacity(trace.steps.len());
+    for step in &trace.steps {
+        let event = &step.event;
+        let request = TransitionRequest {
+            identity: step.identity.as_ref().unwrap_or(&trace.identity).into(),
+            graph: trace.workflow.as_bytes().to_vec(),
+            snapshot: step
+                .snapshot
+                .as_ref()
+                .map(|s| s.as_bytes().to_vec())
+                .or_else(|| snapshot.clone()),
+            input_event: Envelope {
+                event_id: event.event_id.clone(),
+                sequence: event.sequence,
+                accepted_at_ms: event.accepted_at_ms,
+                kind: event.kind.clone(),
+                payload: event.payload.as_bytes().to_vec(),
+            },
+            frozen_limits: trace.limits.into(),
+        };
+        match NativeReducer.transition(&request) {
+            Ok(decision) => {
+                snapshot = Some(decision.snapshot);
+                details.push(None);
+            }
+            Err(failure) => details.push(Some(failure.details)),
+        }
+    }
+    details
 }
 
 /// The `*.json` files directly inside `dir`, in file name order.
