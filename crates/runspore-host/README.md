@@ -24,7 +24,10 @@ decides a branch, a retry or an outcome route. Unix only (process groups).
 An attempt heartbeats every `heartbeat_ms`. A heartbeat answered `lease.lost` fires
 the runner's stop signal; the attempt then records its result with
 `record_late_evidence` and never calls `finish_attempt`. A `duplicate` claim receipt
-is only used after a heartbeat on it is `applied`.
+is only used after a heartbeat on it is `applied`. An attempt whose run or package
+cannot be read is abandoned: nothing is reported, the lease expires and the kernel
+decides. A missing action or runner, or an input that does not parse, is reported as
+a non-retryable `failure`.
 
 `serve(shutdown)` repeats `tick`. On shutdown it stops claiming, waits up to
 `shutdown_grace_ms` for in-flight attempts, then fires every remaining attempt's stop

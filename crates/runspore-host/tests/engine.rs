@@ -12,7 +12,7 @@ use runspore_store_sqlite::SqliteStore;
 use runspore_types::canonical;
 use runspore_types::digest;
 use runspore_types::reducer::*;
-use runspore_types::store::Disposition;
+use runspore_types::store::{Disposition, InvocationStatus, StoreFailure, StoreFailureKind};
 use serde_json::{json, Value};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -164,6 +164,66 @@ async fn h3_a_lost_lease_stops_the_runner_and_keeps_late_evidence() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["status"], "expired");
     assert_eq!(audits(&path), 1, "late evidence was not recorded");
+}
+
+/// Answers `get_run` with a `corrupt` failure once, when armed.
+struct Unreadable(AtomicBool);
+
+impl Hook for Unreadable {
+    fn get_run(&self) -> Option<StoreFailure> {
+        self.0
+            .swap(false, Ordering::SeqCst)
+            .then(|| StoreFailure::new(StoreFailureKind::Corrupt, "db.corrupt", "unreadable"))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_attempt_whose_run_cannot_be_read_is_abandoned_to_lease_expiry() {
+    let path = temp_db("abandon");
+    let clock = ManualClock::new(1_000_000);
+    let store = Arc::new(Hooked {
+        inner: Arc::new(SqliteStore::open_with_clock(&path, clock.clone()).unwrap()),
+        hook: Unreadable(AtomicBool::new(false)),
+    });
+    let count = Arc::new(AtomicUsize::new(0));
+    let config = EngineConfig {
+        lease_ms: 1_000,
+        ..EngineConfig::default()
+    };
+    let engine = engine(
+        store.clone(),
+        one_step,
+        counting_echo(count.clone()),
+        config,
+    );
+    let key = engine
+        .start(WORKFLOW, json!({}), "abandon")
+        .await
+        .unwrap()
+        .key;
+    store.hook.0.store(true, Ordering::SeqCst);
+    assert_eq!(engine.tick().await.unwrap().dispatched, 1);
+    while engine.in_flight() > 0 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !store.hook.0.load(Ordering::SeqCst),
+        "the attempt never read its run"
+    );
+    assert!(
+        results(&engine, &key).await.is_empty(),
+        "a result was reported"
+    );
+    assert_eq!(audits(&path), 0, "late evidence was recorded");
+    let invocations = engine.list_invocations(&key).await.unwrap();
+    assert_eq!(invocations[0].status, InvocationStatus::Running);
+    clock.set(1_002_000);
+    let view = engine.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.status, "completed");
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    let results = results(&engine, &key).await;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["status"], "expired");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -88,6 +88,15 @@ impl TickReport {
     }
 }
 
+/// Why a claimed attempt cannot start.
+enum Unrunnable {
+    /// The run or its package could not be read. Nothing is reported: the lease
+    /// expires and the kernel decides, as after a crash.
+    Abandon,
+    /// The workflow cannot be run as stored: a non-retryable failure is reported.
+    Fail(ActivityOutput),
+}
+
 struct Package {
     bytes: Vec<u8>,
     actions: Map<String, Value>,
@@ -756,7 +765,8 @@ impl Inner {
         let mut lost = false;
         let mut abandoned = false;
         let output = match self.resolve_action(&attempt.key, &claim).await {
-            Err(output) => output,
+            Err(Unrunnable::Abandon) => return,
+            Err(Unrunnable::Fail(output)) => output,
             Ok((action, runner, input)) => {
                 let run = runner.run(&ctx, &action, &input);
                 tokio::pin!(run);
@@ -850,24 +860,26 @@ impl Inner {
         let _ = retry(true, || self.store.record_late_evidence(request.clone())).await;
     }
 
+    /// Finds the action, its runner and the input of a claimed attempt.
     #[allow(clippy::type_complexity)]
     async fn resolve_action(
         &self,
         key: &RunKey,
         claim: &Claim,
-    ) -> Result<(Value, Arc<dyn crate::ActivityRunner>, Value), ActivityOutput> {
-        let fail = |code: &str, message: String| ActivityOutput::Failure {
-            error: ActivityOutput::error(code, message, Value::Null),
-            retryable: false,
+    ) -> Result<(Value, Arc<dyn crate::ActivityRunner>, Value), Unrunnable> {
+        let fail = |code: &str, message: String| {
+            Unrunnable::Fail(ActivityOutput::Failure {
+                error: ActivityOutput::error(code, message, Value::Null),
+                retryable: false,
+            })
         };
-        let digest = match self.store.get_run(key).await {
-            Ok(Some(view)) => view.package_digest,
-            _ => return Err(fail("host.run-unreadable", format!("run {}", key.run))),
+        let Ok(Some(view)) = retry(false, || self.store.get_run(key)).await else {
+            return Err(Unrunnable::Abandon);
         };
         let package = self
-            .package(&digest)
+            .package(&view.package_digest)
             .await
-            .map_err(|e| fail("host.package-unreadable", e.to_string()))?;
+            .map_err(|_| Unrunnable::Abandon)?;
         let action = package
             .actions
             .get(&claim.action_id)
