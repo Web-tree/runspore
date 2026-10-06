@@ -33,12 +33,17 @@ cannot be read is abandoned: nothing is reported, the lease expires and the kern
 decides. A missing action or runner, or an input that does not parse, is reported as
 a non-retryable `failure`.
 
-`serve(shutdown)` repeats `tick`. On shutdown it stops claiming, waits up to
-`shutdown_grace_ms` for in-flight attempts, then fires every remaining attempt's stop
-signal and waits up to `shutdown_grace_ms` again. An attempt whose runner returns is
-finished with what the runner reported (a stopped `command` reports `unknown` /
-`command.stopped`), so the kernel decides at once instead of after a lease. Attempts
-that still have not returned are aborted, unfinished: their leases expire. Only a lost
+`serve(shutdown)` repeats `tick` until `shutdown` resolves, then calls
+`shutdown()`. `shutdown()` can also be called on its own, e.g. on SIGINT while
+`run_until_parked` is being dropped. From its first call no attempt is ever claimed
+again, by it or by any later `tick`. It waits up to `shutdown_grace_ms` for in-flight
+attempts, then fires every remaining attempt's stop signal and waits up to
+`shutdown_grace_ms` again. An attempt whose runner returns is finished with what the
+runner reported (a stopped `command` reports `unknown` / `command.stopped`), so the
+kernel decides at once instead of after a lease. Attempts that still have not
+returned are aborted, unfinished: their leases expire. A last tick then sweeps and
+coordinates (dispatch is off), so the stored run status reflects the results just
+recorded; its errors are ignored. Calling `shutdown()` again is harmless. Only a lost
 lease skips `finish_attempt`.
 
 ## Failpoints
