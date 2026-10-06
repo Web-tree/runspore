@@ -47,6 +47,6 @@ implement these same semantic operations and tests; generic get/put is insuffici
 The telemetry WIT world is an optional effectful extension, not an import of the
 pure reducer. Its opaque live handles must never be serialized into run snapshots.
 
-The project name is Runspore and the WIT package namespace is `runspore:`. No registry
-name or domain availability is implied. The existing skills repository is a separate
+The project name is Runspore and the WIT package namespace is `runspore:`. The domain is
+runspore.com; registry names are not yet reserved. The existing skills repository is a separate
 integration target.

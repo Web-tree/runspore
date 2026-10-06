@@ -2,7 +2,7 @@
 
 Runspore is an embedded durable workflow runtime designed around a deterministic Rust/WebAssembly graph kernel and replaceable transactional storage.
 
-**Status: MVP implemented.** One binary, `runspore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. Node and Bun are verified at kernel level only; there is no JS host. Not implemented yet: timers, fork and join, child workflows, compensation, cancellation, `reconcilable` effects, input and output schemas, a compiler or YAML/DOT frontends, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Package and domain availability for the name have not been established.
+**Status: MVP implemented.** One binary, `runspore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. Node and Bun are verified at kernel level only; there is no JS host. Not implemented yet: timers, fork and join, child workflows, compensation, cancellation, `reconcilable` effects, input and output schemas, a compiler or YAML/DOT frontends, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Website: [runspore.com](https://runspore.com).
 
 ```text
 event + state → deterministic kernel → new state + commands
@@ -121,6 +121,6 @@ Not yet done: a soak test, a security review, any target beyond one host with on
 
 This is a general workflow substrate developed under WebTree. The [skills workflow epic](https://github.com/Max-Levitskiy/skills/issues/18) is an optional integration profile rather than the runtime's governing format.
 
-## License status
+## License
 
-The architecture proposes dual MIT / Apache-2.0 licensing for original work, subject to dependency review. No license has been applied in this initial documentation commit; licensing must be finalized before distributing runtime code.
+MIT. See [LICENSE](LICENSE). Third-party dependencies keep their own licences; all current Rust dependencies are permissive (MIT, Apache-2.0, BSD, Zlib, Unlicense).

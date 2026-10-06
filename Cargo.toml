@@ -7,6 +7,9 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.96"
 publish = false
+license = "MIT"
+repository = "https://github.com/Web-tree/runspore"
+homepage = "https://runspore.com"
 
 # Shared pins. A crate that needs anything else declares it in its own
 # Cargo.toml with an explicit version; do not add entries here from a package branch.

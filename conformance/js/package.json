@@ -1,6 +1,7 @@
 {
   "name": "runspore-conformance-js",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Replays compiled kernel traces through the jco-transpiled kernel component under Node and Bun.",
   "scripts": {
