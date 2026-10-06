@@ -821,6 +821,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "runspore-conformance-export"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "runspore-kernel",
+ "runspore-trace",
+ "runspore-types",
+ "runspore-wasmtime",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "runspore-host"
 version = "0.1.0"
 dependencies = [
@@ -897,6 +910,7 @@ name = "runspore-wasmtime"
 version = "0.1.0"
 dependencies = [
  "runspore-kernel",
+ "runspore-trace",
  "runspore-types",
  "serde_json",
  "wasmparser 0.261.0",
