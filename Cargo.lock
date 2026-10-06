@@ -873,6 +873,7 @@ name = "runspore-wasmtime"
 version = "0.1.0"
 dependencies = [
  "runspore-kernel",
+ "runspore-trace",
  "runspore-types",
  "serde_json",
  "wasmparser 0.261.0",
