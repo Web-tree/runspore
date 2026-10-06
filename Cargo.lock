@@ -806,6 +806,7 @@ dependencies = [
 name = "runspore-kernel"
 version = "0.1.0"
 dependencies = [
+ "runspore-trace",
  "runspore-types",
  "serde",
  "serde_json",

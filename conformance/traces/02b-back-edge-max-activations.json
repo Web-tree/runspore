@@ -1,0 +1,269 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "back-edge-max-activations",
+  "description": "A draft/review loop uses the run's three activations; the fourth entry (review, second visit) exceeds maxActivations 3 and the run ends failed with limit.activations-exceeded although no node is over its visit limit.",
+  "workflow": {
+    "actions": {
+      "review": {
+        "argv": ["review"],
+        "effect": "pure",
+        "kind": "command",
+        "outcomes": ["approved", "changes"]
+      },
+      "write": {"argv": ["write"], "effect": "idempotent", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.1",
+    "limits": {"maxActivations": 3},
+    "name": "back-edge-max-activations",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "draft", "output"]}},
+      "draft": {
+        "action": "write",
+        "input": {"topic": {"$get": ["input", "topic"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "review"}
+      },
+      "review": {
+        "action": "review",
+        "input": {"text": {"$get": ["nodes", "draft", "output", "text"]}},
+        "kind": "activity",
+        "outcomes": {"approved": "done", "changes": "draft"}
+      }
+    },
+    "start": "draft"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"topic": "kernels"}, "runId": "run_activations", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"topic": "kernels"},
+          "invocation": {
+            "actionId": "write",
+            "activationId": "draft/1",
+            "attempt": 1,
+            "inputDigest": "sha256:699e12d114adfeaa015b4453f72e5c1b886a7c95f753bd11cfde0ee2f8752f82",
+            "invocationId": "inv_e19d746cdf3b9453ee4f40780d67a8b5",
+            "nodeId": "draft",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "draft/1", "nodeId": "draft", "visit": 1},
+          "result": null,
+          "runId": "run_activations",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"draft": 1}
+        },
+        "snapshotDigest": "sha256:62f4d59e19564e2aee6a0ac4e7d53d4f65b7df88284610fdab7353208f4dfd69",
+        "commands": [
+          {
+            "commandId": "cmd_b6f6087f7d2eab2473d320ced27d09c8",
+            "activationId": "draft/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "write",
+              "activationId": "draft/1",
+              "attempt": 1,
+              "effectKey": "inv_e19d746cdf3b9453ee4f40780d67a8b5",
+              "input": {"topic": "kernels"},
+              "invocationId": "inv_e19d746cdf3b9453ee4f40780d67a8b5",
+              "nodeId": "draft",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:b5bede346acc289f6c91dc7209046d7a0baf5906cbf48dcb06c682e407431956"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_e19d746cdf3b9453ee4f40780d67a8b5.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_e19d746cdf3b9453ee4f40780d67a8b5.1",
+          "invocationId": "inv_e19d746cdf3b9453ee4f40780d67a8b5",
+          "output": {"text": "v1"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"topic": "kernels"},
+          "invocation": {
+            "actionId": "review",
+            "activationId": "review/1",
+            "attempt": 1,
+            "inputDigest": "sha256:6b75ef59e9439c95d937cd0243b4b1129e799941089c7252d03e402f75ece6bd",
+            "invocationId": "inv_ea854c4fdfc6b750b95ab450038dc638",
+            "nodeId": "review",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {"draft": {"outcome": "ok", "output": {"text": "v1"}, "visit": 1}},
+          "position": {"activationId": "review/1", "nodeId": "review", "visit": 1},
+          "result": null,
+          "runId": "run_activations",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"draft": 1, "review": 1}
+        },
+        "snapshotDigest": "sha256:29d5599949dcf8a2a480225c32ebe2a85a89a141f7bad4e164ec1a7395890662",
+        "commands": [
+          {
+            "commandId": "cmd_c0948dc3ed6da561dd0609191ab9f7e8",
+            "activationId": "review/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "review",
+              "activationId": "review/1",
+              "attempt": 1,
+              "effectKey": "inv_ea854c4fdfc6b750b95ab450038dc638",
+              "input": {"text": "v1"},
+              "invocationId": "inv_ea854c4fdfc6b750b95ab450038dc638",
+              "nodeId": "review",
+              "notBeforeMs": "2000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:a7dc8e059f3d14889775398332644f2bbe3ea3f279103642d4a12573901c9ec9"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_ea854c4fdfc6b750b95ab450038dc638.1",
+        "sequence": "3",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_ea854c4fdfc6b750b95ab450038dc638.1",
+          "invocationId": "inv_ea854c4fdfc6b750b95ab450038dc638",
+          "outcome": "changes",
+          "output": {"notes": "shorter"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"topic": "kernels"},
+          "invocation": {
+            "actionId": "write",
+            "activationId": "draft/2",
+            "attempt": 1,
+            "inputDigest": "sha256:699e12d114adfeaa015b4453f72e5c1b886a7c95f753bd11cfde0ee2f8752f82",
+            "invocationId": "inv_5e917895435e8cc996934f9662b22a47",
+            "nodeId": "draft",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "3",
+          "nodes": {
+            "draft": {"outcome": "ok", "output": {"text": "v1"}, "visit": 1},
+            "review": {"outcome": "changes", "output": {"notes": "shorter"}, "visit": 1}
+          },
+          "position": {"activationId": "draft/2", "nodeId": "draft", "visit": 2},
+          "result": null,
+          "runId": "run_activations",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"draft": 2, "review": 1}
+        },
+        "snapshotDigest": "sha256:3d9c47dab3625d3f0c2b0fbdd1589cfd0eca08e73ba0349e1907a3632daea8db",
+        "commands": [
+          {
+            "commandId": "cmd_f929daaed9a0eb7b8e3c6527fee84308",
+            "activationId": "draft/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "write",
+              "activationId": "draft/2",
+              "attempt": 1,
+              "effectKey": "inv_5e917895435e8cc996934f9662b22a47",
+              "input": {"topic": "kernels"},
+              "invocationId": "inv_5e917895435e8cc996934f9662b22a47",
+              "nodeId": "draft",
+              "notBeforeMs": "3000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:ed1840e723f433112a986ff26d1b57df5024c6862afd94a56740f418edd810a8"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_5e917895435e8cc996934f9662b22a47.1",
+        "sequence": "4",
+        "acceptedAtMs": "4000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_5e917895435e8cc996934f9662b22a47.1",
+          "invocationId": "inv_5e917895435e8cc996934f9662b22a47",
+          "output": {"text": "v2"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"topic": "kernels"},
+          "invocation": null,
+          "lastAcceptedAtMs": "4000",
+          "lastSequence": "4",
+          "nodes": {
+            "draft": {"outcome": "ok", "output": {"text": "v2"}, "visit": 2},
+            "review": {"outcome": "changes", "output": {"notes": "shorter"}, "visit": 1}
+          },
+          "position": null,
+          "result": {
+            "error": {
+              "code": "limit.activations-exceeded",
+              "details": null,
+              "message": "run activation limit exceeded",
+              "nodeId": "review"
+            }
+          },
+          "runId": "run_activations",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"draft": 2, "review": 1}
+        },
+        "snapshotDigest": "sha256:2cf4452672236c696ae60ae921a13979568b22a63ff3fc29241c05294eed56f4",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:5484debab1af96926f3a3dfc83de297893e8f39e5496ba429d48fceb9ccec2a9"
+      }
+    }
+  ]
+}

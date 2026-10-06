@@ -1,0 +1,256 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "supplementary-plane-keys",
+  "description": "Keys and strings beyond the basic plane (C15). JCS orders keys by UTF-16 code units, so U+1F600 (D83D DE00) sorts before U+FB33 although it follows it in UTF-8 and code point order; the keys of the RFC 8785 ordering example and strings needing each escape form are carried through input, mapping, command, signal and result. The digests pin the canonical bytes.",
+  "workflow": {
+    "actions": {"tag": {"argv": ["tag"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "supplementary-plane-keys",
+    "nodes": {
+      "done": {
+        "kind": "complete",
+        "output": {
+          "picked": {"$get": ["nodes", "tag", "output", "😀"]},
+          "whole": {"$get": ["nodes", "tag", "output"]}
+        }
+      },
+      "tag": {
+        "action": "tag",
+        "input": {
+          "all": {"$get": ["input"]},
+          "literal": {"$literal": {"😀": 2, "דּ": 1}},
+          "😀": {"$get": ["input", "😀"]},
+          "דּ": {"$get": ["input", "דּ"]}
+        },
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "tag"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": {
+            "\r": "Carriage Return",
+            "1": "One",
+            "text": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀",
+            "": "Control",
+            "ö": "Latin Small Letter O With Diaeresis",
+            "€": "Euro Sign",
+            "😀": "astral",
+            "דּ": "bmp"
+          },
+          "runId": "run_unicode",
+          "tenant": "default"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {
+            "\r": "Carriage Return",
+            "1": "One",
+            "text": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀",
+            "": "Control",
+            "ö": "Latin Small Letter O With Diaeresis",
+            "€": "Euro Sign",
+            "😀": "astral",
+            "דּ": "bmp"
+          },
+          "invocation": {
+            "actionId": "tag",
+            "activationId": "tag/1",
+            "attempt": 1,
+            "inputDigest": "sha256:da82c4fcfd094d1dc9bc2047d3026273f9c39f618750da78cbac35571bddef2e",
+            "invocationId": "inv_fba3e7c83a34df41200265e3d8506296",
+            "nodeId": "tag",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "tag/1", "nodeId": "tag", "visit": 1},
+          "result": null,
+          "runId": "run_unicode",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"tag": 1}
+        },
+        "snapshotDigest": "sha256:5b73b3ce8f7a367cc13de11b131d2b84044d10a4f2e26feef0c36c3e4a989686",
+        "commands": [
+          {
+            "commandId": "cmd_cbcb8754e3d458132a232ea705bbd8ce",
+            "activationId": "tag/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "tag",
+              "activationId": "tag/1",
+              "attempt": 1,
+              "effectKey": "inv_fba3e7c83a34df41200265e3d8506296",
+              "input": {
+                "all": {
+                  "\r": "Carriage Return",
+                  "1": "One",
+                  "text": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀",
+                  "": "Control",
+                  "ö": "Latin Small Letter O With Diaeresis",
+                  "€": "Euro Sign",
+                  "😀": "astral",
+                  "דּ": "bmp"
+                },
+                "literal": {"😀": 2, "דּ": 1},
+                "😀": "astral",
+                "דּ": "bmp"
+              },
+              "invocationId": "inv_fba3e7c83a34df41200265e3d8506296",
+              "nodeId": "tag",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:d68e3b2b2cb2b52198aea0236a6d1b06eaede2bb786c47e7eb2c5b531aa492a8"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-😀",
+        "sequence": "2",
+        "acceptedAtMs": "1500",
+        "kind": "signal.received",
+        "payload": {
+          "data": {
+            "😀": {"דּ": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀"},
+            "דּ": ["😀"]
+          },
+          "name": "note",
+          "outcome": "seen"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {
+            "\r": "Carriage Return",
+            "1": "One",
+            "text": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀",
+            "": "Control",
+            "ö": "Latin Small Letter O With Diaeresis",
+            "€": "Euro Sign",
+            "😀": "astral",
+            "דּ": "bmp"
+          },
+          "invocation": {
+            "actionId": "tag",
+            "activationId": "tag/1",
+            "attempt": 1,
+            "inputDigest": "sha256:da82c4fcfd094d1dc9bc2047d3026273f9c39f618750da78cbac35571bddef2e",
+            "invocationId": "inv_fba3e7c83a34df41200265e3d8506296",
+            "nodeId": "tag",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1500",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "tag/1", "nodeId": "tag", "visit": 1},
+          "result": null,
+          "runId": "run_unicode",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": {
+                "😀": {"דּ": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀"},
+                "דּ": ["😀"]
+              },
+              "eventId": "sig:m-😀",
+              "name": "note",
+              "outcome": "seen",
+              "sequence": "2"
+            }
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"tag": 1}
+        },
+        "snapshotDigest": "sha256:385728eeaf330e91be4363a034a98ffa6a15c8b4c35fc6ddec98878900ab8a06",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:33c09762591f6acfc405994a493909af2eff157b92807ec787f5b29dd7400923"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_fba3e7c83a34df41200265e3d8506296.1",
+        "sequence": "3",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_fba3e7c83a34df41200265e3d8506296.1",
+          "invocationId": "inv_fba3e7c83a34df41200265e3d8506296",
+          "output": {"z": 5, "𐀀": 3, "😀": 2, "דּ": 1, "￿": 4},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {
+            "\r": "Carriage Return",
+            "1": "One",
+            "text": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀",
+            "": "Control",
+            "ö": "Latin Small Letter O With Diaeresis",
+            "€": "Euro Sign",
+            "😀": "astral",
+            "דּ": "bmp"
+          },
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "3",
+          "nodes": {
+            "tag": {
+              "outcome": "ok",
+              "output": {"z": 5, "𐀀": 3, "😀": 2, "דּ": 1, "￿": 4},
+              "visit": 1
+            }
+          },
+          "position": null,
+          "result": {"output": {"picked": 2, "whole": {"z": 5, "𐀀": 3, "😀": 2, "דּ": 1, "￿": 4}}},
+          "runId": "run_unicode",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": {
+                "😀": {"דּ": "quote\" backslash\\ tab\t unit\u001f del separator  e-acuteé astral😀"},
+                "דּ": ["😀"]
+              },
+              "eventId": "sig:m-😀",
+              "name": "note",
+              "outcome": "seen",
+              "sequence": "2"
+            }
+          ],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "tag": 1}
+        },
+        "snapshotDigest": "sha256:32e8323ecb6a2592836b0dc9ff47674b28c2c213d2ae1b3f8cef5935832a7c2f",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:7783cf4fea8be17c8e0ba3c3929f05001266a0df3855582a62a0c0b0319dbfdc"
+      }
+    }
+  ]
+}

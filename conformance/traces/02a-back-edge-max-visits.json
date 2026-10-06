@@ -1,0 +1,258 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "back-edge-max-visits",
+  "description": "A node that routes back to itself is entered three times; the fourth entry exceeds maxVisitsPerNode 3 and the run ends failed with limit.visits-exceeded, counters unchanged.",
+  "workflow": {
+    "actions": {
+      "poll": {
+        "argv": ["poll"],
+        "effect": "read-only",
+        "kind": "command",
+        "outcomes": ["ready", "pending"]
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "limits": {"maxVisitsPerNode": 3},
+    "name": "back-edge-max-visits",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "poll", "output"]}},
+      "poll": {
+        "action": "poll",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"pending": "poll", "ready": "done"}
+      }
+    },
+    "start": "poll"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-1"}, "runId": "run_visits", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-1"},
+          "invocation": {
+            "actionId": "poll",
+            "activationId": "poll/1",
+            "attempt": 1,
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6",
+            "invocationId": "inv_23b6943624c758eeb8dd953a8edeae2e",
+            "nodeId": "poll",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "poll/1", "nodeId": "poll", "visit": 1},
+          "result": null,
+          "runId": "run_visits",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"poll": 1}
+        },
+        "snapshotDigest": "sha256:71db03ffa14385202efb8637a48296f4b630b97a8bac8df40599bac4a146c0c7",
+        "commands": [
+          {
+            "commandId": "cmd_58fddb2b08e37471c3403e45f4cae7cf",
+            "activationId": "poll/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "poll",
+              "activationId": "poll/1",
+              "attempt": 1,
+              "effectKey": "inv_23b6943624c758eeb8dd953a8edeae2e",
+              "input": {"job": "j-1"},
+              "invocationId": "inv_23b6943624c758eeb8dd953a8edeae2e",
+              "nodeId": "poll",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:62a42857acdb69492c7339dd7454eb020da28c9528d91cdddf04833242771201"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_23b6943624c758eeb8dd953a8edeae2e.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_23b6943624c758eeb8dd953a8edeae2e.1",
+          "invocationId": "inv_23b6943624c758eeb8dd953a8edeae2e",
+          "outcome": "pending",
+          "output": {"progress": 10},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-1"},
+          "invocation": {
+            "actionId": "poll",
+            "activationId": "poll/2",
+            "attempt": 1,
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6",
+            "invocationId": "inv_4cb1ac7dda84bf2dceda463d7c3465a9",
+            "nodeId": "poll",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {"poll": {"outcome": "pending", "output": {"progress": 10}, "visit": 1}},
+          "position": {"activationId": "poll/2", "nodeId": "poll", "visit": 2},
+          "result": null,
+          "runId": "run_visits",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"poll": 2}
+        },
+        "snapshotDigest": "sha256:9cf6711775fd5bf302d89c1e4dad396649ec3e723801efe42b0233cb48d4039b",
+        "commands": [
+          {
+            "commandId": "cmd_c527037dad5bceea1503985814e995e5",
+            "activationId": "poll/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "poll",
+              "activationId": "poll/2",
+              "attempt": 1,
+              "effectKey": "inv_4cb1ac7dda84bf2dceda463d7c3465a9",
+              "input": {"job": "j-1"},
+              "invocationId": "inv_4cb1ac7dda84bf2dceda463d7c3465a9",
+              "nodeId": "poll",
+              "notBeforeMs": "2000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:7242302749721ac4707a4d5783de0d12fbe2de0593e44cc657cf3047e8560f0f"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_4cb1ac7dda84bf2dceda463d7c3465a9.1",
+        "sequence": "3",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_4cb1ac7dda84bf2dceda463d7c3465a9.1",
+          "invocationId": "inv_4cb1ac7dda84bf2dceda463d7c3465a9",
+          "outcome": "pending",
+          "output": {"progress": 60},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-1"},
+          "invocation": {
+            "actionId": "poll",
+            "activationId": "poll/3",
+            "attempt": 1,
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6",
+            "invocationId": "inv_2fa5e8245c1e21bc3124e298edf55cc6",
+            "nodeId": "poll",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "3",
+          "nodes": {"poll": {"outcome": "pending", "output": {"progress": 60}, "visit": 2}},
+          "position": {"activationId": "poll/3", "nodeId": "poll", "visit": 3},
+          "result": null,
+          "runId": "run_visits",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"poll": 3}
+        },
+        "snapshotDigest": "sha256:26b30ab3d4ca9626c899278109110fc1046d202223ff37feda08503b12fbafbf",
+        "commands": [
+          {
+            "commandId": "cmd_771b0396af2227c08153ead0065388b1",
+            "activationId": "poll/3",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "poll",
+              "activationId": "poll/3",
+              "attempt": 1,
+              "effectKey": "inv_2fa5e8245c1e21bc3124e298edf55cc6",
+              "input": {"job": "j-1"},
+              "invocationId": "inv_2fa5e8245c1e21bc3124e298edf55cc6",
+              "nodeId": "poll",
+              "notBeforeMs": "3000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:8d8a3701a623159cc7d2baa75463613c65737513fb573693947a4b275bec0e84"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_2fa5e8245c1e21bc3124e298edf55cc6.1",
+        "sequence": "4",
+        "acceptedAtMs": "4000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_2fa5e8245c1e21bc3124e298edf55cc6.1",
+          "invocationId": "inv_2fa5e8245c1e21bc3124e298edf55cc6",
+          "outcome": "pending",
+          "output": {"progress": 90},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "4000",
+          "lastSequence": "4",
+          "nodes": {"poll": {"outcome": "pending", "output": {"progress": 90}, "visit": 3}},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "limit.visits-exceeded",
+              "details": null,
+              "message": "node visit limit exceeded",
+              "nodeId": "poll"
+            }
+          },
+          "runId": "run_visits",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"poll": 3}
+        },
+        "snapshotDigest": "sha256:b54274e6a0a1c8335721211f081a3d63fc665981615739554de300a77342255a",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:7f6238c692469713791cdb55361b89fdfefae77b273fafc55da6cd0bdeff2bfe"
+      }
+    }
+  ]
+}

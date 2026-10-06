@@ -1,0 +1,218 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-6-sequence",
+  "description": "Check 6: run.started has sequence 1 and every later event has lastSequence + 1; a gap, a repeat, or zero fails with event.out-of-order and the next in-order event is still accepted.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-6-sequence",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "2",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_6", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "0",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_6", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_6", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_2a884b3ca9e33f4aecdd75d07d505ca1",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_6",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:1d98b01a048df49f487f206259079d256a405f44979f478641cc9a155227c835",
+        "commands": [
+          {
+            "commandId": "cmd_b31cc75082a7ca11e672bb5c20ea02e2",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_2a884b3ca9e33f4aecdd75d07d505ca1",
+              "input": null,
+              "invocationId": "inv_2a884b3ca9e33f4aecdd75d07d505ca1",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:fd975abbbe01f3ff036ff3cd9791665be344d06b220a265ab5a36e3a98d7c30a"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "3",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "1",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "0",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_2a884b3ca9e33f4aecdd75d07d505ca1",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_6",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "note", "outcome": null, "sequence": "2"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:c2a61c5d478ed0499e11dd4dbefea68f2cd51b2471cb7054914bf979a0c1b2e8",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:9f42c881607321d399643c7d20c5a4228e5d9d68d851bfcac828c8ec624e1eda"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-2",
+        "sequence": "2",
+        "acceptedAtMs": "3000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "event.out-of-order"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-2",
+        "sequence": "3",
+        "acceptedAtMs": "3000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_2a884b3ca9e33f4aecdd75d07d505ca1",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_6",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "note", "outcome": null, "sequence": "2"},
+            {"data": null, "eventId": "sig:m-2", "name": "note", "outcome": null, "sequence": "3"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:eaf7b372c1b3a34651dae71f6a5484e90ae10f776b243b1890b07ba7a31eee10",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:09790183348b4a427e998cec5430413aedc6fd1788635f17d360887e17c85a4f"
+      }
+    }
+  ]
+}

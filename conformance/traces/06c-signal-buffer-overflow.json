@@ -1,0 +1,1392 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "signal-buffer-overflow",
+  "description": "The buffer holds 64 signals. snapshotRaw supplies the snapshot the kernel produces after 64 `noise` signals (sequences 2 to 65); the 65th signal is dropped with signal.buffer-overflow, and a later `go` signal is still taken by the parked waiter, because a signal the waiter wants never enters the buffer, so a full buffer cannot starve it.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "signal-buffer-overflow",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "gate": {"kind": "await-signal", "outcomes": {"received": "done"}, "signal": "go"},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "gate"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_signal_overflow", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_f1766391fe6c0d0df444acb07ebfbf6b",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_signal_overflow",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:b1c385b376ed7b5f9d0921d483e6e1295a424d985c99670d8fca76ee873b958c",
+        "commands": [
+          {
+            "commandId": "cmd_7cdf1ea6486a010e14b96bf53444b360",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_f1766391fe6c0d0df444acb07ebfbf6b",
+              "input": null,
+              "invocationId": "inv_f1766391fe6c0d0df444acb07ebfbf6b",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:f8d8b4ed279180023da154b0834f94a96e0292b974ad52352a777b07c93d3fe5"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:go-1",
+        "sequence": "66",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "go"}
+      },
+      "snapshotRaw": "{\"activations\":1,\"format\":\"runspore.state/0.1\",\"input\":null,\"invocation\":{\"actionId\":\"work\",\"activationId\":\"work/1\",\"attempt\":1,\"inputDigest\":\"sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0\",\"invocationId\":\"inv_f1766391fe6c0d0df444acb07ebfbf6b\",\"nodeId\":\"work\",\"state\":\"scheduled\"},\"lastAcceptedAtMs\":\"1064\",\"lastSequence\":\"65\",\"nodes\":{},\"position\":{\"activationId\":\"work/1\",\"nodeId\":\"work\",\"visit\":1},\"result\":null,\"runId\":\"run_signal_overflow\",\"semantics\":\"0.1\",\"signals\":[{\"data\":null,\"eventId\":\"sig:n-1\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"2\"},{\"data\":null,\"eventId\":\"sig:n-2\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"3\"},{\"data\":null,\"eventId\":\"sig:n-3\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"4\"},{\"data\":null,\"eventId\":\"sig:n-4\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"5\"},{\"data\":null,\"eventId\":\"sig:n-5\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"6\"},{\"data\":null,\"eventId\":\"sig:n-6\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"7\"},{\"data\":null,\"eventId\":\"sig:n-7\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"8\"},{\"data\":null,\"eventId\":\"sig:n-8\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"9\"},{\"data\":null,\"eventId\":\"sig:n-9\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"10\"},{\"data\":null,\"eventId\":\"sig:n-10\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"11\"},{\"data\":null,\"eventId\":\"sig:n-11\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"12\"},{\"data\":null,\"eventId\":\"sig:n-12\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"13\"},{\"data\":null,\"eventId\":\"sig:n-13\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"14\"},{\"data\":null,\"eventId\":\"sig:n-14\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"15\"},{\"data\":null,\"eventId\":\"sig:n-15\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"16\"},{\"data\":null,\"eventId\":\"sig:n-16\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"17\"},{\"data\":null,\"eventId\":\"sig:n-17\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"18\"},{\"data\":null,\"eventId\":\"sig:n-18\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"19\"},{\"data\":null,\"eventId\":\"sig:n-19\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"20\"},{\"data\":null,\"eventId\":\"sig:n-20\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"21\"},{\"data\":null,\"eventId\":\"sig:n-21\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"22\"},{\"data\":null,\"eventId\":\"sig:n-22\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"23\"},{\"data\":null,\"eventId\":\"sig:n-23\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"24\"},{\"data\":null,\"eventId\":\"sig:n-24\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"25\"},{\"data\":null,\"eventId\":\"sig:n-25\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"26\"},{\"data\":null,\"eventId\":\"sig:n-26\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"27\"},{\"data\":null,\"eventId\":\"sig:n-27\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"28\"},{\"data\":null,\"eventId\":\"sig:n-28\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"29\"},{\"data\":null,\"eventId\":\"sig:n-29\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"30\"},{\"data\":null,\"eventId\":\"sig:n-30\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"31\"},{\"data\":null,\"eventId\":\"sig:n-31\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"32\"},{\"data\":null,\"eventId\":\"sig:n-32\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"33\"},{\"data\":null,\"eventId\":\"sig:n-33\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"34\"},{\"data\":null,\"eventId\":\"sig:n-34\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"35\"},{\"data\":null,\"eventId\":\"sig:n-35\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"36\"},{\"data\":null,\"eventId\":\"sig:n-36\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"37\"},{\"data\":null,\"eventId\":\"sig:n-37\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"38\"},{\"data\":null,\"eventId\":\"sig:n-38\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"39\"},{\"data\":null,\"eventId\":\"sig:n-39\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"40\"},{\"data\":null,\"eventId\":\"sig:n-40\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"41\"},{\"data\":null,\"eventId\":\"sig:n-41\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"42\"},{\"data\":null,\"eventId\":\"sig:n-42\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"43\"},{\"data\":null,\"eventId\":\"sig:n-43\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"44\"},{\"data\":null,\"eventId\":\"sig:n-44\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"45\"},{\"data\":null,\"eventId\":\"sig:n-45\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"46\"},{\"data\":null,\"eventId\":\"sig:n-46\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"47\"},{\"data\":null,\"eventId\":\"sig:n-47\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"48\"},{\"data\":null,\"eventId\":\"sig:n-48\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"49\"},{\"data\":null,\"eventId\":\"sig:n-49\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"50\"},{\"data\":null,\"eventId\":\"sig:n-50\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"51\"},{\"data\":null,\"eventId\":\"sig:n-51\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"52\"},{\"data\":null,\"eventId\":\"sig:n-52\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"53\"},{\"data\":null,\"eventId\":\"sig:n-53\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"54\"},{\"data\":null,\"eventId\":\"sig:n-54\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"55\"},{\"data\":null,\"eventId\":\"sig:n-55\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"56\"},{\"data\":null,\"eventId\":\"sig:n-56\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"57\"},{\"data\":null,\"eventId\":\"sig:n-57\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"58\"},{\"data\":null,\"eventId\":\"sig:n-58\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"59\"},{\"data\":null,\"eventId\":\"sig:n-59\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"60\"},{\"data\":null,\"eventId\":\"sig:n-60\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"61\"},{\"data\":null,\"eventId\":\"sig:n-61\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"62\"},{\"data\":null,\"eventId\":\"sig:n-62\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"63\"},{\"data\":null,\"eventId\":\"sig:n-63\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"64\"},{\"data\":null,\"eventId\":\"sig:n-64\",\"name\":\"noise\",\"outcome\":null,\"sequence\":\"65\"}],\"status\":\"running\",\"tenant\":\"default\",\"visits\":{\"work\":1}}",
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_f1766391fe6c0d0df444acb07ebfbf6b",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "66",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_signal_overflow",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:n-1", "name": "noise", "outcome": null, "sequence": "2"},
+            {"data": null, "eventId": "sig:n-2", "name": "noise", "outcome": null, "sequence": "3"},
+            {"data": null, "eventId": "sig:n-3", "name": "noise", "outcome": null, "sequence": "4"},
+            {"data": null, "eventId": "sig:n-4", "name": "noise", "outcome": null, "sequence": "5"},
+            {"data": null, "eventId": "sig:n-5", "name": "noise", "outcome": null, "sequence": "6"},
+            {"data": null, "eventId": "sig:n-6", "name": "noise", "outcome": null, "sequence": "7"},
+            {"data": null, "eventId": "sig:n-7", "name": "noise", "outcome": null, "sequence": "8"},
+            {"data": null, "eventId": "sig:n-8", "name": "noise", "outcome": null, "sequence": "9"},
+            {
+              "data": null,
+              "eventId": "sig:n-9",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "10"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-10",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "11"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-11",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "12"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-12",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "13"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-13",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "14"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-14",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "15"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-15",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "16"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-16",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "17"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-17",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "18"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-18",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "19"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-19",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "20"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-20",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "21"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-21",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "22"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-22",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "23"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-23",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "24"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-24",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "25"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-25",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "26"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-26",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "27"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-27",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "28"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-28",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "29"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-29",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "30"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-30",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "31"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-31",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "32"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-32",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "33"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-33",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "34"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-34",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "35"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-35",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "36"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-36",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "37"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-37",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "38"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-38",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "39"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-39",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "40"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-40",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "41"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-41",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "42"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-42",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "43"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-43",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "44"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-44",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "45"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-45",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "46"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-46",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "47"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-47",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "48"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-48",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "49"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-49",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "50"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-50",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "51"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-51",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "52"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-52",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "53"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-53",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "54"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-54",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "55"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-55",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "56"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-56",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "57"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-57",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "58"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-58",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "59"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-59",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "60"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-60",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "61"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-61",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "62"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-62",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "63"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-63",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "64"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-64",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "65"
+            }
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:97401017a1d0a32c1fb14973e0ff64c82fe9b5e2c791764b03211907ea70c73e",
+        "commands": [],
+        "diagnostics": [
+          {"code": "signal.buffer-overflow", "nodeId": null, "details": {"eventId": "sig:go-1"}}
+        ],
+        "decisionDigest": "sha256:829027e141e732015527f8cf0655d8296cc6593f322f261c8d74df65dcdfb0ff"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_f1766391fe6c0d0df444acb07ebfbf6b.1",
+        "sequence": "67",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_f1766391fe6c0d0df444acb07ebfbf6b.1",
+          "invocationId": "inv_f1766391fe6c0d0df444acb07ebfbf6b",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "67",
+          "nodes": {"work": {"outcome": "ok", "output": null, "visit": 1}},
+          "position": {"activationId": "gate/1", "nodeId": "gate", "visit": 1},
+          "result": null,
+          "runId": "run_signal_overflow",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:n-1", "name": "noise", "outcome": null, "sequence": "2"},
+            {"data": null, "eventId": "sig:n-2", "name": "noise", "outcome": null, "sequence": "3"},
+            {"data": null, "eventId": "sig:n-3", "name": "noise", "outcome": null, "sequence": "4"},
+            {"data": null, "eventId": "sig:n-4", "name": "noise", "outcome": null, "sequence": "5"},
+            {"data": null, "eventId": "sig:n-5", "name": "noise", "outcome": null, "sequence": "6"},
+            {"data": null, "eventId": "sig:n-6", "name": "noise", "outcome": null, "sequence": "7"},
+            {"data": null, "eventId": "sig:n-7", "name": "noise", "outcome": null, "sequence": "8"},
+            {"data": null, "eventId": "sig:n-8", "name": "noise", "outcome": null, "sequence": "9"},
+            {
+              "data": null,
+              "eventId": "sig:n-9",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "10"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-10",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "11"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-11",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "12"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-12",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "13"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-13",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "14"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-14",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "15"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-15",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "16"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-16",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "17"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-17",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "18"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-18",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "19"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-19",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "20"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-20",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "21"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-21",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "22"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-22",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "23"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-23",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "24"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-24",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "25"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-25",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "26"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-26",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "27"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-27",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "28"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-28",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "29"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-29",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "30"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-30",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "31"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-31",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "32"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-32",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "33"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-33",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "34"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-34",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "35"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-35",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "36"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-36",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "37"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-37",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "38"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-38",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "39"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-39",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "40"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-40",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "41"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-41",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "42"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-42",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "43"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-43",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "44"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-44",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "45"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-45",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "46"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-46",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "47"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-47",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "48"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-48",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "49"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-49",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "50"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-50",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "51"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-51",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "52"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-52",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "53"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-53",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "54"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-54",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "55"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-55",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "56"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-56",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "57"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-57",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "58"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-58",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "59"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-59",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "60"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-60",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "61"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-61",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "62"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-62",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "63"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-63",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "64"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-64",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "65"
+            }
+          ],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"gate": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:a7d3b6d7919eec5e82cd1528afcbf46b7ce5de98a1611d1ca1fcc32b1150e661",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:2a5611bbe66d392ca5e2cd11bb29d1b461e00fa4331169cba217a2fa9da1aa78"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:go-2",
+        "sequence": "68",
+        "acceptedAtMs": "4000",
+        "kind": "signal.received",
+        "payload": {"name": "go"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "4000",
+          "lastSequence": "68",
+          "nodes": {
+            "gate": {"outcome": "received", "output": null, "visit": 1},
+            "work": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": null,
+          "result": {"output": null},
+          "runId": "run_signal_overflow",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:n-1", "name": "noise", "outcome": null, "sequence": "2"},
+            {"data": null, "eventId": "sig:n-2", "name": "noise", "outcome": null, "sequence": "3"},
+            {"data": null, "eventId": "sig:n-3", "name": "noise", "outcome": null, "sequence": "4"},
+            {"data": null, "eventId": "sig:n-4", "name": "noise", "outcome": null, "sequence": "5"},
+            {"data": null, "eventId": "sig:n-5", "name": "noise", "outcome": null, "sequence": "6"},
+            {"data": null, "eventId": "sig:n-6", "name": "noise", "outcome": null, "sequence": "7"},
+            {"data": null, "eventId": "sig:n-7", "name": "noise", "outcome": null, "sequence": "8"},
+            {"data": null, "eventId": "sig:n-8", "name": "noise", "outcome": null, "sequence": "9"},
+            {
+              "data": null,
+              "eventId": "sig:n-9",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "10"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-10",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "11"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-11",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "12"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-12",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "13"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-13",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "14"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-14",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "15"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-15",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "16"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-16",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "17"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-17",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "18"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-18",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "19"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-19",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "20"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-20",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "21"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-21",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "22"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-22",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "23"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-23",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "24"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-24",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "25"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-25",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "26"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-26",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "27"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-27",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "28"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-28",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "29"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-29",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "30"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-30",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "31"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-31",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "32"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-32",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "33"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-33",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "34"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-34",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "35"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-35",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "36"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-36",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "37"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-37",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "38"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-38",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "39"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-39",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "40"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-40",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "41"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-41",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "42"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-42",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "43"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-43",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "44"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-44",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "45"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-45",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "46"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-46",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "47"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-47",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "48"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-48",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "49"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-49",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "50"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-50",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "51"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-51",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "52"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-52",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "53"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-53",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "54"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-54",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "55"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-55",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "56"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-56",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "57"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-57",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "58"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-58",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "59"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-59",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "60"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-60",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "61"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-61",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "62"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-62",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "63"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-63",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "64"
+            },
+            {
+              "data": null,
+              "eventId": "sig:n-64",
+              "name": "noise",
+              "outcome": null,
+              "sequence": "65"
+            }
+          ],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "gate": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:7bdece2e11ba04fcea4243c50b8fbc285f637456dfc291f273544dc4bd3f5ae5",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:9c1162b4850315ad312d13194ead96a0c3a9cb71f01bd716700b73e08663d9bc"
+      }
+    }
+  ]
+}

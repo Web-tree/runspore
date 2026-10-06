@@ -1,0 +1,133 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "budget-value-depth",
+  "description": "Canonical JSON nests at most 32 levels. An activity output 30 levels deep is a canonical payload, but a node result sits three levels down in the snapshot, so recording it fails (resource-limit / budget.value-depth, a code the kernel defines because spec/kernel.md names none) and commits nothing; the same result with 29 levels reuses sequence 2 and is accepted.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "budget-value-depth",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_budget_depth", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_cf6393ddf0c916bdbb2cb8463236cda8",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_budget_depth",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:806fe0e638ef13b12509e4ecfd7497ac4e8e549898b3f60ab444ff094de1e6e6",
+        "commands": [
+          {
+            "commandId": "cmd_0794ab233cd4fda8cfdda2de7a13014a",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_cf6393ddf0c916bdbb2cb8463236cda8",
+              "input": null,
+              "invocationId": "inv_cf6393ddf0c916bdbb2cb8463236cda8",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:84150f9dbe38f8ac027894a8f38d8b0778be62ec1d1325318d079b8c55636493"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_cf6393ddf0c916bdbb2cb8463236cda8.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_cf6393ddf0c916bdbb2cb8463236cda8.1",
+          "invocationId": "inv_cf6393ddf0c916bdbb2cb8463236cda8",
+          "output": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],
+          "status": "success"
+        }
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.value-depth"}}
+    },
+    {
+      "event": {
+        "eventId": "att:inv_cf6393ddf0c916bdbb2cb8463236cda8.1",
+        "sequence": "2",
+        "acceptedAtMs": "2100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_cf6393ddf0c916bdbb2cb8463236cda8.1",
+          "invocationId": "inv_cf6393ddf0c916bdbb2cb8463236cda8",
+          "output": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]],
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2100",
+          "lastSequence": "2",
+          "nodes": {
+            "work": {
+              "outcome": "ok",
+              "output": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]],
+              "visit": 1
+            }
+          },
+          "position": null,
+          "result": {"output": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]},
+          "runId": "run_budget_depth",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:55c4a32a15c26aa97f562c452da64ea4b6f11cacf99e087cfc9ad2abb607ce78",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:1791ce32819107ffa93fadaa87a9ee857e32167eb12cbde7b50eeabc671a8eb0"
+      }
+    }
+  ]
+}

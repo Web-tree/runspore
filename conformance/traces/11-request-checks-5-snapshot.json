@@ -1,0 +1,201 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-5-snapshot",
+  "description": "Check 5: an event other than run.started needs a snapshot (state.missing); run.started must not have one (state.unexpected-start); the snapshot must be a canonical state (state.invalid) of this format and semantics (version.state-format, reported even when the newer document has members this version does not know); and it must not contradict itself (state.invalid). snapshotRaw replaces the threaded snapshot for one step.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-5-snapshot",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "sig:m-0",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "state.missing"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_5", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_420dafa76792bf3b2b99b031ffb3d798",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_5",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:c60900083bf3534df553ac11ce816ffc77ce5a9ca1121061241cd72c21bdbfe5",
+        "commands": [
+          {
+            "commandId": "cmd_be949622f1088214e74afcced5c28feb",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_420dafa76792bf3b2b99b031ffb3d798",
+              "input": null,
+              "invocationId": "inv_420dafa76792bf3b2b99b031ffb3d798",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:6af3c9deacb6cd9826be45f01f412ce4471fc0c11eae777edc8e4253d9e91128"
+      }
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_5", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "state.unexpected-start"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "snapshotRaw": "{}",
+      "expect": {"failure": {"kind": "invalid-input", "code": "state.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "snapshotRaw": "{\"activations\": 1,\"format\":\"runspore.state/0.1\",\"input\":null,\"invocation\":{\"actionId\":\"work\",\"activationId\":\"work/1\",\"attempt\":1,\"inputDigest\":\"sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0\",\"invocationId\":\"inv_420dafa76792bf3b2b99b031ffb3d798\",\"nodeId\":\"work\",\"state\":\"scheduled\"},\"lastAcceptedAtMs\":\"1000\",\"lastSequence\":\"1\",\"nodes\":{},\"position\":{\"activationId\":\"work/1\",\"nodeId\":\"work\",\"visit\":1},\"result\":null,\"runId\":\"run_check_5\",\"semantics\":\"0.1\",\"signals\":[],\"status\":\"running\",\"tenant\":\"default\",\"visits\":{\"work\":1}}",
+      "expect": {"failure": {"kind": "invalid-input", "code": "state.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "snapshotRaw": "{\"activations\":1,\"format\":\"runspore.state/0.2\",\"input\":null,\"invocation\":{\"actionId\":\"work\",\"activationId\":\"work/1\",\"attempt\":1,\"inputDigest\":\"sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0\",\"invocationId\":\"inv_420dafa76792bf3b2b99b031ffb3d798\",\"nodeId\":\"work\",\"state\":\"scheduled\"},\"lastAcceptedAtMs\":\"1000\",\"lastSequence\":\"1\",\"nodes\":{},\"position\":{\"activationId\":\"work/1\",\"nodeId\":\"work\",\"visit\":1},\"result\":null,\"runId\":\"run_check_5\",\"semantics\":\"0.1\",\"signals\":[],\"status\":\"running\",\"tenant\":\"default\",\"visits\":{\"work\":1}}",
+      "expect": {"failure": {"kind": "incompatible-version", "code": "version.state-format"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "snapshotRaw": "{\"activations\":1,\"cancellation\":null,\"format\":\"runspore.state/0.1\",\"input\":null,\"invocation\":{\"actionId\":\"work\",\"activationId\":\"work/1\",\"attempt\":1,\"inputDigest\":\"sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0\",\"invocationId\":\"inv_420dafa76792bf3b2b99b031ffb3d798\",\"nodeId\":\"work\",\"state\":\"scheduled\"},\"lastAcceptedAtMs\":\"1000\",\"lastSequence\":\"1\",\"nodes\":{},\"position\":{\"activationId\":\"work/1\",\"nodeId\":\"work\",\"visit\":1},\"result\":null,\"runId\":\"run_check_5\",\"semantics\":\"0.2\",\"signals\":[],\"status\":\"running\",\"tenant\":\"default\",\"visits\":{\"work\":1}}",
+      "expect": {"failure": {"kind": "incompatible-version", "code": "version.state-format"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "snapshotRaw": "{\"activations\":1,\"cancellation\":null,\"format\":\"runspore.state/0.1\",\"input\":null,\"invocation\":{\"actionId\":\"work\",\"activationId\":\"work/1\",\"attempt\":1,\"inputDigest\":\"sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0\",\"invocationId\":\"inv_420dafa76792bf3b2b99b031ffb3d798\",\"nodeId\":\"work\",\"state\":\"scheduled\"},\"lastAcceptedAtMs\":\"1000\",\"lastSequence\":\"1\",\"nodes\":{},\"position\":{\"activationId\":\"work/1\",\"nodeId\":\"work\",\"visit\":1},\"result\":null,\"runId\":\"run_check_5\",\"semantics\":\"0.1\",\"signals\":[],\"status\":\"running\",\"tenant\":\"default\",\"visits\":{\"work\":1}}",
+      "expect": {"failure": {"kind": "invalid-input", "code": "state.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "snapshotRaw": "{\"activations\":1,\"format\":\"runspore.state/0.1\",\"input\":null,\"invocation\":{\"actionId\":\"work\",\"activationId\":\"work/1\",\"attempt\":1,\"inputDigest\":\"sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0\",\"invocationId\":\"inv_420dafa76792bf3b2b99b031ffb3d798\",\"nodeId\":\"work\",\"state\":\"scheduled\"},\"lastAcceptedAtMs\":\"1000\",\"lastSequence\":\"1\",\"nodes\":{},\"position\":{\"activationId\":\"work/1\",\"nodeId\":\"work\",\"visit\":1},\"result\":null,\"runId\":\"run_check_5\",\"semantics\":\"0.1\",\"signals\":[],\"status\":\"waiting\",\"tenant\":\"default\",\"visits\":{\"work\":1}}",
+      "expect": {"failure": {"kind": "invalid-input", "code": "state.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_420dafa76792bf3b2b99b031ffb3d798",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_5",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "note", "outcome": null, "sequence": "2"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:288f5b393951b83899ab705995dea6549445284a91bdc1d527d971449e60fb1a",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:2f3c7010f9816ff99118f15762d00d63ee6354b862ce2243604f08575825d2fc"
+      }
+    }
+  ]
+}

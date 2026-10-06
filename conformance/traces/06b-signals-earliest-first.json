@@ -1,0 +1,391 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "signals-earliest-first",
+  "description": "Five signals are buffered before any waiter exists. Two waiters on the same name then consume in acceptance order: an unrouted outcome is dropped with a diagnostic, each waiter takes the earliest remaining match, and unrelated or surplus signals stay buffered.",
+  "workflow": {
+    "actions": {"open": {"argv": ["open"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "signals-earliest-first",
+    "nodes": {
+      "done": {
+        "kind": "complete",
+        "output": {"first": {"$get": ["nodes", "first"]}, "second": {"$get": ["nodes", "second"]}}
+      },
+      "first": {
+        "kind": "await-signal",
+        "outcomes": {"no": "second", "yes": "second"},
+        "signal": "vote"
+      },
+      "open": {"action": "open", "kind": "activity", "outcomes": {"ok": "first"}},
+      "second": {
+        "kind": "await-signal",
+        "outcomes": {"no": "done", "yes": "done"},
+        "signal": "vote"
+      }
+    },
+    "start": "open"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_signal_order", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "open",
+            "activationId": "open/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+            "nodeId": "open",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "open/1", "nodeId": "open", "visit": 1},
+          "result": null,
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"open": 1}
+        },
+        "snapshotDigest": "sha256:7b44607066426d5c7b7145ba6b0d27ef19767f1cfe946dcf9f95b2cb0af057d6",
+        "commands": [
+          {
+            "commandId": "cmd_83110e064f195129dbeab1f5117b63ed",
+            "activationId": "open/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "open",
+              "activationId": "open/1",
+              "attempt": 1,
+              "effectKey": "inv_aea41cce583c3044230a2f42f195ba50",
+              "input": null,
+              "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+              "nodeId": "open",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:e11751584447d673527978656cedf4fb1b030c8130a53c0692460f492b779d4b"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "signal.received",
+        "payload": {"data": 0, "name": "vote", "outcome": "abstain"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "open",
+            "activationId": "open/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+            "nodeId": "open",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "open/1", "nodeId": "open", "visit": 1},
+          "result": null,
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": 0,
+              "eventId": "sig:m-1",
+              "name": "vote",
+              "outcome": "abstain",
+              "sequence": "2"
+            }
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"open": 1}
+        },
+        "snapshotDigest": "sha256:4418b9f94765fd88657f2bf300e1a43d4de0fcd08b0ce1a6f17725854a07cac8",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:dc80d5547da1a2c5cdb0a5871c09e617aeb3140188740103f0b22be65917e05c"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-2",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "signal.received",
+        "payload": {"data": 1, "name": "vote", "outcome": "yes"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "open",
+            "activationId": "open/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+            "nodeId": "open",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "open/1", "nodeId": "open", "visit": 1},
+          "result": null,
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": 0,
+              "eventId": "sig:m-1",
+              "name": "vote",
+              "outcome": "abstain",
+              "sequence": "2"
+            },
+            {"data": 1, "eventId": "sig:m-2", "name": "vote", "outcome": "yes", "sequence": "3"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"open": 1}
+        },
+        "snapshotDigest": "sha256:11301a5d7b1ef7c812b7852a67ae3d162f611e9241750538cbf31c783d2cf6c5",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:358b86e89ae18463d43111062610518b1d764e53f539d7100088e9685d656b63"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-3",
+        "sequence": "4",
+        "acceptedAtMs": "1300",
+        "kind": "signal.received",
+        "payload": {"data": "fyi", "name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "open",
+            "activationId": "open/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+            "nodeId": "open",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1300",
+          "lastSequence": "4",
+          "nodes": {},
+          "position": {"activationId": "open/1", "nodeId": "open", "visit": 1},
+          "result": null,
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": 0,
+              "eventId": "sig:m-1",
+              "name": "vote",
+              "outcome": "abstain",
+              "sequence": "2"
+            },
+            {"data": 1, "eventId": "sig:m-2", "name": "vote", "outcome": "yes", "sequence": "3"},
+            {"data": "fyi", "eventId": "sig:m-3", "name": "note", "outcome": null, "sequence": "4"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"open": 1}
+        },
+        "snapshotDigest": "sha256:47fffdb796312a437d32d3b08fca0c5a70ecf90add8b7cd4e7ee0730beec2e6a",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:7dc532bb63356382bdfcf2036e5923e32e86252c8471df5adea3d7079569319e"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-4",
+        "sequence": "5",
+        "acceptedAtMs": "1400",
+        "kind": "signal.received",
+        "payload": {"data": 2, "name": "vote", "outcome": "no"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "open",
+            "activationId": "open/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+            "nodeId": "open",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1400",
+          "lastSequence": "5",
+          "nodes": {},
+          "position": {"activationId": "open/1", "nodeId": "open", "visit": 1},
+          "result": null,
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": 0,
+              "eventId": "sig:m-1",
+              "name": "vote",
+              "outcome": "abstain",
+              "sequence": "2"
+            },
+            {"data": 1, "eventId": "sig:m-2", "name": "vote", "outcome": "yes", "sequence": "3"},
+            {"data": "fyi", "eventId": "sig:m-3", "name": "note", "outcome": null, "sequence": "4"},
+            {"data": 2, "eventId": "sig:m-4", "name": "vote", "outcome": "no", "sequence": "5"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"open": 1}
+        },
+        "snapshotDigest": "sha256:d104b3c5017cb641018dfb609ffd0c3156eec37ad66255c2d3a9ad34cb194f83",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:5e3b40a7236759c5fb2d67ed3f9ec17497a9605456e22571e994024d2a25981b"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-5",
+        "sequence": "6",
+        "acceptedAtMs": "1500",
+        "kind": "signal.received",
+        "payload": {"data": 3, "name": "vote", "outcome": "yes"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "open",
+            "activationId": "open/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+            "nodeId": "open",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1500",
+          "lastSequence": "6",
+          "nodes": {},
+          "position": {"activationId": "open/1", "nodeId": "open", "visit": 1},
+          "result": null,
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": 0,
+              "eventId": "sig:m-1",
+              "name": "vote",
+              "outcome": "abstain",
+              "sequence": "2"
+            },
+            {"data": 1, "eventId": "sig:m-2", "name": "vote", "outcome": "yes", "sequence": "3"},
+            {"data": "fyi", "eventId": "sig:m-3", "name": "note", "outcome": null, "sequence": "4"},
+            {"data": 2, "eventId": "sig:m-4", "name": "vote", "outcome": "no", "sequence": "5"},
+            {"data": 3, "eventId": "sig:m-5", "name": "vote", "outcome": "yes", "sequence": "6"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"open": 1}
+        },
+        "snapshotDigest": "sha256:1da7fad2e68a36f330e532e9970cafd20ce9ea80aef914b33a785e956e0df6c5",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:39536519a71fc8c3afbc95d44112c7c9ca5b4a0a811f3aab0fa100b36f971fd4"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_aea41cce583c3044230a2f42f195ba50.1",
+        "sequence": "7",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_aea41cce583c3044230a2f42f195ba50.1",
+          "invocationId": "inv_aea41cce583c3044230a2f42f195ba50",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 4,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "7",
+          "nodes": {
+            "first": {"outcome": "yes", "output": 1, "visit": 1},
+            "open": {"outcome": "ok", "output": null, "visit": 1},
+            "second": {"outcome": "no", "output": 2, "visit": 1}
+          },
+          "position": null,
+          "result": {
+            "output": {
+              "first": {"outcome": "yes", "output": 1, "visit": 1},
+              "second": {"outcome": "no", "output": 2, "visit": 1}
+            }
+          },
+          "runId": "run_signal_order",
+          "semantics": "0.1",
+          "signals": [
+            {"data": "fyi", "eventId": "sig:m-3", "name": "note", "outcome": null, "sequence": "4"},
+            {"data": 3, "eventId": "sig:m-5", "name": "vote", "outcome": "yes", "sequence": "6"}
+          ],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "first": 1, "open": 1, "second": 1}
+        },
+        "snapshotDigest": "sha256:944d92b03d8e10e1a59f26e24e0155bf66f1fef6a565b5ca9dc1ab51d3636738",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "signal.outcome-unrouted",
+            "nodeId": "first",
+            "details": {"eventId": "sig:m-1", "outcome": "abstain"}
+          }
+        ],
+        "decisionDigest": "sha256:9bac089917a059148db25fabffd0bcb168d7e2e7f08360f4055e5585d2443e2f"
+      }
+    }
+  ]
+}

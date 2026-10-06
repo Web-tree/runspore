@@ -229,10 +229,10 @@ fn the_buffer_holds_sixty_four_signals() {
     assert_eq!(run.state(), expected);
 }
 
-/// The overflow rule comes before consumption, so a full buffer drops even a
-/// signal the parked waiter would have taken.
+/// A signal the parked waiter waits for is taken directly, so a buffer full of
+/// unrelated signals never starves it; an unrelated one is still dropped.
 #[test]
-fn a_full_buffer_drops_a_signal_the_waiter_wants() {
+fn a_full_buffer_never_starves_the_waiter() {
     let mut run = Run::started(&gated(), json!(null));
     for index in 0..MAX_BUFFERED_SIGNALS {
         run.signal("other", None, json!(index), 1_100);
@@ -240,15 +240,28 @@ fn a_full_buffer_drops_a_signal_the_waiter_wants() {
     run.succeed("ok", json!(null), 2_000);
     assert_eq!(run.status(), "waiting");
 
-    let decision = run.signal("go", Some("a"), json!("dropped"), 2_100);
+    let decision = run.signal("go", Some("zzz"), json!("unrouted"), 2_100);
+    assert_eq!(
+        diagnostics(&decision),
+        json!([{"code": code::SIGNAL_OUTCOME_UNROUTED, "nodeId": "gate1",
+                "details": {"eventId": "e67", "outcome": "zzz"}}])
+    );
+    assert_eq!(run.state()["position"]["nodeId"], json!("gate1"));
+    assert_eq!(buffered(&run).len(), 64);
+
+    let decision = run.signal("go", Some("a"), json!("taken"), 2_200);
+    assert!(decision.diagnostics.is_empty());
+    assert_eq!(run.status(), "waiting");
+    assert_eq!(run.state()["position"]["nodeId"], json!("gate2"));
+    assert_eq!(run.state()["nodes"]["gate1"]["output"], json!("taken"));
+    assert_eq!(buffered(&run).len(), 64);
+
+    let decision = run.signal("other", None, json!("dropped"), 2_300);
     assert_eq!(
         diagnostics(&decision),
         json!([{"code": code::SIGNAL_BUFFER_OVERFLOW, "nodeId": null,
-                "details": {"eventId": "e67"}}])
+                "details": {"eventId": "e69"}}])
     );
-    assert_eq!(run.status(), "waiting");
-    assert_eq!(run.state()["position"]["nodeId"], json!("gate1"));
-    assert_eq!(buffered(&run).len(), 64);
 }
 
 #[test]
