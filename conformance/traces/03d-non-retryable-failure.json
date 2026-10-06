@@ -1,0 +1,106 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "non-retryable-failure",
+  "description": "A failure with retryable false on attempt 1 of 3 skips the retry budget; the failed route enters a fail node that ends the run.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "non-retryable-failure",
+    "start": "work",
+    "actions": {
+      "work": {
+        "kind": "command", "argv": ["work"], "effect": "idempotent",
+        "retry": {"maxAttempts": 3, "backoffMs": "100"}
+      }
+    },
+    "nodes": {
+      "work": {
+        "kind": "activity", "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "outcomes": {"ok": "done", "failed": "broken"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "broken": {"kind": "fail", "error": {"code": "work.broken", "message": "work cannot be done"}}
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_retry_d", "input": {"job": "j-4"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_d",
+          "status": "running",
+          "input": {"job": "j-4"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_5082fdc76d5213802472320db41a8a40", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:1e928cbe36e45df0f988ad5723bab46f1eee9910cd24c973531d7d3e7c28a296"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:b08599752068bdc7779e2dcc0dc4a4d003279600b3b02949fcb7349f8b9b8beb",
+        "commands": [
+          {
+            "commandId": "cmd_cb9e167dd21da75b86aaa0cf05d7699c", "activationId": "work/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_5082fdc76d5213802472320db41a8a40", "activationId": "work/1",
+              "nodeId": "work", "actionId": "work", "effectKey": "inv_5082fdc76d5213802472320db41a8a40",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {"job": "j-4"}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:afa569cc281a963418555be9ef4b6027b58da56ed59b357feb2f74f36c90d1ad"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_5082fdc76d5213802472320db41a8a40.1", "sequence": "2", "acceptedAtMs": "1200", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_5082fdc76d5213802472320db41a8a40", "attemptId": "inv_5082fdc76d5213802472320db41a8a40.1", "attempt": 1,
+          "status": "failure", "retryable": false,
+          "error": {"code": "input.rejected", "message": "job is malformed"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_d",
+          "status": "failed",
+          "input": {"job": "j-4"},
+          "nodes": {
+            "work": {
+              "visit": 1, "outcome": "failed",
+              "output": {
+                "error": {"code": "input.rejected", "message": "job is malformed", "nodeId": "work", "details": null}
+              }
+            }
+          },
+          "visits": {"work": 1, "broken": 1},
+          "activations": 2,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {
+            "error": {"code": "work.broken", "message": "work cannot be done", "nodeId": "broken", "details": null}
+          },
+          "lastSequence": "2", "lastAcceptedAtMs": "1200"
+        },
+        "snapshotDigest": "sha256:bd7b87bc8eb4c696947b377f9f1a919ecd41624be9c7aebb478b80ad3bc0c27f",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:06de19addc984748f6a8202133d4b3d39478eaade9914ffa4464d47237ed9985"
+      }
+    }
+  ]
+}

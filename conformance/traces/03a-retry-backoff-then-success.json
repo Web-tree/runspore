@@ -1,0 +1,221 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "retry-backoff-then-success",
+  "description": "Three retryable attempts (failure, expired, failure) back off 500, 1000, then the 1500 cap from logical time; attempt 4 succeeds.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "retry-backoff-then-success",
+    "start": "work",
+    "actions": {
+      "work": {
+        "kind": "command", "argv": ["work"], "effect": "idempotent",
+        "retry": {"maxAttempts": 4, "backoffMs": "500", "maxBackoffMs": "1500"}
+      }
+    },
+    "nodes": {
+      "work": {
+        "kind": "activity", "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "outcomes": {"ok": "done"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}}
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_retry_a", "input": {"job": "j-1"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_a",
+          "status": "running",
+          "input": {"job": "j-1"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:0b507391c7f3a358d7199088695c99e6f8b633883e8fdda1e0fe6d9ffa8feb9b",
+        "commands": [
+          {
+            "commandId": "cmd_9a6af8cab27930865497c8818c6a5d77", "activationId": "work/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "activationId": "work/1",
+              "nodeId": "work", "actionId": "work", "effectKey": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {"job": "j-1"}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:bc0021600841520f30e75e31814c63de8082e0e9394a611555266ece6cdbb837"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.1", "sequence": "2", "acceptedAtMs": "2000", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attemptId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.1", "attempt": 1,
+          "status": "failure",
+          "error": {"code": "net.timeout", "message": "upstream timed out"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_a",
+          "status": "running",
+          "input": {"job": "j-1"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 2, "state": "scheduled",
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "2", "lastAcceptedAtMs": "2000"
+        },
+        "snapshotDigest": "sha256:731c388dca94ef5d14777163968a6cdf0a8df025a8b43eb130a7774c78ae8a76",
+        "commands": [
+          {
+            "commandId": "cmd_945ba7460fd9ed68d7a4e7eac5ed28db", "activationId": "work/1", "kind": "activity.retry",
+            "payload": {"invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attempt": 2, "notBeforeMs": "2500"}
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:e977ba89c23832146777373b4d2af3234043778f5f3c96c7c12cee579e54e543"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.2", "sequence": "3", "acceptedAtMs": "1800", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attemptId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.2", "attempt": 2,
+          "status": "expired",
+          "outcome": null, "output": null, "error": null, "retryable": true
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_a",
+          "status": "running",
+          "input": {"job": "j-1"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 3, "state": "scheduled",
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "3", "lastAcceptedAtMs": "2000"
+        },
+        "snapshotDigest": "sha256:bc829f0c7958ff7efa1109670bfdd1a666afe824dc900767cebecb1f948b168b",
+        "commands": [
+          {
+            "commandId": "cmd_b58603de2e3eba1b0d204a23508ba2f5", "activationId": "work/1", "kind": "activity.retry",
+            "payload": {"invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attempt": 3, "notBeforeMs": "3000"}
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 3}}
+        ],
+        "decisionDigest": "sha256:44ada90b3941cc8b46c3a719685bd9427f686c7fb48604f799fd35d6c7e05527"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.3", "sequence": "4", "acceptedAtMs": "9000", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attemptId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.3", "attempt": 3,
+          "status": "failure", "retryable": true,
+          "error": {"code": "net.reset", "message": "connection reset"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_a",
+          "status": "running",
+          "input": {"job": "j-1"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 4, "state": "scheduled",
+            "inputDigest": "sha256:936a484020df8bb5e9531e7a63be4179e4ccb3992773431072f5da1ee2c252e6"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "4", "lastAcceptedAtMs": "9000"
+        },
+        "snapshotDigest": "sha256:e4df3825ae2ff896270a27db09e37cdb0cbfbee2204a99862a7991935220b330",
+        "commands": [
+          {
+            "commandId": "cmd_d4f638b868cb7db3af7189b6d9fd3693", "activationId": "work/1", "kind": "activity.retry",
+            "payload": {"invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attempt": 4, "notBeforeMs": "10500"}
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 4}}
+        ],
+        "decisionDigest": "sha256:69c96fb2dd5dedd4168334e577495466bad7100bbd0ae2e3c957de6486bab69c"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.4", "sequence": "5", "acceptedAtMs": "11000", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7", "attemptId": "inv_f6425b1ab1a2fa195a28a5b60e2cc8a7.4", "attempt": 4,
+          "status": "success",
+          "output": {"done": true}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_a",
+          "status": "completed",
+          "input": {"job": "j-1"},
+          "nodes": {
+            "work": {"visit": 1, "outcome": "ok", "output": {"done": true}}
+          },
+          "visits": {"work": 1, "done": 1},
+          "activations": 2,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {"output": {"done": true}},
+          "lastSequence": "5", "lastAcceptedAtMs": "11000"
+        },
+        "snapshotDigest": "sha256:65f53a27bf1cfb5b167eef6af6ce0a29999ca4c1067f9c719b54461768e44e93",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:672406c91842da3759c378013e5c768b2543394a2e27a6c55428a55c4ccccc5c"
+      }
+    }
+  ]
+}

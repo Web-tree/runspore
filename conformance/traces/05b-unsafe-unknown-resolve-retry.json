@@ -1,0 +1,247 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "unsafe-unknown-resolve-retry",
+  "description": "Unknown, then expired, on an unsafe single-attempt action each pause the run; each resolve retry authorizes the next attempt at once, beyond maxAttempts.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "unsafe-unknown-resolve-retry",
+    "start": "charge",
+    "actions": {
+      "charge": {"kind": "command", "argv": ["charge"], "effect": "unsafe"}
+    },
+    "nodes": {
+      "charge": {
+        "kind": "activity", "action": "charge",
+        "input": {"amount": {"$get": ["input", "amount"]}},
+        "outcomes": {"ok": "done"}
+      },
+      "done": {"kind": "complete", "output": {"receipt": {"$get": ["nodes", "charge", "output", "receipt"]}}}
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_unsafe_b", "input": {"amount": 1200}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_b",
+          "status": "running",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:0b7e494d37681c04c7509f1ac0b36d49c878d7fa1794bf4192d1643d52160938",
+        "commands": [
+          {
+            "commandId": "cmd_42efb79756f78987a665223168a8ad31", "activationId": "charge/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "activationId": "charge/1",
+              "nodeId": "charge", "actionId": "charge", "effectKey": "inv_1b1595da3f33a7d86556025d45d556d2",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {"amount": 1200}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:cee091b7d42a9392f2c484760d1a8a353c96886da60b3ef7c3940945b7daeb09"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_1b1595da3f33a7d86556025d45d556d2.1", "sequence": "2", "acceptedAtMs": "4000", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attemptId": "inv_1b1595da3f33a7d86556025d45d556d2.1", "attempt": 1,
+          "status": "unknown",
+          "error": {"code": "host.timeout", "message": "no reply from provider"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_b",
+          "status": "needs-intervention",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "unknown",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "2", "lastAcceptedAtMs": "4000"
+        },
+        "snapshotDigest": "sha256:41528cb4e196953d2156cf3c24a509f84a252192afbaccae866095730f2480be",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.unknown", "nodeId": "charge",
+            "details": {"invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attempt": 1, "status": "unknown"}
+          }
+        ],
+        "decisionDigest": "sha256:8f2ba6f6787e18be5fd70b0ae6f76b2993684c65c2a090167c404f5a10ea23e2"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-1", "sequence": "3", "acceptedAtMs": "9000", "kind": "invocation.resolved",
+        "payload": {"invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "resolution": {"action": "retry"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_b",
+          "status": "running",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 2, "state": "scheduled",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "3", "lastAcceptedAtMs": "9000"
+        },
+        "snapshotDigest": "sha256:4835cef56e8d4051cb1a6317bc8efb75cf7abe966cde9b6418816fe029b93f63",
+        "commands": [
+          {
+            "commandId": "cmd_454054a38d745d6308a31d8c6978f339", "activationId": "charge/1", "kind": "activity.retry",
+            "payload": {"invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attempt": 2, "notBeforeMs": "9000"}
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "charge", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:3529b87b25280cc679a79e864cd2d1fac638a25dfe1c3ffcdf6472c7e28b9c7e"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_1b1595da3f33a7d86556025d45d556d2.2", "sequence": "4", "acceptedAtMs": "9500", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attemptId": "inv_1b1595da3f33a7d86556025d45d556d2.2", "attempt": 2,
+          "status": "expired",
+          "outcome": null, "output": null, "error": null, "retryable": true
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_b",
+          "status": "needs-intervention",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 2, "state": "unknown",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "4", "lastAcceptedAtMs": "9500"
+        },
+        "snapshotDigest": "sha256:4cf88671c288af55f1d62da4f91fc74a5f124cdf9e56f93dfb5d04079404f199",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.unknown", "nodeId": "charge",
+            "details": {"invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attempt": 2, "status": "expired"}
+          }
+        ],
+        "decisionDigest": "sha256:196da1b0a1904adf5c0d8614e8384105f96a9086956974c0ad6a53c4e1e0db7d"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-2", "sequence": "5", "acceptedAtMs": "12000", "kind": "invocation.resolved",
+        "payload": {"invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "resolution": {"action": "retry"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_b",
+          "status": "running",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 3, "state": "scheduled",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "5", "lastAcceptedAtMs": "12000"
+        },
+        "snapshotDigest": "sha256:46c54a1dd7c83777c2d3b0fcdfced0493c484852ff14b68222b8b47572d267c3",
+        "commands": [
+          {
+            "commandId": "cmd_331b4c70cba04c2ac0e99e8c0bc99a49", "activationId": "charge/1", "kind": "activity.retry",
+            "payload": {"invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attempt": 3, "notBeforeMs": "12000"}
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "charge", "details": {"attempt": 3}}
+        ],
+        "decisionDigest": "sha256:2ef87403100173e254f1360b9212b26d8cbd0e42dec4d7fbe77bc9899aea426b"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_1b1595da3f33a7d86556025d45d556d2.3", "sequence": "6", "acceptedAtMs": "12500", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_1b1595da3f33a7d86556025d45d556d2", "attemptId": "inv_1b1595da3f33a7d86556025d45d556d2.3", "attempt": 3,
+          "status": "success",
+          "output": {"receipt": "r-78"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_b",
+          "status": "completed",
+          "input": {"amount": 1200},
+          "nodes": {
+            "charge": {"visit": 1, "outcome": "ok", "output": {"receipt": "r-78"}}
+          },
+          "visits": {"charge": 1, "done": 1},
+          "activations": 2,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {"output": {"receipt": "r-78"}},
+          "lastSequence": "6", "lastAcceptedAtMs": "12500"
+        },
+        "snapshotDigest": "sha256:f2fc996eda3508a612833a12f7516b042c76b650a4ae71f7664fa39ede44b973",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:423c2a7a529a8b27a6d7506c2af043dbc0d9207dfce9b6b7812906a7455f82cb"
+      }
+    }
+  ]
+}
