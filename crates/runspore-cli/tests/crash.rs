@@ -24,6 +24,15 @@ const NATIVE: &[&str] = &[
     "--poll-ms",
     "20",
 ];
+/// The default Wasmtime kernel, with a lease that outlives component compilation.
+const WASMTIME: &[&str] = &[
+    "--lease-ms",
+    "3000",
+    "--heartbeat-ms",
+    "300",
+    "--poll-ms",
+    "20",
+];
 const FAILPOINTS: [&str; 19] = [
     "host.turn.after-reduce",
     "host.turn.after-commit",
@@ -432,6 +441,44 @@ fn every_failpoint_at_every_hit_recovers() {
         "no crash left deploy in doubt"
     );
     assert!(failures.is_empty(), "failed scenarios:\n{failures:#?}");
+}
+
+/// The default Wasmtime kernel: the reference run and one crash for each of three
+/// failpoints, recovered to the native kernel's final state.
+#[test]
+fn wasmtime_kernel_recovers_to_the_native_final_state() {
+    let native = reference(NATIVE);
+    let wasmtime = reference(WASMTIME);
+    assert_eq!(
+        (&wasmtime.result, &wasmtime.nodes),
+        (&native.result, &native.nodes)
+    );
+    // (failpoint, hit, stage): a turn after the first step, the unsafe deploy after its
+    // effect, the turn that accepts the approval.
+    let scenarios = [
+        ("host.turn.after-commit", 2, 0),
+        ("host.attempt.after-effect", 1, 2),
+        ("store.commit-turn.after-commit", 1, 2),
+    ];
+    let results: Vec<(&str, Option<Result<bool, String>>)> = std::thread::scope(|s| {
+        let handles: Vec<_> = scenarios
+            .iter()
+            .map(|&(name, n, stage)| {
+                let native = &native;
+                s.spawn(move || (name, failpoint_scenario(native, WASMTIME, name, stage, n)))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    println!("\nWasmtime kernel: {results:?}");
+    for (name, result) in &results {
+        match result {
+            Some(Ok(in_doubt)) => {
+                assert_eq!(*in_doubt, *name == "host.attempt.after-effect", "{name}");
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+    }
 }
 
 #[test]
