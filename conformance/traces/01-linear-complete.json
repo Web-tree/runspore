@@ -1,0 +1,175 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "linear-complete",
+  "description": "Two activities in sequence reach complete; inputs and the run output are built with $get (member, array index, run) and $literal.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "linear-complete",
+    "start": "fetch",
+    "actions": {
+      "fetch": {"kind": "command", "argv": ["fetch"], "effect": "read-only"},
+      "render": {"kind": "command", "argv": ["render"], "effect": "pure"}
+    },
+    "nodes": {
+      "fetch": {
+        "kind": "activity", "action": "fetch",
+        "input": {
+          "url": {"$get": ["input", "url"]},
+          "run": {"$get": ["run", "id"]},
+          "opts": {"$literal": {"$get": ["input", "missing"]}}
+        },
+        "outcomes": {"ok": "render"}
+      },
+      "render": {
+        "kind": "activity", "action": "render",
+        "input": {
+          "title": {"$get": ["nodes", "fetch", "output", "title"]},
+          "second": {"$get": ["nodes", "fetch", "output", "items", 1]},
+          "style": ["plain", {"$literal": 2}]
+        },
+        "outcomes": {"ok": "done"}
+      },
+      "done": {
+        "kind": "complete",
+        "output": {
+          "page": {"$get": ["nodes", "render", "output"]},
+          "source": {"$get": ["input", "url"]},
+          "tenant": {"$get": ["run", "tenant"]},
+          "fetchVisit": {"$get": ["nodes", "fetch", "visit"]}
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_linear", "input": {"url": "https://example.test/a"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_linear",
+          "status": "running",
+          "input": {"url": "https://example.test/a"},
+          "nodes": {},
+          "visits": {"fetch": 1},
+          "activations": 1,
+          "position": {"nodeId": "fetch", "activationId": "fetch/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_bace2a214da5d1084a274ecbb982ae38", "activationId": "fetch/1",
+            "nodeId": "fetch", "actionId": "fetch", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:7064291d66630e6c63bc6a5643260054271bfc7ba1e620b5f67ec02eba669e8c"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:8161ce99dc2b756521a714d802532dd7f5078c7fa3c7448bbb5f85bd06141a6a",
+        "commands": [
+          {
+            "commandId": "cmd_10cf0cb652e890f8ae2894d31114659d", "activationId": "fetch/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_bace2a214da5d1084a274ecbb982ae38", "activationId": "fetch/1",
+              "nodeId": "fetch", "actionId": "fetch", "effectKey": "inv_bace2a214da5d1084a274ecbb982ae38",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {
+                "url": "https://example.test/a",
+                "run": "run_linear",
+                "opts": {"$get": ["input", "missing"]}
+              }
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4596f3aaeba9f10617768075ea413601b5e88af200491b126f05a2c5aa79dde2"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_bace2a214da5d1084a274ecbb982ae38.1", "sequence": "2", "acceptedAtMs": "1400", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_bace2a214da5d1084a274ecbb982ae38", "attemptId": "inv_bace2a214da5d1084a274ecbb982ae38.1", "attempt": 1,
+          "status": "success",
+          "output": {"title": "Hello", "items": ["a", "b"]}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_linear",
+          "status": "running",
+          "input": {"url": "https://example.test/a"},
+          "nodes": {
+            "fetch": {"visit": 1, "outcome": "ok", "output": {"title": "Hello", "items": ["a", "b"]}}
+          },
+          "visits": {"fetch": 1, "render": 1},
+          "activations": 2,
+          "position": {"nodeId": "render", "activationId": "render/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_9847561b95fa06d0b86d68244318b1d7", "activationId": "render/1",
+            "nodeId": "render", "actionId": "render", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:6fedf6dff32004d3c9a4b303e4ef829d8c72b0843af06a18cdb11090d7b11e1b"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "2", "lastAcceptedAtMs": "1400"
+        },
+        "snapshotDigest": "sha256:000a2caa55280310543115921dd0a8033727008283ee0638eb1b17b95fa39574",
+        "commands": [
+          {
+            "commandId": "cmd_38390d4ac2fe38e251471d8c37a27908", "activationId": "render/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_9847561b95fa06d0b86d68244318b1d7", "activationId": "render/1",
+              "nodeId": "render", "actionId": "render", "effectKey": "inv_9847561b95fa06d0b86d68244318b1d7",
+              "attempt": 1, "notBeforeMs": "1400",
+              "input": {"title": "Hello", "second": "b", "style": ["plain", 2]}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:2c61008bcb88957e5c3c0dbf1bb5204c757023f2a27058e72eca0dccb905ec37"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_9847561b95fa06d0b86d68244318b1d7.1", "sequence": "3", "acceptedAtMs": "1900", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_9847561b95fa06d0b86d68244318b1d7", "attemptId": "inv_9847561b95fa06d0b86d68244318b1d7.1", "attempt": 1,
+          "status": "success", "outcome": "ok",
+          "output": {"html": "<h1>Hello</h1>"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_linear",
+          "status": "completed",
+          "input": {"url": "https://example.test/a"},
+          "nodes": {
+            "fetch": {"visit": 1, "outcome": "ok", "output": {"title": "Hello", "items": ["a", "b"]}},
+            "render": {"visit": 1, "outcome": "ok", "output": {"html": "<h1>Hello</h1>"}}
+          },
+          "visits": {"fetch": 1, "render": 1, "done": 1},
+          "activations": 3,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {
+            "output": {
+              "page": {"html": "<h1>Hello</h1>"},
+              "source": "https://example.test/a",
+              "tenant": "default",
+              "fetchVisit": 1
+            }
+          },
+          "lastSequence": "3", "lastAcceptedAtMs": "1900"
+        },
+        "snapshotDigest": "sha256:678b23068833e782d6994835133fee2a90e86ea85bfd3e7b42f4f021a8c9df7f",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:0e294f5efb2c726c1252b709b128162f6a02fdf39b8c515df3bde4ffa821b675"
+      }
+    }
+  ]
+}

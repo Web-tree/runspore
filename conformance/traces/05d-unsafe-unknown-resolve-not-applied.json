@@ -1,0 +1,244 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "unsafe-unknown-resolve-not-applied",
+  "description": "Resolutions that arrive before the outcome is unknown, name another invocation, or complete with an undeclared outcome change nothing; a valid one still applies afterwards.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "unsafe-unknown-resolve-not-applied",
+    "start": "charge",
+    "actions": {
+      "charge": {"kind": "command", "argv": ["charge"], "effect": "unsafe", "outcomes": ["ok", "declined"]}
+    },
+    "nodes": {
+      "charge": {
+        "kind": "activity", "action": "charge",
+        "input": {"amount": {"$get": ["input", "amount"]}},
+        "outcomes": {"ok": "done", "declined": "rejected"}
+      },
+      "done": {"kind": "complete", "output": {"receipt": {"$get": ["nodes", "charge", "output", "receipt"]}}},
+      "rejected": {"kind": "fail", "error": {"code": "payment.declined", "message": "card declined"}}
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_unsafe_d", "input": {"amount": 1200}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_d",
+          "status": "running",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:b27760f33cbe92aa13af2efb852c8e6d82bc8ea69c3ba0ea66800f7534631f6b",
+        "commands": [
+          {
+            "commandId": "cmd_542fa62e7230ee347a93cc8c08a437cf", "activationId": "charge/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "activationId": "charge/1",
+              "nodeId": "charge", "actionId": "charge", "effectKey": "inv_b82d722cfc6eeb5ceb19614ace295dac",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {"amount": 1200}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:43feb49a1b3cfa9a7ebd6f114e1953c8c4291508bc06c19da5f10c5cfa392f44"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-early", "sequence": "2", "acceptedAtMs": "2000", "kind": "invocation.resolved",
+        "payload": {"invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "resolution": {"action": "retry"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_d",
+          "status": "running",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "2", "lastAcceptedAtMs": "2000"
+        },
+        "snapshotDigest": "sha256:8ffbd1b3cd5575e7575abaebee142dc922e567ca4561e80cccb4fde403914cd2",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "resolve.not-applicable", "nodeId": "charge",
+            "details": {"invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "reason": "invocation-not-unknown"}
+          }
+        ],
+        "decisionDigest": "sha256:300e4a14895d56a002b338f7978a70e64ff309a63e063db65b831658ba100d16"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_b82d722cfc6eeb5ceb19614ace295dac.1", "sequence": "3", "acceptedAtMs": "4000", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "attemptId": "inv_b82d722cfc6eeb5ceb19614ace295dac.1", "attempt": 1,
+          "status": "unknown",
+          "error": {"code": "host.timeout", "message": "no reply from provider"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_d",
+          "status": "needs-intervention",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "unknown",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "3", "lastAcceptedAtMs": "4000"
+        },
+        "snapshotDigest": "sha256:ed3822db20dec4da24dd0325f1bcb338a002ac0ec8ef66ec279641a775cc09d2",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.unknown", "nodeId": "charge",
+            "details": {"invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "attempt": 1, "status": "unknown"}
+          }
+        ],
+        "decisionDigest": "sha256:030919d00d6921f734efb06318a82d81096d988bdd29a2b665112a50ba7463ca"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-wrong-id", "sequence": "4", "acceptedAtMs": "5000", "kind": "invocation.resolved",
+        "payload": {"invocationId": "inv_2d04e3de435431c851a1c230347e2c67", "resolution": {"action": "retry"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_d",
+          "status": "needs-intervention",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "unknown",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "4", "lastAcceptedAtMs": "5000"
+        },
+        "snapshotDigest": "sha256:5086d0a050367dc0d56a280c8d52cead5414af438339ed7793196f4f3df722ed",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "resolve.not-applicable", "nodeId": null,
+            "details": {"invocationId": "inv_2d04e3de435431c851a1c230347e2c67", "reason": "invocation-mismatch"}
+          }
+        ],
+        "decisionDigest": "sha256:abfc6bb4c5a72abe7194b55b40c8ca1b96937524f1b65f9cf5cca3b25000512a"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-undeclared", "sequence": "5", "acceptedAtMs": "6000", "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac",
+          "resolution": {"action": "complete", "outcome": "refunded", "output": {"receipt": "r-0"}}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_d",
+          "status": "needs-intervention",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "unknown",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "5", "lastAcceptedAtMs": "6000"
+        },
+        "snapshotDigest": "sha256:ab90a1888b692b01774c2156e80cea40702337485c767a2a1ec4dedb5b49d403",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "resolve.not-applicable", "nodeId": "charge",
+            "details": {"invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac", "reason": "outcome-undeclared"}
+          }
+        ],
+        "decisionDigest": "sha256:b0d7ac952bcb97296b2880d54ef7ddacd22934ddaf054d3e4d8980326d3196fa"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-declined", "sequence": "6", "acceptedAtMs": "7000", "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_b82d722cfc6eeb5ceb19614ace295dac",
+          "resolution": {"action": "complete", "outcome": "declined", "output": {"reason": "card"}}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_d",
+          "status": "failed",
+          "input": {"amount": 1200},
+          "nodes": {
+            "charge": {"visit": 1, "outcome": "declined", "output": {"reason": "card"}}
+          },
+          "visits": {"charge": 1, "rejected": 1},
+          "activations": 2,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {
+            "error": {"code": "payment.declined", "message": "card declined", "nodeId": "rejected", "details": null}
+          },
+          "lastSequence": "6", "lastAcceptedAtMs": "7000"
+        },
+        "snapshotDigest": "sha256:59c63f5aa1e0413219e75154cb22713ac5e0adc47815d1c8229858631201c8d3",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:79ed1efddd2f9fa63f0f5134793e2262ed872a192c410eec4733e1bdc39b1e3b"
+      }
+    }
+  ]
+}

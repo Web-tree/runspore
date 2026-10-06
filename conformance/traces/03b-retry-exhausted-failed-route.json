@@ -1,0 +1,162 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "retry-exhausted-failed-route",
+  "description": "The second of two allowed attempts fails retryably; the invocation fails with the reported error and the failed route completes the run.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "retry-exhausted-failed-route",
+    "start": "work",
+    "actions": {
+      "work": {
+        "kind": "command", "argv": ["work"], "effect": "idempotent",
+        "retry": {"maxAttempts": 2, "backoffMs": "100"}
+      }
+    },
+    "nodes": {
+      "work": {
+        "kind": "activity", "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "outcomes": {"ok": "done", "failed": "gave-up"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "gave-up": {
+        "kind": "complete",
+        "output": {
+          "outcome": {"$get": ["nodes", "work", "outcome"]},
+          "error": {"$get": ["nodes", "work", "output", "error"]}
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_retry_b", "input": {"job": "j-2"}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_b",
+          "status": "running",
+          "input": {"job": "j-2"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_652c4c6dc8f334443c435a3f3750c893", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:d613e87df9d321463cfec6e06f03aa25603cde6095b2261480757e3fee01469f",
+        "commands": [
+          {
+            "commandId": "cmd_fae6e028ada61ea743c52d5ffe5ec1c4", "activationId": "work/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_652c4c6dc8f334443c435a3f3750c893", "activationId": "work/1",
+              "nodeId": "work", "actionId": "work", "effectKey": "inv_652c4c6dc8f334443c435a3f3750c893",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {"job": "j-2"}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:e4b075c526e8a5ddf0bc53ea9429792fae0889df7e8297ff7214d6e22794ef9d"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_652c4c6dc8f334443c435a3f3750c893.1", "sequence": "2", "acceptedAtMs": "1100", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_652c4c6dc8f334443c435a3f3750c893", "attemptId": "inv_652c4c6dc8f334443c435a3f3750c893.1", "attempt": 1,
+          "status": "failure",
+          "error": {"code": "net.timeout", "message": "upstream timed out"}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_b",
+          "status": "running",
+          "input": {"job": "j-2"},
+          "nodes": {},
+          "visits": {"work": 1},
+          "activations": 1,
+          "position": {"nodeId": "work", "activationId": "work/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_652c4c6dc8f334443c435a3f3750c893", "activationId": "work/1",
+            "nodeId": "work", "actionId": "work", "attempt": 2, "state": "scheduled",
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "2", "lastAcceptedAtMs": "1100"
+        },
+        "snapshotDigest": "sha256:a8d88c7facedc4840e46e5467433a5aa8e23bb4495bf70ca25873ec96407b500",
+        "commands": [
+          {
+            "commandId": "cmd_aa942adbb765e2faf2722589ee9bccd0", "activationId": "work/1", "kind": "activity.retry",
+            "payload": {"invocationId": "inv_652c4c6dc8f334443c435a3f3750c893", "attempt": 2, "notBeforeMs": "1200"}
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:e97c086146adc8809c67b3f72b5a0ef7a3d25e59822d0fb5f0a024d37a937dcd"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_652c4c6dc8f334443c435a3f3750c893.2", "sequence": "3", "acceptedAtMs": "1300", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_652c4c6dc8f334443c435a3f3750c893", "attemptId": "inv_652c4c6dc8f334443c435a3f3750c893.2", "attempt": 2,
+          "status": "failure", "retryable": true,
+          "error": {"code": "net.reset", "message": "connection reset", "details": {"host": "a.example"}}
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_retry_b",
+          "status": "completed",
+          "input": {"job": "j-2"},
+          "nodes": {
+            "work": {
+              "visit": 1, "outcome": "failed",
+              "output": {
+                "error": {
+                  "code": "net.reset", "message": "connection reset",
+                  "nodeId": "work", "details": {"host": "a.example"}
+                }
+              }
+            }
+          },
+          "visits": {"work": 1, "gave-up": 1},
+          "activations": 2,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {
+            "output": {
+              "outcome": "failed",
+              "error": {
+                "code": "net.reset", "message": "connection reset",
+                "nodeId": "work", "details": {"host": "a.example"}
+              }
+            }
+          },
+          "lastSequence": "3", "lastAcceptedAtMs": "1300"
+        },
+        "snapshotDigest": "sha256:7f434b26f970ba6a04ae944fca89d2a359be10c63eb0cc97c8854af113074076",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:6b80fd9060c57d9609753f6456490ecb24a5c068bfa1f57060bb9b60d4cb05ff"
+      }
+    }
+  ]
+}
