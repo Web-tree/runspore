@@ -8,11 +8,11 @@ Questions that need Max collect in [questions/](questions/README.md).
 | ID | Package | Owns | Depends on | Status | Branch |
 | --- | --- | --- | --- | --- | --- |
 | P0 | Contract freeze: spec and `runspore-types` | `spec/`, `crates/runspore-types` | — | done 2026-10-06 | main |
-| K | Kernel and golden traces | `crates/runspore-kernel`, `crates/runspore-trace`, `conformance/traces` | P0 | pending | |
-| S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | pending | |
-| C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | pending | |
-| H | Engine and activity runners | `crates/runspore-host` | K, S | pending | |
-| X | Cross-host determinism: Wasmtime, Node, Bun | `conformance/js`, tests in `crates/runspore-wasmtime` | K, C | pending | |
+| K | Kernel and golden traces | `crates/runspore-kernel`, `crates/runspore-trace`, `conformance/traces` | P0 | kernel and trace crate verified and merged 14:20; remaining golden traces still running | worktree-agent-a515f322a7eeef774 |
+| S | SQLite store and store conformance | `crates/runspore-store-sqlite`, `crates/runspore-store-conformance` | P0 | done 2026-10-06, verified and merged | pkg-S |
+| C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | done 2026-10-06, verified and merged | worktree-agent-ab051d9354ed47950 |
+| H | Engine and activity runners | `crates/runspore-host` | K, S | running since 2026-10-06 14:08 (engine parts that need no kernel first) | |
+| X | Cross-host determinism: Wasmtime, Node, Bun | `conformance/js`, tests in `crates/runspore-wasmtime` | K, C | running since 2026-10-06 14:24 | |
 | E | CLI, examples, crash-recovery suite | `crates/runspore-cli`, `examples` | H, C | pending | |
 
 ## Done-when
@@ -31,3 +31,11 @@ Questions that need Max collect in [questions/](questions/README.md).
   the README quickstart runs as written.
 
 ## Log
+- 2026-10-06: P0 frozen on main (7f42cf8). Wave 1 launched: K, S, C, each an Opus agent in its own worktree.
+- 2026-10-06 13:44: K and S each fanned out to nested sub-agents and stopped; neither left a file, and S's worktree was removed as unchanged. Max: new agents start only on Opus. S worktree recreated on branch `pkg-S`; K and S resumed with "do it yourself, start no sub-agents, do not hand back before committing". C continues.
+- 2026-10-06 13:58: S verified on disk (fmt, clippy, 14 conformance + 3 SQLite tests, code read) and merged to main. Its four spec gaps (payload-invalid code, generic store codes, capability values, natural-key duplicates write no receipt) are folded into spec/store.md.
+- 2026-10-06 14:06: C verified on disk (reducer code read, `cargo test --workspace` on main: 14 component and reducer tests, import-free and reproducible build) and merged. Its notes on failure-code precedence, fuel watchdog, cached describe and the versioned export name are folded into spec/host.md. Component is 32.5 KB with the stub kernel.
+- 2026-10-06 14:08: H launched early (Opus, no nested agents) against the merged store; it merges main once K lands for the tests that need the real kernel.
+- 2026-10-06 14:20: K's kernel and trace crate (commit 47d0bd5) verified in a throwaway checkout (172 tests), kernel state machine read against spec/kernel.md, merged to main; workspace passes with the real kernel inside the component. K keeps adding golden traces on its branch. H handed back its kernel-independent part (25 tests); resumed for H1 and full-run tests. H's three spec notes folded into spec/host.md.
+- 2026-10-06 14:24: X launched (Opus, no nested agents) against the merged kernel, trace crate and component.
+- 2026-10-06 14:27: H's first agent ran out of context right after merging main; its work is committed on `worktree-agent-ae3e3822be5e46fe6`. A fresh Opus agent (pkg-H2-host-finish) continues in the same worktree: spec alignment, abandon-on-unreadable, shared test helpers, full-run tests with the real kernel.
