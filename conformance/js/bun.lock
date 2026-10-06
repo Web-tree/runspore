@@ -5,7 +5,7 @@
     "": {
       "name": "runspore-conformance-js",
       "devDependencies": {
-        "@bytecodealliance/jco": "1.36.1",
+        "@bytecodealliance/jco": "1.37.0",
       },
     },
   },
@@ -30,7 +30,7 @@
 
     "@bytecodealliance/componentize-js-0-19-3": ["@bytecodealliance/componentize-js@0.19.3", "", { "dependencies": { "@bytecodealliance/jco": "^1.15.1", "@bytecodealliance/wizer": "^10.0.0", "es-module-lexer": "^1.6.0", "oxc-parser": "^0.76.0" }, "bin": { "componentize-js": "src/cli.js" } }, "sha512-ju7Y4WeF0B9uMkSPHJgmT6ouEfSwbe9M1uR/YOnYZjBpxJjH9qzxIkJg/kf8NycVDyFJ2/lscmJ1E1uPiDQVRQ=="],
 
-    "@bytecodealliance/jco": ["@bytecodealliance/jco@1.36.1", "", { "dependencies": { "@bytecodealliance/componentize-js": "^0.23.0", "@bytecodealliance/componentize-js-0-19-3": "npm:@bytecodealliance/componentize-js@^0.19.3", "@bytecodealliance/jco-std": "^0.6.0", "@bytecodealliance/jco-transpile": "^0.17.0", "@bytecodealliance/preview2-shim": "^0.27.1", "binaryen": "^132.0.0", "commander": "^14", "componentize-qjs": "^0.4.5", "mkdirp": "^3", "regexpu-core": "6.4.0", "rolldown": "^1.2.4", "typescript": "7.0.2", "typescript-compiler-api": "npm:typescript@6.0.3", "unenv": "2.0.0-rc.24" }, "bin": { "jco": "dist/jco.js" } }, "sha512-byCvs1wOhWQjiEpuoBMAoVvM7fW0G4JcZz4F+GzrHEN+XS/+hHPN1ny7hmx+FuGiHeaO5rMtmy22crVaT33vqg=="],
+    "@bytecodealliance/jco": ["@bytecodealliance/jco@1.37.0", "", { "dependencies": { "@bytecodealliance/componentize-js": "^0.23.0", "@bytecodealliance/componentize-js-0-19-3": "npm:@bytecodealliance/componentize-js@^0.19.3", "@bytecodealliance/jco-std": "^0.7.0", "@bytecodealliance/jco-transpile": "^0.18.0", "@bytecodealliance/preview2-shim": "^0.28.0", "binaryen": "^132.0.0", "commander": "^14", "componentize-qjs": "^0.4.5", "mkdirp": "^3", "regexpu-core": "6.4.0", "rolldown": "^1.2.4", "typescript": "7.0.2", "typescript-compiler-api": "npm:typescript@6.0.3", "unenv": "2.0.0-rc.24" }, "bin": { "jco": "dist/jco.js" } }, "sha512-z/crtP4L3wumdFA74K1cEsLfdZ8Ki0dE/7m1fJ9SVq5Z9VsAf0yQXWQzMb6ZrJmXvRN+4wHC2MNkFwSFdaoBzQ=="],
 
     "@bytecodealliance/jco-node-fs": ["@bytecodealliance/jco-node-fs@0.3.2", "", { "optionalDependencies": { "@bytecodealliance/jco-node-fs-darwin-arm64": "0.3.2", "@bytecodealliance/jco-node-fs-darwin-x64": "0.3.2", "@bytecodealliance/jco-node-fs-linux-arm64-gnu": "0.3.2", "@bytecodealliance/jco-node-fs-linux-arm64-musl": "0.3.2", "@bytecodealliance/jco-node-fs-linux-x64-gnu": "0.3.2", "@bytecodealliance/jco-node-fs-linux-x64-musl": "0.3.2", "@bytecodealliance/jco-node-fs-win32-arm64-msvc": "0.3.2", "@bytecodealliance/jco-node-fs-win32-x64-msvc": "0.3.2" } }, "sha512-yxvqQreNcOQdMsEKZomkSqThtkxrAz3f1Cmy8BsV0UHi9saa2/D1KDB14IAXPYwDq/maS6lCzS+MuMQx6QkUgA=="],
 
@@ -50,13 +50,13 @@
 
     "@bytecodealliance/jco-node-fs-win32-x64-msvc": ["@bytecodealliance/jco-node-fs-win32-x64-msvc@0.3.2", "", { "os": "win32", "cpu": "x64" }, "sha512-RsPj2t8TvltsMWK7/Z7JcVC/IWPMi07/AJkNLiNTCuGTdT/sseqTThJJwhuz3sjFw7dJdxA+bSGT+23y/KT0fw=="],
 
-    "@bytecodealliance/jco-std": ["@bytecodealliance/jco-std@0.6.0", "", { "dependencies": { "acorn": "8.17.0", "acorn-walk": "8.3.5", "minimatch": "10.2.6", "punycode": "2.3.1", "readable-stream": "4.7.0", "urlpattern-polyfill": "10.1.0", "whatwg-url": "14.2.0" }, "peerDependencies": { "@bytecodealliance/preview2-shim": "^0.27.1" }, "optionalPeers": ["@bytecodealliance/preview2-shim"] }, "sha512-7c8S9NJv/WB8J3RXbDBuFrSbiB6W+P2rAdT6oBwfra+BiCr+9KZcsfEoDhBlBA/OVc3P6KOn7Wq65A1VOuTwHg=="],
+    "@bytecodealliance/jco-std": ["@bytecodealliance/jco-std@0.7.0", "", { "dependencies": { "acorn": "8.17.0", "acorn-walk": "8.3.5", "minimatch": "10.2.6", "punycode": "2.3.1", "readable-stream": "4.7.0", "urlpattern-polyfill": "10.1.0", "whatwg-url": "14.2.0" }, "peerDependencies": { "@bytecodealliance/preview2-shim": "^0.28.0" }, "optionalPeers": ["@bytecodealliance/preview2-shim"] }, "sha512-QSiIRXS5eMUTe0gt5D45vZK4Pt7Hdf0S0Gr2Lt3+Q0h4YIq+n8EbEioQ2lem2edNWT/Zym+YvEXDZOhS3qZ2dw=="],
 
-    "@bytecodealliance/jco-transpile": ["@bytecodealliance/jco-transpile@0.17.0", "", { "dependencies": { "@bytecodealliance/preview2-shim": "^0.27.1", "@bytecodealliance/preview3-shim": "^0.8.1", "binaryen": "^132.0.0", "oxc-minify": "^0.151.0" } }, "sha512-mfSXL9a8drjGW/kr3V55cClJ8Rs3cs50GhsJ+wTHl3/gFPPw0Ej6z9KyYiuZ2veuf0WwrDWFuCKW7CyBpniLFw=="],
+    "@bytecodealliance/jco-transpile": ["@bytecodealliance/jco-transpile@0.18.0", "", { "dependencies": { "@bytecodealliance/preview2-shim": "^0.28.0", "@bytecodealliance/preview3-shim": "^0.9.0", "binaryen": "^132.0.0", "oxc-minify": "^0.151.0" } }, "sha512-Ou4MWoxGC6HKBjRpTJ4SEUxsN8DOAv9LIi2RD22Kosq2OZTnUvKikFrOAGS2vCGNMzvXkeKBS1jFMLKzYBk4pg=="],
 
-    "@bytecodealliance/preview2-shim": ["@bytecodealliance/preview2-shim@0.27.1", "", { "dependencies": { "@bytecodealliance/jco-node-fs": "0.3.2" } }, "sha512-eIYEHwuPG7LlOFEBgP2lnO/+uKrLng8gIZu70WnoeB3bhYp2mvOgZg0vhWmSIYbXW3P8+hj+VNnk2lGXg/1vHQ=="],
+    "@bytecodealliance/preview2-shim": ["@bytecodealliance/preview2-shim@0.28.0", "", { "dependencies": { "@bytecodealliance/jco-node-fs": "0.3.2" } }, "sha512-55y59uAzYMTA1bTepmgC7LmK8DUyhOU+y7cfKQRV7wRVABMYna4t7KYpBUkO8VhI+FbDn5cq0ghPLelaP24OpQ=="],
 
-    "@bytecodealliance/preview3-shim": ["@bytecodealliance/preview3-shim@0.8.1", "", { "dependencies": { "@bytecodealliance/jco-node-fs": "0.3.2", "@bytecodealliance/preview2-shim": "^0.27.1" } }, "sha512-9vGL5lSV9Cjxmkage9MCnR+EWyI2GSbqE7h/P6F/CIoDmTfXkSYoG8c0HAeCNfmTVQDqD8Bo3eeM+zNeWeeXcA=="],
+    "@bytecodealliance/preview3-shim": ["@bytecodealliance/preview3-shim@0.9.0", "", { "dependencies": { "@bytecodealliance/jco-node-fs": "0.3.2", "@bytecodealliance/preview2-shim": "^0.28.0" } }, "sha512-/0dEMWyxFyTF/1tsxspU8p6dgfWnQ4SSY+ray8QBJi7KFJu1W6R3M3BFRL83PJ+PmMyuOBaRhhYH3rR6kE+pcA=="],
 
     "@bytecodealliance/weval": ["@bytecodealliance/weval@0.5.0", "", { "dependencies": { "@napi-rs/lzma": "^1.1.2", "fflate": "^0.8.3", "tar": "^7.5.19" } }, "sha512-lIR6+enn52gcdMQM8C3YaNoUlzm90TRkJrIgiVky/hED81ezDjhnq+6Z4w0eSFf9C6b2nmdKUFwbp6q1PhiuIQ=="],
 
