@@ -335,7 +335,7 @@ fn resolving_complete_with_an_undeclared_outcome_changes_nothing() {
         assert_eq!(
             diagnostics(&decision),
             json!([{"code": code::RESOLVE_NOT_APPLICABLE, "nodeId": "work",
-                    "details": {"invocationId": invocation, "reason": "undeclared-outcome"}}])
+                    "details": {"invocationId": invocation, "reason": "outcome-undeclared"}}])
         );
         assert_eq!(run.status(), "needs-intervention");
         assert_eq!(run.state()["invocation"], before["invocation"]);
@@ -431,9 +431,24 @@ fn a_resolution_needs_a_current_unknown_invocation() {
 
     for resolution in resolutions {
         let cases: [(&mut Run, &str, Value, &str); 3] = [
-            (&mut running, current.as_str(), json!("work"), "not-unknown"),
-            (&mut intervention, "inv_other", json!(null), "not-current"),
-            (&mut waiting, current.as_str(), json!(null), "not-current"),
+            (
+                &mut running,
+                current.as_str(),
+                json!("work"),
+                "invocation-not-unknown",
+            ),
+            (
+                &mut intervention,
+                "inv_other",
+                json!(null),
+                "invocation-mismatch",
+            ),
+            (
+                &mut waiting,
+                current.as_str(),
+                json!(null),
+                "invocation-mismatch",
+            ),
         ];
         for (run, invocation, node, reason) in cases {
             let before = run.state();

@@ -297,3 +297,21 @@ fn a_value_too_deep_to_record_is_a_failure() {
     run.step(event_kind::ACTIVITY_RESULT, &payload, 2_000);
     assert_eq!(run.status(), "waiting");
 }
+
+/// A mapping can nest a projected value deeper than it arrived: a run input 31
+/// levels deep fits the snapshot, but not under one more key of an activity input.
+#[test]
+fn a_mapped_value_too_deep_to_emit_is_a_failure() {
+    let nest = |levels: usize| (0..levels).fold(json!(0), |inner, _| json!([inner]));
+    let workflow = mapping_workflow(json!({"wrapped": {"$get": ["input"]}}));
+
+    let request = start_request(&workflow, nest(31));
+    assert_failure(transition(&request), ResourceLimit, "budget.value-depth");
+
+    let request = start_request(&workflow, nest(30));
+    let decision = transition(&request).expect("thirty levels fit under two keys");
+    assert_eq!(
+        parse(&decision.commands[0].payload)["input"],
+        json!({"wrapped": nest(30)})
+    );
+}
