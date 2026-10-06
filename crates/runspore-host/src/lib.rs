@@ -13,5 +13,5 @@ pub use activity::{
     ActivityContext, ActivityOutput, ActivityRegistry, ActivityRunner, NativeFn, NativeRunner,
 };
 pub use command::CommandRunner;
-pub use engine::{Engine, EngineConfig, StartOutcome, TickReport};
+pub use engine::{validate_workflow, Engine, EngineConfig, StartOutcome, TickReport};
 pub use error::HostError;

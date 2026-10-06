@@ -9,15 +9,15 @@ use std::sync::{Arc, Mutex};
 
 use common::*;
 use runspore_host::{
-    ActivityContext, ActivityOutput, ActivityRegistry, Engine, EngineConfig, NativeRunner,
-    TickReport,
+    validate_workflow, ActivityContext, ActivityOutput, ActivityRegistry, Engine, EngineConfig,
+    NativeRunner, TickReport,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_conformance::ManualClock;
 use runspore_store_sqlite::SqliteStore;
-use runspore_types::digest::ids;
+use runspore_types::digest::{self, ids};
 use runspore_types::model::Resolution;
-use runspore_types::reducer::Reducer;
+use runspore_types::reducer::{Limits, Reducer};
 use runspore_types::store::{RunKey, RunView, Store};
 use runspore_wasmtime::WasmtimeReducer;
 use serde_json::{json, Value};
@@ -641,4 +641,40 @@ async fn two_command_activities_pass_output_through_a_mapping() {
         .map(|r| r["status"].clone())
         .collect();
     assert_eq!(statuses, vec![json!("success"), json!("success")]);
+}
+
+#[tokio::test]
+async fn validate_workflow_checks_what_start_checks_without_a_store() {
+    let registry = ActivityRegistry::with_builtins(work(Arc::default(), |_| ok(Value::Null)));
+    let validate = |doc: &Value| {
+        let bytes = serde_json::to_vec(doc).unwrap();
+        validate_workflow(&NativeReducer, &registry, Limits::default(), &bytes)
+    };
+    let valid: Value = serde_json::from_slice(&single("idempotent", 1)).unwrap();
+    let package = validate(&valid).unwrap();
+    let path = temp_db("validate");
+    let engine = native(&path, None, work(Arc::default(), |_| ok(Value::Null)));
+    let key = engine
+        .start(&single("idempotent", 1), json!({}), "validate")
+        .await
+        .unwrap()
+        .key;
+    let view = engine.get_run(&key).await.unwrap().unwrap();
+    assert_eq!(digest::package(&package), view.package_digest);
+
+    let mut unregistered = valid.clone();
+    unregistered["actions"]["work"]["kind"] = json!("teleport");
+    assert_eq!(
+        validate(&unregistered).unwrap_err().code(),
+        "action.kind-unregistered"
+    );
+    let mut misconfigured = valid.clone();
+    misconfigured["actions"]["work"]["function"] = json!("missing");
+    assert_eq!(
+        validate(&misconfigured).unwrap_err().code(),
+        "action.invalid"
+    );
+    let mut invalid = valid;
+    invalid["start"] = json!("nowhere");
+    assert_eq!(validate(&invalid).unwrap_err().code(), "workflow.invalid");
 }

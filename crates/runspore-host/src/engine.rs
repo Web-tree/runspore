@@ -188,6 +188,76 @@ fn parked(view: &RunView) -> bool {
     }
 }
 
+fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
+    let descriptor = reducer.describe();
+    Identity {
+        package_digest: package_digest.to_string(),
+        kernel_digest: reducer.kernel_digest(),
+        semantics_version: descriptor.semantics_version,
+        codec_version: descriptor.codec_version,
+    }
+}
+
+/// Checks a workflow without a store: canonicalizes it, validates every action with
+/// the runner its `kind` names, and runs a dry `run.started` transition with a null
+/// input. Returns the canonical package bytes. `start` performs the same checks.
+pub fn validate_workflow(
+    reducer: &dyn Reducer,
+    activities: &ActivityRegistry,
+    limits: Limits,
+    workflow_json: &[u8],
+) -> Result<Vec<u8>, HostError> {
+    let started = evidence(&RunStarted {
+        tenant: DEFAULT_TENANT.to_string(),
+        run_id: "validate".to_string(),
+        input: Value::Null,
+    })?;
+    check_workflow(reducer, activities, limits, workflow_json, &started)
+}
+
+/// The checks of `validate_workflow`, with the dry transition fed `started`.
+fn check_workflow(
+    reducer: &dyn Reducer,
+    activities: &ActivityRegistry,
+    limits: Limits,
+    workflow_json: &[u8],
+    started: &Evidence,
+) -> Result<Vec<u8>, HostError> {
+    let workflow =
+        canonical::parse(workflow_json).map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
+    let package =
+        canonical::to_vec(&workflow).map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
+    let actions = workflow.get("actions").and_then(Value::as_object);
+    for (action_id, action) in actions.into_iter().flatten() {
+        let kind = action.get("kind").and_then(Value::as_str).ok_or_else(|| {
+            HostError::invalid("action.kind-missing", format!("action `{action_id}`"))
+        })?;
+        let runner = activities.get(kind).ok_or_else(|| {
+            HostError::invalid(
+                "action.kind-unregistered",
+                format!("action `{action_id}` has kind `{kind}` with no runner"),
+            )
+        })?;
+        runner
+            .validate(action_id, action)
+            .map_err(|e| HostError::invalid("action.invalid", e))?;
+    }
+    reducer.transition(&TransitionRequest {
+        identity: identity(reducer, &digest::package(&package)),
+        graph: package.clone(),
+        snapshot: None,
+        input_event: Envelope {
+            event_id: ids::EVENT_STARTED.to_string(),
+            sequence: 1,
+            accepted_at_ms: 0,
+            kind: event_kind::RUN_STARTED.to_string(),
+            payload: started.body.clone(),
+        },
+        frozen_limits: limits,
+    })?;
+    Ok(package)
+}
+
 impl Engine {
     pub fn new(
         store: Arc<dyn Store>,
@@ -229,25 +299,6 @@ impl Engine {
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
         let inner = &self.inner;
-        let workflow = canonical::parse(workflow_json)
-            .map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
-        let package = canonical::to_vec(&workflow)
-            .map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
-        let actions = workflow.get("actions").and_then(Value::as_object);
-        for (action_id, action) in actions.into_iter().flatten() {
-            let kind = action.get("kind").and_then(Value::as_str).ok_or_else(|| {
-                HostError::invalid("action.kind-missing", format!("action `{action_id}`"))
-            })?;
-            let runner = inner.activities.get(kind).ok_or_else(|| {
-                HostError::invalid(
-                    "action.kind-unregistered",
-                    format!("action `{action_id}` has kind `{kind}` with no runner"),
-                )
-            })?;
-            runner
-                .validate(action_id, action)
-                .map_err(|e| HostError::invalid("action.invalid", e))?;
-        }
         let tenant = &inner.config.tenant;
         let key = self.key(&ids::run_from_start_key(tenant, start_key));
         let started = evidence(&RunStarted {
@@ -255,20 +306,14 @@ impl Engine {
             run_id: key.run.clone(),
             input,
         })?;
+        let package = check_workflow(
+            &*inner.reducer,
+            &inner.activities,
+            inner.config.limits,
+            workflow_json,
+            &started,
+        )?;
         let package_digest = digest::package(&package);
-        inner.reducer.transition(&TransitionRequest {
-            identity: inner.identity(&package_digest),
-            graph: package.clone(),
-            snapshot: None,
-            input_event: Envelope {
-                event_id: "start".to_string(),
-                sequence: 1,
-                accepted_at_ms: 0,
-                kind: event_kind::RUN_STARTED.to_string(),
-                payload: started.body.clone(),
-            },
-            frozen_limits: inner.config.limits,
-        })?;
         let request = CreateRun {
             mutation: mutation(
                 "create_run",
@@ -512,16 +557,6 @@ impl Inner {
         format!("{prefix}/{}/{n}", self.nonce)
     }
 
-    fn identity(&self, package_digest: &str) -> Identity {
-        let descriptor = self.reducer.describe();
-        Identity {
-            package_digest: package_digest.to_string(),
-            kernel_digest: self.reducer.kernel_digest(),
-            semantics_version: descriptor.semantics_version,
-            codec_version: descriptor.codec_version,
-        }
-    }
-
     fn reap(&self) {
         let mut tasks = lock(&self.tasks);
         while tasks.try_join_next().is_some() {}
@@ -625,7 +660,7 @@ impl Inner {
             let package = self.package(&turn.package_digest).await?;
             let event = &turn.next_event;
             let request = TransitionRequest {
-                identity: self.identity(&turn.package_digest),
+                identity: identity(&*self.reducer, &turn.package_digest),
                 graph: package.bytes.clone(),
                 snapshot: turn.snapshot.clone(),
                 input_event: Envelope {

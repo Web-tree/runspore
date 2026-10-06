@@ -3,6 +3,10 @@
 The engine between the store and the kernel. It holds no graph logic: it never
 decides a branch, a retry or an outcome route. Unix only (process groups).
 
+`validate_workflow` checks a document without a store: canonical form, every action
+against the runner its `kind` names, and a dry `run.started` transition (null input).
+`start` runs the same checks, with the dry transition fed the real run ID and input.
+
 ## The loop
 
 `tick()` is one bounded pass and never waits for an activity:
