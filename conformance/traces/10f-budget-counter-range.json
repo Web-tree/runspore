@@ -1,0 +1,139 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "budget-counter-range",
+  "description": "Timestamps stop at 2^63 - 1. A retryable failure accepted at that instant would need notBeforeMs = now + 200, beyond the counter domain, so the transition fails (resource-limit / budget.counter-range, a code the kernel defines because spec/kernel.md names none) instead of wrapping, and commits nothing; a success reusing sequence 2 is accepted.",
+  "workflow": {
+    "actions": {
+      "upload": {
+        "argv": ["upload"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"backoffMs": "200", "maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "name": "budget-counter-range",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "upload", "output"]}},
+      "upload": {
+        "action": "upload",
+        "input": {"file": {"$get": ["input", "file"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "upload"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"file": "c.bin"}, "runId": "run_budget_counter", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"file": "c.bin"},
+          "invocation": {
+            "actionId": "upload",
+            "activationId": "upload/1",
+            "attempt": 1,
+            "inputDigest": "sha256:259fd6828f8b250472a84728343d083e55b1f12c951eb1860f666bf5afc00ec3",
+            "invocationId": "inv_2d5f3fa2578d073812af3adc6de38dc5",
+            "nodeId": "upload",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "upload/1", "nodeId": "upload", "visit": 1},
+          "result": null,
+          "runId": "run_budget_counter",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"upload": 1}
+        },
+        "snapshotDigest": "sha256:ac325029c89c4385523e239d4b6caa63bfc52bf062247ecac5c46ea7b638f0e3",
+        "commands": [
+          {
+            "commandId": "cmd_d4222b6c4f80802ed7eec55dc1295a19",
+            "activationId": "upload/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "upload",
+              "activationId": "upload/1",
+              "attempt": 1,
+              "effectKey": "inv_2d5f3fa2578d073812af3adc6de38dc5",
+              "input": {"file": "c.bin"},
+              "invocationId": "inv_2d5f3fa2578d073812af3adc6de38dc5",
+              "nodeId": "upload",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:96eb3d11a0285d55cfed183b59a05a8f90b7200ed58dc742a1b45107af37f812"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_2d5f3fa2578d073812af3adc6de38dc5.1",
+        "sequence": "2",
+        "acceptedAtMs": "9223372036854775807",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_2d5f3fa2578d073812af3adc6de38dc5.1",
+          "error": {"code": "net.reset", "message": "connection reset"},
+          "invocationId": "inv_2d5f3fa2578d073812af3adc6de38dc5",
+          "status": "failure"
+        }
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.counter-range"}}
+    },
+    {
+      "event": {
+        "eventId": "att:inv_2d5f3fa2578d073812af3adc6de38dc5.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_2d5f3fa2578d073812af3adc6de38dc5.1",
+          "invocationId": "inv_2d5f3fa2578d073812af3adc6de38dc5",
+          "output": {"etag": "e-3"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"file": "c.bin"},
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {"upload": {"outcome": "ok", "output": {"etag": "e-3"}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"etag": "e-3"}},
+          "runId": "run_budget_counter",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "upload": 1}
+        },
+        "snapshotDigest": "sha256:33f1a9f085cdcd7268672a651d2018d7e7659a0a654555da382f183d0388d6ea",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:f58123bf2a0a689f1fbca7d068b4b7b4511c67bf2121d371177f80d0dae47bd4"
+      }
+    }
+  ]
+}

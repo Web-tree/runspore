@@ -1,0 +1,61 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W07-reconcilable",
+  "description": "W07: the review-loop example of spec/kernel.md with two changes: the action's effect is `reconcilable`, which semantics 0.1 does not support, and outcome `ok` targets no node (W08). W07 is checked first, so the unsupported effect is what is reported. Validation runs on every transition before anything that depends on the graph, so both run.started and a later event without a snapshot fail with incompatible-version / workflow.unsupported-effect.",
+  "workflow": {
+    "actions": {
+      "build": {
+        "argv": ["make"],
+        "effect": "reconcilable",
+        "kind": "command",
+        "outcomes": ["ok", "red"],
+        "retry": {"backoffMs": "500", "maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "validation-W07-reconcilable",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "build"},
+        "signal": "approval"
+      },
+      "broken": {"error": {"code": "build.broken", "message": "never passed"}, "kind": "fail"},
+      "build": {
+        "action": "build",
+        "input": {"repo": {"$get": ["input", "repo"]}},
+        "kind": "activity",
+        "outcomes": {"failed": "broken", "ok": "nowhere", "red": "build"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "build", "output"]}}
+    },
+    "start": "build"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"repo": "r"}, "runId": "run_w07_reconcilable", "tenant": "default"}
+      },
+      "expect": {
+        "failure": {"kind": "incompatible-version", "code": "workflow.unsupported-effect"}
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "1",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "approval", "outcome": "approved"}
+      },
+      "expect": {
+        "failure": {"kind": "incompatible-version", "code": "workflow.unsupported-effect"}
+      }
+    }
+  ]
+}

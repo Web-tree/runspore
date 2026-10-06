@@ -1,0 +1,141 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "budget-expression-operations",
+  "description": "Budget of 7 expression operations. The first node has no input mapping (null: one operation). The second node's mapping costs 8: the object, a, the array, true, the $get object plus two path steps, and the $literal object. Entering it fails with budget.expression-operations and commits nothing; a signal reusing sequence 2 shows the run still at the first node.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "budget-expression-operations",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "first": {"action": "work", "kind": "activity", "outcomes": {"ok": "second"}},
+      "second": {
+        "action": "work",
+        "input": {
+          "a": 1,
+          "b": [true, {"$get": ["input", "x"]}],
+          "c": {"$literal": {"deep": [1, 2, 3]}}
+        },
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "first"
+  },
+  "limits": {"expressionOperations": 7},
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"x": 7}, "runId": "run_budget_ops", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"x": 7},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "first/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_83b15ae3af7acd28a23006f42cf2eb15",
+            "nodeId": "first",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "first/1", "nodeId": "first", "visit": 1},
+          "result": null,
+          "runId": "run_budget_ops",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"first": 1}
+        },
+        "snapshotDigest": "sha256:41600e4bc5ccb2d9df14f0e3c35627c75764dc006300f3f0b1365bcb4e653bab",
+        "commands": [
+          {
+            "commandId": "cmd_9a4e548d0707dc10f7cb8849ee6e4807",
+            "activationId": "first/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "first/1",
+              "attempt": 1,
+              "effectKey": "inv_83b15ae3af7acd28a23006f42cf2eb15",
+              "input": null,
+              "invocationId": "inv_83b15ae3af7acd28a23006f42cf2eb15",
+              "nodeId": "first",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:04437c91f51c6b51eac51b3e23f1c3bfa057c877b28687c04057a290edf9c0d3"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_83b15ae3af7acd28a23006f42cf2eb15.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_83b15ae3af7acd28a23006f42cf2eb15.1",
+          "invocationId": "inv_83b15ae3af7acd28a23006f42cf2eb15",
+          "status": "success"
+        }
+      },
+      "expect": {"failure": {"kind": "resource-limit", "code": "budget.expression-operations"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "2100",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"x": 7},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "first/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_83b15ae3af7acd28a23006f42cf2eb15",
+            "nodeId": "first",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "first/1", "nodeId": "first", "visit": 1},
+          "result": null,
+          "runId": "run_budget_ops",
+          "semantics": "0.1",
+          "signals": [
+            {"data": null, "eventId": "sig:m-1", "name": "note", "outcome": null, "sequence": "2"}
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"first": 1}
+        },
+        "snapshotDigest": "sha256:006082bd6eb73d9ecd9de58ebe7035b5c72a0afd097edb590eaf6cbb2f7a2e3e",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:72b214b5e87224eac9dcf0e5bd81cc02a5a5ca2fbc8edb2283cedb9de177be58"
+      }
+    }
+  ]
+}

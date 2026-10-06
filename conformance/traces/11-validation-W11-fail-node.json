@@ -1,0 +1,57 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W11-fail-node",
+  "description": "W11: the review-loop example of spec/kernel.md with one change: the fail node's error.code has upper-case letters. Validation runs on every transition before anything that depends on the graph, so both run.started and a later event without a snapshot fail with invalid-input / workflow.invalid.",
+  "workflow": {
+    "actions": {
+      "build": {
+        "argv": ["make"],
+        "effect": "idempotent",
+        "kind": "command",
+        "outcomes": ["ok", "red"],
+        "retry": {"backoffMs": "500", "maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "validation-W11-fail-node",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "build"},
+        "signal": "approval"
+      },
+      "broken": {"error": {"code": "Build.Broken", "message": "never passed"}, "kind": "fail"},
+      "build": {
+        "action": "build",
+        "input": {"repo": {"$get": ["input", "repo"]}},
+        "kind": "activity",
+        "outcomes": {"failed": "broken", "ok": "approve", "red": "build"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "build", "output"]}}
+    },
+    "start": "build"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"repo": "r"}, "runId": "run_w11_fail_node", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "1",
+        "acceptedAtMs": "2000",
+        "kind": "signal.received",
+        "payload": {"name": "approval", "outcome": "approved"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}

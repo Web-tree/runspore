@@ -1,0 +1,84 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-1-semantics-version",
+  "description": "Check 1: a request whose identity names another semantics version fails with version.semantics; the same event under the current version is accepted.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-1-semantics-version",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_1", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {"failure": {"kind": "incompatible-version", "code": "version.semantics"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_1", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_7f6252ca9e27011f4d47d568b09dd474",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_1",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:43551efe4341374ddd3a2d5da18fc5917f25c820b5096ae8b252a2a8920d0f60",
+        "commands": [
+          {
+            "commandId": "cmd_d76e96d2f22cdc2f406905f9b629273a",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_7f6252ca9e27011f4d47d568b09dd474",
+              "input": null,
+              "invocationId": "inv_7f6252ca9e27011f4d47d568b09dd474",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:20a8567c115a64f6228e30a9cec2ec6a5a78557f6f66e0992f25f0c67d0b0bb3"
+      }
+    }
+  ]
+}

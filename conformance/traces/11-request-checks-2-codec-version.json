@@ -1,0 +1,95 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-2-codec-version",
+  "description": "Check 2: a request whose identity names another codec version fails with version.codec; with both versions wrong, check 1 wins. The same event under the current versions is accepted.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-2-codec-version",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_2", "tenant": "default"}
+      },
+      "identity": {"codecVersion": "jcs-int53/2"},
+      "expect": {"failure": {"kind": "incompatible-version", "code": "version.codec"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_2", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2", "codecVersion": "jcs-int53/2"},
+      "expect": {"failure": {"kind": "incompatible-version", "code": "version.semantics"}}
+    },
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_2", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_a1ef407aa223f23b017ec7df1995f231",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_check_2",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:9584d8627b38b5f7f959cdc507b2bdcab44f63f3e91c1f4fa6125edb9a505c59",
+        "commands": [
+          {
+            "commandId": "cmd_197518156f2eae18b68af4dc65828398",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_a1ef407aa223f23b017ec7df1995f231",
+              "input": null,
+              "invocationId": "inv_a1ef407aa223f23b017ec7df1995f231",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:37022a518e4c9460d3bb22c82d3af231eb2b1c5eb24e5c616f46badd99a6ccf2"
+      }
+    }
+  ]
+}

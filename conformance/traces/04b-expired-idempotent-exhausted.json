@@ -1,0 +1,195 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "expired-idempotent-exhausted",
+  "description": "Two expired leases on an idempotent action with two attempts: the first is retried after the backoff, the second exhausts the budget and, with no failed route, ends the run with activity.attempts-exhausted.",
+  "workflow": {
+    "actions": {
+      "upload": {
+        "argv": ["upload"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"backoffMs": "200", "maxAttempts": 2}
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "name": "expired-idempotent-exhausted",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "upload", "output"]}},
+      "upload": {
+        "action": "upload",
+        "input": {"file": {"$get": ["input", "file"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "upload"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"file": "b.bin"}, "runId": "run_expired_idem", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"file": "b.bin"},
+          "invocation": {
+            "actionId": "upload",
+            "activationId": "upload/1",
+            "attempt": 1,
+            "inputDigest": "sha256:57767c9a2039fb9a1f24cc3888f245352b8aaa243528c19017f6deeb80e99a97",
+            "invocationId": "inv_1f1381a64679972fbf0e3a9bfb097525",
+            "nodeId": "upload",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "upload/1", "nodeId": "upload", "visit": 1},
+          "result": null,
+          "runId": "run_expired_idem",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"upload": 1}
+        },
+        "snapshotDigest": "sha256:a316c245ed8cf6d966901d595c56b28a93cfdb0b2fbb76c0077d842aa0f5ac55",
+        "commands": [
+          {
+            "commandId": "cmd_a97208ef49aea6b88a0a2b53ffcd967b",
+            "activationId": "upload/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "upload",
+              "activationId": "upload/1",
+              "attempt": 1,
+              "effectKey": "inv_1f1381a64679972fbf0e3a9bfb097525",
+              "input": {"file": "b.bin"},
+              "invocationId": "inv_1f1381a64679972fbf0e3a9bfb097525",
+              "nodeId": "upload",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4bb345c4e44ced3549dad3648919768e50c2af6a06c3a78161c9823c3b2362d5"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_1f1381a64679972fbf0e3a9bfb097525.1",
+        "sequence": "2",
+        "acceptedAtMs": "31000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_1f1381a64679972fbf0e3a9bfb097525.1",
+          "error": null,
+          "invocationId": "inv_1f1381a64679972fbf0e3a9bfb097525",
+          "outcome": null,
+          "output": null,
+          "retryable": true,
+          "status": "expired"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"file": "b.bin"},
+          "invocation": {
+            "actionId": "upload",
+            "activationId": "upload/1",
+            "attempt": 2,
+            "inputDigest": "sha256:57767c9a2039fb9a1f24cc3888f245352b8aaa243528c19017f6deeb80e99a97",
+            "invocationId": "inv_1f1381a64679972fbf0e3a9bfb097525",
+            "nodeId": "upload",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "31000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "upload/1", "nodeId": "upload", "visit": 1},
+          "result": null,
+          "runId": "run_expired_idem",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"upload": 1}
+        },
+        "snapshotDigest": "sha256:db0e717c826cd84ad2948b533f72f02ca972239da9a51a1fd6cead78c899aece",
+        "commands": [
+          {
+            "commandId": "cmd_1d4dd483f533e050476eb5186ecee2ef",
+            "activationId": "upload/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 2,
+              "invocationId": "inv_1f1381a64679972fbf0e3a9bfb097525",
+              "notBeforeMs": "31200"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "upload", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:243a4d1533fa6145fadfa9bcc6f8d9a9c822f758e6711ff36f0e7e4856e5241f"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_1f1381a64679972fbf0e3a9bfb097525.2",
+        "sequence": "3",
+        "acceptedAtMs": "61200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_1f1381a64679972fbf0e3a9bfb097525.2",
+          "error": null,
+          "invocationId": "inv_1f1381a64679972fbf0e3a9bfb097525",
+          "outcome": null,
+          "output": null,
+          "retryable": true,
+          "status": "expired"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"file": "b.bin"},
+          "invocation": null,
+          "lastAcceptedAtMs": "61200",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "activity.attempts-exhausted",
+              "details": {"lastStatus": "expired"},
+              "message": "activity attempts exhausted",
+              "nodeId": "upload"
+            }
+          },
+          "runId": "run_expired_idem",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"upload": 1}
+        },
+        "snapshotDigest": "sha256:7e7d93dbf281966ac32cbaa9aae3d4646c5ebc1524be3ce2598eae0e5458c80c",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:ee26af5afff000a696a48efabe05b757537fcc8841598cca554d2cc570f67c05"
+      }
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "signal-before-waiter",
+  "description": "A signal accepted while the activity before its waiter is still running is buffered; entering the await-signal node consumes it in the same transition and the run completes.",
+  "workflow": {
+    "actions": {"prepare": {"argv": ["prepare"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "signal-before-waiter",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "cancelled"},
+        "signal": "approval"
+      },
+      "cancelled": {"error": {"code": "approval.rejected", "message": "rejected"}, "kind": "fail"},
+      "done": {
+        "kind": "complete",
+        "output": {"approvedBy": {"$get": ["nodes", "approve", "output", "by"]}}
+      },
+      "prepare": {"action": "prepare", "kind": "activity", "outcomes": {"ok": "approve"}}
+    },
+    "start": "prepare"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_signal_early", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "prepare",
+            "activationId": "prepare/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_bfa5acfc8cdfc286d6b62031430b75ca",
+            "nodeId": "prepare",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "prepare/1", "nodeId": "prepare", "visit": 1},
+          "result": null,
+          "runId": "run_signal_early",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"prepare": 1}
+        },
+        "snapshotDigest": "sha256:73ae65e0fa16615795eb9498c6f4e96cc0705c5bce2eb93430714d906e31aaa6",
+        "commands": [
+          {
+            "commandId": "cmd_fbdfe0452a4b8dbb615394aaa45785ab",
+            "activationId": "prepare/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "prepare",
+              "activationId": "prepare/1",
+              "attempt": 1,
+              "effectKey": "inv_bfa5acfc8cdfc286d6b62031430b75ca",
+              "input": null,
+              "invocationId": "inv_bfa5acfc8cdfc286d6b62031430b75ca",
+              "nodeId": "prepare",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:c8c85dae6935cec73313c5872c521f92ba5b7c3eca79ce62a698416d4eebae37"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "2",
+        "acceptedAtMs": "1500",
+        "kind": "signal.received",
+        "payload": {"data": {"by": "ana"}, "name": "approval", "outcome": "approved"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "prepare",
+            "activationId": "prepare/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_bfa5acfc8cdfc286d6b62031430b75ca",
+            "nodeId": "prepare",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1500",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "prepare/1", "nodeId": "prepare", "visit": 1},
+          "result": null,
+          "runId": "run_signal_early",
+          "semantics": "0.1",
+          "signals": [
+            {
+              "data": {"by": "ana"},
+              "eventId": "sig:m-1",
+              "name": "approval",
+              "outcome": "approved",
+              "sequence": "2"
+            }
+          ],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"prepare": 1}
+        },
+        "snapshotDigest": "sha256:36c4681c8e95595f970ee79f92d3111e32de6257bbaa924e44d135b114db1dc6",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:3ded1034202b4bf68a296e545eaac95b2d6d5a7250c5a09674ab0d7d49ffdda6"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_bfa5acfc8cdfc286d6b62031430b75ca.1",
+        "sequence": "3",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_bfa5acfc8cdfc286d6b62031430b75ca.1",
+          "invocationId": "inv_bfa5acfc8cdfc286d6b62031430b75ca",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "3",
+          "nodes": {
+            "approve": {"outcome": "approved", "output": {"by": "ana"}, "visit": 1},
+            "prepare": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": null,
+          "result": {"output": {"approvedBy": "ana"}},
+          "runId": "run_signal_early",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"approve": 1, "done": 1, "prepare": 1}
+        },
+        "snapshotDigest": "sha256:4a3c995ac035d0840c4cac2bd6f110b497ad84574bca8d54a37fdccd61963fb5",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:f7a099e0cbfb131584a1e0572762028fa78656733b9cdffcd3ece284a806162e"
+      }
+    }
+  ]
+}

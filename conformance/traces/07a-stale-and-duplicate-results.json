@@ -1,0 +1,456 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stale-and-duplicate-results",
+  "description": "A result is applied at most once. A repeat of a superseded attempt, a result for an attempt not yet authorized, a duplicate of an applied success, and a result for an unknown invocation each yield result.stale and change only lastSequence and lastAcceptedAtMs.",
+  "workflow": {
+    "actions": {
+      "build": {
+        "argv": ["build"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"backoffMs": "100", "maxAttempts": 3}
+      },
+      "ship": {"argv": ["ship"], "effect": "idempotent", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.1",
+    "name": "stale-and-duplicate-results",
+    "nodes": {
+      "build": {"action": "build", "kind": "activity", "outcomes": {"ok": "ship"}},
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "ship", "output"]}},
+      "ship": {
+        "action": "ship",
+        "input": {"artifact": {"$get": ["nodes", "build", "output", "artifact"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "build"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_stale", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "build/1", "nodeId": "build", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1}
+        },
+        "snapshotDigest": "sha256:e6cf3ccfa1d1c3ea15e3c2affebb94612b050e6c18e68cc806fd992966b4789e",
+        "commands": [
+          {
+            "commandId": "cmd_fd40d94fbfad6069957e602a52afe73a",
+            "activationId": "build/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "build",
+              "activationId": "build/1",
+              "attempt": 1,
+              "effectKey": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+              "input": null,
+              "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+              "nodeId": "build",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:e0fdccc5638ab2d7938d601d9751cf9be9a903883afaa7f2132b044ba18cd6a5"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_17c1462f3dafca6c91e1ed850ee9f017.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_17c1462f3dafca6c91e1ed850ee9f017.1",
+          "error": {"code": "net.reset", "message": "connection reset"},
+          "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+          "status": "failure"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/1",
+            "attempt": 2,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "build/1", "nodeId": "build", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1}
+        },
+        "snapshotDigest": "sha256:109d499f4a43d5ec86b906a027b99c8b74d058be005cd37cb396f97b3c0fd137",
+        "commands": [
+          {
+            "commandId": "cmd_b60b52d50255910ecfa6ce5ca20e686b",
+            "activationId": "build/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 2,
+              "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+              "notBeforeMs": "2100"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "build", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:a0e00e4415bdbbc76ac47bfbfa4f863f3bec59c5c933c6f68b122d4c1152d781"
+      }
+    },
+    {
+      "event": {
+        "eventId": "dup:inv_17c1462f3dafca6c91e1ed850ee9f017.1",
+        "sequence": "3",
+        "acceptedAtMs": "2050",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_17c1462f3dafca6c91e1ed850ee9f017.1",
+          "error": {"code": "net.reset", "message": "connection reset"},
+          "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+          "status": "failure"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/1",
+            "attempt": 2,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2050",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "build/1", "nodeId": "build", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1}
+        },
+        "snapshotDigest": "sha256:7fe9e13df409ca6481eba4731268172546e469234839efb3b05be707a9677da0",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "result.stale",
+            "nodeId": "build",
+            "details": {"attempt": 1, "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017"}
+          }
+        ],
+        "decisionDigest": "sha256:ead03b10b35c33ff039d160af98352cea71e401214637ac7549b781593d3901b"
+      }
+    },
+    {
+      "event": {
+        "eventId": "early:inv_17c1462f3dafca6c91e1ed850ee9f017.3",
+        "sequence": "4",
+        "acceptedAtMs": "2060",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 3,
+          "attemptId": "inv_17c1462f3dafca6c91e1ed850ee9f017.3",
+          "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+          "output": {"artifact": "a-1"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/1",
+            "attempt": 2,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2060",
+          "lastSequence": "4",
+          "nodes": {},
+          "position": {"activationId": "build/1", "nodeId": "build", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1}
+        },
+        "snapshotDigest": "sha256:a0c8de9350b6242c6f361ff13c2b107c101833a033f3bb775c5902e9cddae584",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "result.stale",
+            "nodeId": "build",
+            "details": {"attempt": 3, "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017"}
+          }
+        ],
+        "decisionDigest": "sha256:29add404bd6823d5a717e23e61108ccee7397f04bc74fae3207104c7b7826e79"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_17c1462f3dafca6c91e1ed850ee9f017.2",
+        "sequence": "5",
+        "acceptedAtMs": "2200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_17c1462f3dafca6c91e1ed850ee9f017.2",
+          "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+          "output": {"artifact": "a-1"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "ship",
+            "activationId": "ship/1",
+            "attempt": 1,
+            "inputDigest": "sha256:42a1e4a97b8642e07571bfcab6dcd5037347d2c29faeaedcc205f9d0b941ce2f",
+            "invocationId": "inv_3c3f5745666686bd71b1db39392ef993",
+            "nodeId": "ship",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2200",
+          "lastSequence": "5",
+          "nodes": {"build": {"outcome": "ok", "output": {"artifact": "a-1"}, "visit": 1}},
+          "position": {"activationId": "ship/1", "nodeId": "ship", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1, "ship": 1}
+        },
+        "snapshotDigest": "sha256:935a86fdcdae20b2a18bcd1ee808734a9568cc3781f673aa4f4f5b1642646162",
+        "commands": [
+          {
+            "commandId": "cmd_7ba9f16bcfd51451a8b842b46cd68d5d",
+            "activationId": "ship/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "ship",
+              "activationId": "ship/1",
+              "attempt": 1,
+              "effectKey": "inv_3c3f5745666686bd71b1db39392ef993",
+              "input": {"artifact": "a-1"},
+              "invocationId": "inv_3c3f5745666686bd71b1db39392ef993",
+              "nodeId": "ship",
+              "notBeforeMs": "2200"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:8ac3a3566febd6448cc13aed2a74b232790887abfa75728384a798defb223124"
+      }
+    },
+    {
+      "event": {
+        "eventId": "dup:inv_17c1462f3dafca6c91e1ed850ee9f017.2",
+        "sequence": "6",
+        "acceptedAtMs": "2300",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_17c1462f3dafca6c91e1ed850ee9f017.2",
+          "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017",
+          "output": {"artifact": "a-1"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "ship",
+            "activationId": "ship/1",
+            "attempt": 1,
+            "inputDigest": "sha256:42a1e4a97b8642e07571bfcab6dcd5037347d2c29faeaedcc205f9d0b941ce2f",
+            "invocationId": "inv_3c3f5745666686bd71b1db39392ef993",
+            "nodeId": "ship",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2300",
+          "lastSequence": "6",
+          "nodes": {"build": {"outcome": "ok", "output": {"artifact": "a-1"}, "visit": 1}},
+          "position": {"activationId": "ship/1", "nodeId": "ship", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1, "ship": 1}
+        },
+        "snapshotDigest": "sha256:f97a0092f692b05c543540895410a9c54520a29f55c2fcd4655d45441653db39",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "result.stale",
+            "nodeId": null,
+            "details": {"attempt": 2, "invocationId": "inv_17c1462f3dafca6c91e1ed850ee9f017"}
+          }
+        ],
+        "decisionDigest": "sha256:e83202f0a951e2c683aeb4f07c39cec2c3d0866ee1cd4e7e37aa64e828323047"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_00000000000000000000000000000000.1",
+        "sequence": "7",
+        "acceptedAtMs": "2400",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_00000000000000000000000000000000.1",
+          "invocationId": "inv_00000000000000000000000000000000",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "ship",
+            "activationId": "ship/1",
+            "attempt": 1,
+            "inputDigest": "sha256:42a1e4a97b8642e07571bfcab6dcd5037347d2c29faeaedcc205f9d0b941ce2f",
+            "invocationId": "inv_3c3f5745666686bd71b1db39392ef993",
+            "nodeId": "ship",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2400",
+          "lastSequence": "7",
+          "nodes": {"build": {"outcome": "ok", "output": {"artifact": "a-1"}, "visit": 1}},
+          "position": {"activationId": "ship/1", "nodeId": "ship", "visit": 1},
+          "result": null,
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1, "ship": 1}
+        },
+        "snapshotDigest": "sha256:fff1bdc1267bd72e7c2bed94c4f4556e4d85d40ef21a69410673eecc054f53f8",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "result.stale",
+            "nodeId": null,
+            "details": {"attempt": 1, "invocationId": "inv_00000000000000000000000000000000"}
+          }
+        ],
+        "decisionDigest": "sha256:01d97b75702ef8546f9b4f885ca11b72d1510aa1e66669e4f98b8f238b5cf826"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_3c3f5745666686bd71b1db39392ef993.1",
+        "sequence": "8",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_3c3f5745666686bd71b1db39392ef993.1",
+          "invocationId": "inv_3c3f5745666686bd71b1db39392ef993",
+          "output": {"url": "https://example.test/a-1"},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "8",
+          "nodes": {
+            "build": {"outcome": "ok", "output": {"artifact": "a-1"}, "visit": 1},
+            "ship": {"outcome": "ok", "output": {"url": "https://example.test/a-1"}, "visit": 1}
+          },
+          "position": null,
+          "result": {"output": {"url": "https://example.test/a-1"}},
+          "runId": "run_stale",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"build": 1, "done": 1, "ship": 1}
+        },
+        "snapshotDigest": "sha256:269befc9753de335a3d5b9fe788c829eb1facbc4660114f203500c3fb3d12f05",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:3ae2ba2bb38038bc0bb70f047acb8a7038b5354a823437dca42905ad2ff4d6d4"
+      }
+    }
+  ]
+}

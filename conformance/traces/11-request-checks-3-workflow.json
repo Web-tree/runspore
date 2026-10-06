@@ -1,0 +1,48 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "request-checks-3-workflow",
+  "description": "Check 3: the graph must decode as a workflow. A node of a kind outside semantics 0.1 makes every transition fail with workflow.invalid, ahead of the later checks: an unknown event kind (check 4) and a missing snapshot (check 5) are not reached.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "request-checks-3-workflow",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "pause": {"delayMs": "1000", "kind": "timer"},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_check_3", "tenant": "default"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "e-1",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "timer.fired",
+        "payload": {}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "signal.received",
+        "payload": {"name": "note"}
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "failure-without-error",
+  "description": "A failure result that is not retryable and carries no error fails the invocation with the kernel's own activity.failed; the node routes no failed outcome, so the run ends failed.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.1",
+    "name": "failure-without-error",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {"action": "work", "kind": "activity", "outcomes": {"ok": "done"}}
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_errorless", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_a750923e775acb009190b0bf6e3657b3",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_errorless",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:83755340966365ecdf3e2e7dbe32bfefb5c5413c56fd5a3ea944b7b0d62eec6f",
+        "commands": [
+          {
+            "commandId": "cmd_b83ffbdb5278a8e23e6d241b226ff7f7",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_a750923e775acb009190b0bf6e3657b3",
+              "input": null,
+              "invocationId": "inv_a750923e775acb009190b0bf6e3657b3",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:828e494613610a4b08f0e9b82c44e69476cafe9c873a02acd9618f95d22be366"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_a750923e775acb009190b0bf6e3657b3.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_a750923e775acb009190b0bf6e3657b3.1",
+          "invocationId": "inv_a750923e775acb009190b0bf6e3657b3",
+          "retryable": false,
+          "status": "failure"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "activity.failed",
+              "details": null,
+              "message": "activity failed",
+              "nodeId": "work"
+            }
+          },
+          "runId": "run_errorless",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:b5c611eba9d024fbfd176d781fc52f48e1239ace5f199d40b2802ab631dddac2",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:581318527fa1e6cc9374a8ae6ed809198fd676bf29a9b98bbc377f59335e91d4"
+      }
+    }
+  ]
+}

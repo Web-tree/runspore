@@ -122,7 +122,10 @@ A mapping is a JSON value evaluated against the run context:
 A path that does not resolve fails the run: terminal `failed` with error
 `mapping.missing-path`, `nodeId` set, `details` `{"path": [...]}`.
 
-Each mapping value visited costs one expression operation; each path step costs one.
+Each mapping value visited costs one expression operation; each path step costs one,
+for the whole path even when it does not resolve. `$literal` costs one and an absent
+mapping costs one. Members of an object are evaluated in canonical key order, which
+fixes which missing path is reported when several are missing.
 
 ## 5. Events
 
@@ -166,6 +169,19 @@ In order; the first failing check returns its failure and nothing else happens.
 
 `Failure.details` is explanatory text and is not part of conformance; `kind` and `code` are.
 
+Refinements of these checks:
+
+- In check 3, a graph that does not decode at all is `workflow.invalid`. Within W07 the
+  order for one action is: it parses, its effect is supported, its outcomes are valid,
+  its `maxAttempts` is in range.
+- In check 4, an envelope `sequence` or `acceptedAtMs` above 2^63 − 1 is `event.invalid`.
+- In check 5, `format` and `semantics` are read from the raw snapshot before the typed
+  decode, so a future format is `version.state-format`, not `state.invalid`. A snapshot
+  that decodes but contradicts itself or the graph (status against position and
+  invocation, a position at a node of the wrong kind, a visit count below the
+  position's visit, an invocation ID that is not the derived one, more than 64
+  buffered signals) is `state.invalid`.
+
 ### 7.2 Bookkeeping
 
 Before dispatch: `lastSequence = event.sequence`;
@@ -181,9 +197,12 @@ If the state is terminal, every event is consumed with diagnostic
 input, empty `nodes`, `visits`, `signals`, zero `activations`, no result. Then *enter*
 the start node.
 
-**`signal.received`** — if the buffer holds 64 signals, drop this one with diagnostic
-`signal.buffer-overflow` (details `{"eventId": ...}`). Otherwise append
-`{eventId, sequence, name, outcome, data}`. Then, if status is `waiting`, *consume*.
+**`signal.received`** — if status is `waiting` and the signal's name equals the
+parked node's `signal`, the signal is taken directly, exactly as *consume* would take
+it from the buffer (it routes, or it is dropped with `signal.outcome-unrouted`); the
+buffer is not involved, so a full buffer can never starve a waiter. Otherwise, if the
+buffer holds 64 signals, drop this one with diagnostic `signal.buffer-overflow`
+(details `{"eventId": ...}`); else append `{eventId, sequence, name, outcome, data}`.
 
 **`activity.result`** — let `inv` be `state.invocation`. Unless `inv` exists, has the
 same `invocationId` and `attempt`, and is `scheduled`: diagnostic `result.stale`
@@ -208,6 +227,10 @@ change. Otherwise by `resolution.action`:
 - `complete`: if the action does not declare the outcome, diagnostic
   `resolve.not-applicable` and no other change. Otherwise as a `success` result with
   that outcome and output.
+
+The `reason` of `resolve.not-applicable` is `invocation-mismatch` (no invocation, or
+another ID), `invocation-not-unknown` (the ID matches but its phase is `scheduled`),
+or `outcome-undeclared`.
 - `retry`: *retry* with no delay and regardless of `maxAttempts`.
 - `fail`: *fail the invocation* with the given error.
 
@@ -236,7 +259,7 @@ change. Otherwise by `resolution.action`:
 
 **Consume** (at an await-signal node) — find the earliest buffered signal whose name
 equals `node.signal`. None: stay `waiting`. Otherwise remove it and count one
-microstep. Its outcome is `signal.outcome`, or `received` when absent. If the node
+microstep (over the budget is the same `budget.microsteps` failure as in *enter*). Its outcome is `signal.outcome`, or `received` when absent. If the node
 does not route that outcome: diagnostic `signal.outcome-unrouted` (details
 `{"eventId", "outcome"}`) and look for the next matching signal. Otherwise record
 `nodes[node] = {visit, outcome, output: signal.data}` and *enter* the target.
@@ -262,8 +285,30 @@ After dispatch: more than `limits.maxCommandCount` commands is `resource-limit` 
 `resource-limit` / `budget.expression-operations`. A failure discards the whole
 decision: no partial state, no commands.
 
-Diagnostics appear in the order they were produced. `Diagnostic.nodeId` is the
-position's node when the diagnostic concerns it, else null. `details` is canonical JSON.
+Three further failures exist for conditions the checks above cannot rule out; their
+codes are defined by the kernel crate (`runspore_kernel::code`): `resource-limit` /
+`budget.value-depth` when a value the kernel must emit would nest deeper than 32;
+`resource-limit` / `budget.counter-range` when an attempt number or a retry time would
+leave its counter domain; `invariant-violation` / `kernel.invariant` for a state the
+request checks should have made unreachable.
+
+Diagnostics appear in the order they were produced. `details` is canonical JSON.
+`Diagnostic.nodeId` by code:
+
+| Code | `nodeId` |
+| --- | --- |
+| `event.ignored-terminal`, `signal.buffer-overflow` | null |
+| `signal.outcome-unrouted` | the await-signal node |
+| `result.stale`, `resolve.not-applicable` | the activity node when the event names the current invocation, else null |
+| `invocation.unknown`, `activity.retry-scheduled` | the activity node |
+
+`activity.retry-scheduled` details carry the newly authorized attempt and follow the
+retry command. The `message` of an `ErrorInfo` the kernel creates is fixed text and is
+part of the snapshot bytes; the kernel's source is the reference for it.
+
+Known limit of 0.1: the expression-operation and state-size budgets are checked after
+dispatch, so they bound what is committed, not the work done to find out. Work is
+bounded in practice by the size of the workflow document and of the state.
 
 ## 8. Properties the tests must demonstrate
 

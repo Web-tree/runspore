@@ -1,0 +1,144 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "undeclared-outcome",
+  "description": "A success that reports an outcome its action does not declare fails the invocation with activity.undeclared-outcome; the node's failed route records the error as its result and the run continues along it.",
+  "workflow": {
+    "actions": {
+      "classify": {
+        "argv": ["classify"],
+        "effect": "pure",
+        "kind": "command",
+        "outcomes": ["spam", "ham"]
+      }
+    },
+    "format": "runspore.workflow/0.1",
+    "name": "undeclared-outcome",
+    "nodes": {
+      "classify": {
+        "action": "classify",
+        "kind": "activity",
+        "outcomes": {"failed": "unsure", "ham": "done", "spam": "done"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "classify", "outcome"]}},
+      "unsure": {"kind": "complete", "output": {"$get": ["nodes", "classify", "output", "error"]}}
+    },
+    "start": "classify"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": null, "runId": "run_undeclared", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": {
+            "actionId": "classify",
+            "activationId": "classify/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_25952201ee25b32bf7c1286cf01bf66c",
+            "nodeId": "classify",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "classify/1", "nodeId": "classify", "visit": 1},
+          "result": null,
+          "runId": "run_undeclared",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"classify": 1}
+        },
+        "snapshotDigest": "sha256:2dc787229ad8833ddbf082a5557216b69fdc59443ef79ab97a3b0a9235c130e1",
+        "commands": [
+          {
+            "commandId": "cmd_c44515060817e9075a7f95d52838f023",
+            "activationId": "classify/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "classify",
+              "activationId": "classify/1",
+              "attempt": 1,
+              "effectKey": "inv_25952201ee25b32bf7c1286cf01bf66c",
+              "input": null,
+              "invocationId": "inv_25952201ee25b32bf7c1286cf01bf66c",
+              "nodeId": "classify",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:cfaca2833ff4fefb16403b3ed3029839f5a0dff89ca0154332093673ed092ee1"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_25952201ee25b32bf7c1286cf01bf66c.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_25952201ee25b32bf7c1286cf01bf66c.1",
+          "invocationId": "inv_25952201ee25b32bf7c1286cf01bf66c",
+          "outcome": "maybe",
+          "output": {"score": 50},
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": null,
+          "invocation": null,
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {
+            "classify": {
+              "outcome": "failed",
+              "output": {
+                "error": {
+                  "code": "activity.undeclared-outcome",
+                  "details": {"outcome": "maybe"},
+                  "message": "activity reported an undeclared outcome",
+                  "nodeId": "classify"
+                }
+              },
+              "visit": 1
+            }
+          },
+          "position": null,
+          "result": {
+            "output": {
+              "code": "activity.undeclared-outcome",
+              "details": {"outcome": "maybe"},
+              "message": "activity reported an undeclared outcome",
+              "nodeId": "classify"
+            }
+          },
+          "runId": "run_undeclared",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"classify": 1, "unsure": 1}
+        },
+        "snapshotDigest": "sha256:12d5d0ca7c4e3b422417937654b5d6498306582755a209321cae8e6cf4f28a95",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:925db9bb9cd547237a6c6ddaadb5e98887b488efb5e3de913e1ab868eff61681"
+      }
+    }
+  ]
+}
