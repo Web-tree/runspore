@@ -1,0 +1,19 @@
+[package]
+name = "runspore-conformance-export"
+description = "Writes the kernel component and the compiled golden and generated traces to disk for the JavaScript conformance runners."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+hex.workspace = true
+runspore-kernel.workspace = true
+runspore-trace = { path = "../runspore-trace" }
+runspore-types.workspace = true
+runspore-wasmtime = { path = "../runspore-wasmtime" }
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
