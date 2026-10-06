@@ -55,7 +55,9 @@ pub struct ActivityContext {
 }
 
 impl ActivityContext {
-    pub(crate) fn new(
+    /// A context whose stop signal fires when `stop` is set to true.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
         key: RunKey,
         node_id: String,
         action_id: String,
