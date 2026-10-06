@@ -109,9 +109,13 @@ Read the [architecture index](docs/README.md) and [delivery plan](docs/17-delive
 
 The [contracts](contracts/README.md) directory includes the reducer and telemetry WIT drafts, native async store interface, example activity binding, and 22 conformance scenario definitions. [Validation status](contracts/VALIDATION.txt) records what has and has not been checked.
 
-## First implementation milestone
+## Evidence
 
-Prove one graph executes identically through Wasmtime, Node, and Bun; implement atomic SQLite transitions; inject failures around commits and external effects; and verify recovery before expanding to shared workers or edge profiles.
+- The kernel gives byte-identical results natively, through Wasmtime, in Node and in Bun: 48 golden traces plus generated corpora. Run `conformance/js/check.sh`.
+- The SQLite store passes the adapter-independent conformance suite and a crash test at every store failpoint.
+- The `runspore` binary, aborted at each of 19 failpoints and killed at 40 points through a run, recovers: no completed step runs again, and an interrupted `unsafe` step parks the run until an operator resolves it. Run `cargo test -p runspore-cli`.
+
+Not yet done: a soak test, a security review, any target beyond one host with one SQLite file.
 
 ## Project context
 

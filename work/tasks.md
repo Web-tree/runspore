@@ -13,7 +13,7 @@ Questions that need Max collect in [questions/](questions/README.md).
 | C | Component packaging and Wasmtime reducer | `crates/runspore-component`, `crates/runspore-wasmtime`, `contracts/wit/machine/machine.wit` | P0 | done 2026-10-06, verified and merged | worktree-agent-ab051d9354ed47950 |
 | H | Engine and activity runners | `crates/runspore-host` | K, S | done 2026-10-06, verified and merged; follow-up (validate_workflow, finish on shutdown) running | worktree-agent-ae3e3822be5e46fe6 |
 | X | Cross-host determinism: Wasmtime, Node, Bun | `conformance/js`, tests in `crates/runspore-wasmtime` | K, C | done 2026-10-06, verified and merged | worktree-agent-ae5ea7e843a88261a |
-| E | CLI, examples, crash-recovery suite | `crates/runspore-cli`, `examples` | H, C | running since 2026-10-06 14:50 | |
+| E | CLI, examples, crash-recovery suite | `crates/runspore-cli`, `examples` | H, C | done 2026-10-06, verified and merged | worktree-agent-a9f736a8f70b610be |
 
 ## Done-when
 
@@ -45,3 +45,19 @@ Questions that need Max collect in [questions/](questions/README.md).
 - 2026-10-06 15:05: H follow-up reviewed as a diff, merged; 33 host tests pass on main. Note for later: after a graceful stop the result is stored but the run's status updates only when the next worker coordinates.
 - 2026-10-06 15:12: E's first agent ran out of context with the binary, examples, command tests and crash suite committed (crash suite read by me: reference run, 19 failpoints each asserted to fire, 40 SIGKILL points, five recovery assertions). Remaining, handed to a fresh Opus agent in the same worktree: READMEs, strict needs-intervention assertion, Wasmtime-kernel crash subset, exit codes 5 and 10, final verification. H agent adds a public `Engine::shutdown`. Exit code 130 and shutdown semantics added to the spec.
 - 2026-10-06 15:20: `Engine::shutdown` reviewed as a diff and merged; 34 host tests pass on main. Known: `run_until_parked` after `shutdown` never returns for a run that still needs an activity.
+- 2026-10-06 15:45: E verified and merged. On main: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (43 suites, 273 passed, 0 failed). Crash suite on main: 19 failpoints (53 crash scenarios) and 40 SIGKILL points all recover; an interrupted unsafe step parks the run. README quickstart run by hand against a release build: hello, kill-and-resume, signal, needs-intervention and resolve all behave as documented. All package branches are merged; agent worktrees removed, branches kept.
+
+## State at wrap-up (2026-10-06)
+
+All packages are done. No open questions in `questions/`.
+
+Left for later, in rough priority:
+1. Cancellation (spec decision M12).
+2. Timers, then fork and join.
+3. A JS host and SDK on the already verified kernel bundle; PostgreSQL store on the existing conformance suite.
+4. Kernel: budgets bound what is committed, not the work done; move the three kernel-local failure codes into `runspore-types`.
+5. Trace crate: a public `replay`; failure details in compiled traces.
+6. Engine: `run_until_parked` after `shutdown` never returns for a run that still needs an activity; a missing package fails the whole tick instead of quarantining one run.
+7. Store: Q03 finds its crash helper by newest file; test databases are left in the temp directory.
+
+Human-only: licence choice, package and domain name, creating a remote and pushing, security review, soak testing, real browser and Cloudflare targets.
