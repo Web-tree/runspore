@@ -14,13 +14,9 @@ serde_json.workspace = true
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [dev-dependencies]
+serde_json.workspace = true
 runspore-store-conformance = { path = "../runspore-store-conformance" }
 tokio.workspace = true
-
-[[bin]]
-name = "runspore-store-sqlite-crash"
-path = "src/bin/crash.rs"
-test = false
 
 [lints]
 workspace = true

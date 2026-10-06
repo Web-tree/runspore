@@ -60,18 +60,23 @@ fn stale(code: &str) -> StoreFailure {
 
 fn db(error: rusqlite::Error) -> StoreFailure {
     match error.sqlite_error_code() {
-        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => {
-            fail(StoreFailureKind::Unavailable, "store.busy", error.to_string())
-        }
-        Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => {
-            fail(StoreFailureKind::Corrupt, "store.corrupt", error.to_string())
-        }
+        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => fail(
+            StoreFailureKind::Unavailable,
+            "store.busy",
+            error.to_string(),
+        ),
+        Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => fail(
+            StoreFailureKind::Corrupt,
+            "store.corrupt",
+            error.to_string(),
+        ),
         _ => fail(StoreFailureKind::Unavailable, "store.io", error.to_string()),
     }
 }
 
 fn encode<T: serde::Serialize>(value: &T) -> R<Vec<u8>> {
-    canonical::encode(value).map_err(|e| fail(StoreFailureKind::Corrupt, "store.encode", e.to_string()))
+    canonical::encode(value)
+        .map_err(|e| fail(StoreFailureKind::Corrupt, "store.encode", e.to_string()))
 }
 
 fn verify(evidence: &Evidence) -> R<()> {
@@ -130,11 +135,19 @@ fn run_row(c: &Connection, key: &RunKey) -> R<Option<RunRow>> {
 }
 
 fn existing_run(c: &Connection, key: &RunKey) -> R<RunRow> {
-    run_row(c, key)?.ok_or_else(|| fail(StoreFailureKind::NotFound, "run.not-found", "run.not-found"))
+    run_row(c, key)?
+        .ok_or_else(|| fail(StoreFailureKind::NotFound, "run.not-found", "run.not-found"))
 }
 
 /// Appends an event at the run's next sequence with `acceptedAtMs = max(now, previous)`.
-fn push_event(c: &Connection, key: &RunKey, id: &str, kind: &str, body: &[u8], now: u64) -> R<EventAccepted> {
+fn push_event(
+    c: &Connection,
+    key: &RunKey,
+    id: &str,
+    kind: &str,
+    body: &[u8],
+    now: u64,
+) -> R<EventAccepted> {
     let run = existing_run(c, key)?;
     let accepted = now.max(run.last_ms);
     c.execute(
@@ -149,7 +162,10 @@ fn push_event(c: &Connection, key: &RunKey, id: &str, kind: &str, body: &[u8], n
         params![key.tenant, key.run, i(run.next + 1), i(accepted), i(now)],
     )
     .map_err(db)?;
-    Ok(EventAccepted { sequence: run.next, accepted_at_ms: accepted })
+    Ok(EventAccepted {
+        sequence: run.next,
+        accepted_at_ms: accepted,
+    })
 }
 
 struct AttemptRow {
@@ -164,7 +180,14 @@ fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
         "SELECT status, lease_until_ms, attempt_number FROM attempts
          WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3
            AND invocation_id = ?4 AND owner = ?5 AND fence = ?6",
-        params![a.key.tenant, a.key.run, a.attempt_id, a.invocation_id, a.owner, i(a.fence)],
+        params![
+            a.key.tenant,
+            a.key.run,
+            a.attempt_id,
+            a.invocation_id,
+            a.owner,
+            i(a.fence)
+        ],
         |r| {
             Ok(AttemptRow {
                 status: r.get(0)?,
@@ -178,7 +201,13 @@ fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
 }
 
 /// Ends a running attempt, settles its invocation, and appends its result event.
-fn settle(c: &Connection, a: &AttemptRef, status: &str, body: &[u8], now: u64) -> R<ResultAccepted> {
+fn settle(
+    c: &Connection,
+    a: &AttemptRef,
+    status: &str,
+    body: &[u8],
+    now: u64,
+) -> R<ResultAccepted> {
     c.execute(
         "UPDATE attempts SET status = ?4, result = ?5 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
         params![a.key.tenant, a.key.run, a.attempt_id, status, body],
@@ -191,7 +220,9 @@ fn settle(c: &Connection, a: &AttemptRef, status: &str, body: &[u8], now: u64) -
     .map_err(db)?;
     let event = ids::event_for_attempt(&a.attempt_id);
     let accepted = push_event(c, &a.key, &event, "activity.result", body, now)?;
-    Ok(ResultAccepted { result_sequence: accepted.sequence })
+    Ok(ResultAccepted {
+        result_sequence: accepted.sequence,
+    })
 }
 
 fn cursor_value(cursor: Option<String>) -> R<Option<Value>> {
@@ -201,11 +232,17 @@ fn cursor_value(cursor: Option<String>) -> R<Option<Value>> {
 }
 
 fn cursor_str(value: &Value, index: usize) -> R<String> {
-    value[index].as_str().map(str::to_string).ok_or_else(|| conflict("cursor.invalid"))
+    value[index]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| conflict("cursor.invalid"))
 }
 
 fn cursor_u64(value: &Value, index: usize) -> R<i64> {
-    value[index].as_u64().map(i).ok_or_else(|| conflict("cursor.invalid"))
+    value[index]
+        .as_u64()
+        .map(i)
+        .ok_or_else(|| conflict("cursor.invalid"))
 }
 
 const RUN_VIEW: &str = "SELECT tenant, run_id, start_key, package_digest, status, revision,
@@ -258,11 +295,17 @@ impl SqliteStore {
     pub fn open_with_clock(path: impl AsRef<Path>, clock: Arc<dyn Clock>) -> R<Self> {
         let mut conn = Connection::open(path).map_err(db)?;
         conn.busy_timeout(Duration::from_secs(5)).map_err(db)?;
-        conn.pragma_update(None, "journal_mode", "WAL").map_err(db)?;
-        conn.pragma_update(None, "synchronous", "FULL").map_err(db)?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(db)?;
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(db)?;
         conn.pragma_update(None, "foreign_keys", "ON").map_err(db)?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
-        let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(db)?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db)?;
+        let version: i64 = tx
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(db)?;
         if version > SCHEMA_VERSION {
             return Err(fail(
                 StoreFailureKind::Incompatible,
@@ -272,14 +315,20 @@ impl SqliteStore {
         }
         if version == 0 {
             tx.execute_batch(SCHEMA).map_err(db)?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION).map_err(db)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)
+                .map_err(db)?;
         }
         tx.commit().map_err(db)?;
-        Ok(Self { conn: Mutex::new(conn), clock })
+        Ok(Self {
+            conn: Mutex::new(conn),
+            clock,
+        })
     }
 
     fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn read<T>(&self, f: impl FnOnce(&Connection) -> R<T>) -> R<T> {
@@ -302,7 +351,9 @@ impl SqliteStore {
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         let mut conn = self.lock();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db)?;
         let now = self.clock.now_ms();
         let receipt = |disposition, value| Receipt {
             request_id: mutation.request_id.clone(),
@@ -333,7 +384,14 @@ impl SqliteStore {
         tx.execute(
             "INSERT INTO receipts (tenant, run_id, request_id, request_digest, operation, value)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![key.tenant, key.run, mutation.request_id, mutation.request_digest, operation, encode(&value)?],
+            params![
+                key.tenant,
+                key.run,
+                mutation.request_id,
+                mutation.request_digest,
+                operation,
+                encode(&value)?
+            ],
         )
         .map_err(db)?;
         if let Some(op) = failpoint_op {
@@ -370,7 +428,11 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
         return Err(conflict("snapshot.digest-mismatch"));
     }
     if q.snapshot.len() > MAX_SNAPSHOT_BYTES {
-        return Err(fail(StoreFailureKind::Quota, "snapshot.too-large", "snapshot.too-large"));
+        return Err(fail(
+            StoreFailureKind::Quota,
+            "snapshot.too-large",
+            "snapshot.too-large",
+        ));
     }
     for (n, command) in q.commands.iter().enumerate() {
         let taken: bool = c
@@ -380,7 +442,11 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
                 |r| r.get(0),
             )
             .map_err(db)?;
-        if taken || q.commands[..n].iter().any(|o| o.command_id == command.command_id) {
+        if taken
+            || q.commands[..n]
+                .iter()
+                .any(|o| o.command_id == command.command_id)
+        {
             return Err(conflict("command.id-conflict"));
         }
     }
@@ -389,13 +455,31 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
         .map_err(|e| fail(StoreFailureKind::Corrupt, "store.encode", e.to_string()))?;
     c.execute(
         "INSERT INTO transitions VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![q.key.tenant, q.key.run, i(revision), i(q.event_sequence), q.decision_digest, q.snapshot_digest, diagnostics, i(now)],
+        params![
+            q.key.tenant,
+            q.key.run,
+            i(revision),
+            i(q.event_sequence),
+            q.decision_digest,
+            q.snapshot_digest,
+            diagnostics,
+            i(now)
+        ],
     )
     .map_err(db)?;
     c.execute(
         "UPDATE runs SET revision = ?3, applied_sequence = ?4, snapshot = ?5, snapshot_digest = ?6,
                 status = ?7, updated_at_ms = ?8 WHERE tenant = ?1 AND run_id = ?2",
-        params![q.key.tenant, q.key.run, i(revision), i(q.event_sequence), q.snapshot, q.snapshot_digest, q.status, i(now)],
+        params![
+            q.key.tenant,
+            q.key.run,
+            i(revision),
+            i(q.event_sequence),
+            q.snapshot,
+            q.snapshot_digest,
+            q.status,
+            i(now)
+        ],
     )
     .map_err(db)?;
     c.execute(
@@ -407,7 +491,16 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
     for (ordinal, command) in q.commands.iter().enumerate() {
         c.execute(
             "INSERT INTO commands VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![q.key.tenant, q.key.run, command.command_id, i(revision), ordinal as i64, command.activation_id, command.kind, command.payload],
+            params![
+                q.key.tenant,
+                q.key.run,
+                command.command_id,
+                i(revision),
+                ordinal as i64,
+                command.activation_id,
+                command.kind,
+                command.payload
+            ],
         )
         .map_err(db)?;
         match command.kind.as_str() {
@@ -439,7 +532,11 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
                 }
             }
             _ => {
-                return Err(fail(StoreFailureKind::Incompatible, "command.unknown-kind", command.kind.clone()));
+                return Err(fail(
+                    StoreFailureKind::Incompatible,
+                    "command.unknown-kind",
+                    command.kind.clone(),
+                ));
             }
         }
     }
@@ -472,8 +569,14 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
         )
         .optional()
         .map_err(db)?;
-    let Some((node_id, action_id, effect_key, input, input_digest, status, number, not_before)) = row else {
-        return Err(fail(StoreFailureKind::NotFound, "invocation.not-found", "invocation.not-found"));
+    let Some((node_id, action_id, effect_key, input, input_digest, status, number, not_before)) =
+        row
+    else {
+        return Err(fail(
+            StoreFailureKind::NotFound,
+            "invocation.not-found",
+            "invocation.not-found",
+        ));
     };
     let run = existing_run(c, &q.key)?;
     if run.quarantined {
@@ -495,7 +598,16 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     .map_err(db)?;
     c.execute(
         "INSERT INTO attempts VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', NULL)",
-        params![q.key.tenant, q.key.run, attempt_id, q.invocation_id, number, q.worker, i(fence), i(lease_until_ms)],
+        params![
+            q.key.tenant,
+            q.key.run,
+            attempt_id,
+            q.invocation_id,
+            number,
+            q.worker,
+            i(fence),
+            i(lease_until_ms)
+        ],
     )
     .map_err(db)?;
     c.execute(
@@ -521,7 +633,12 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     })
 }
 
-fn set_quarantine(c: &Connection, key: &RunKey, value: Option<(&str, &str)>, now: u64) -> R<QuarantineChanged> {
+fn set_quarantine(
+    c: &Connection,
+    key: &RunKey,
+    value: Option<(&str, &str)>,
+    now: u64,
+) -> R<QuarantineChanged> {
     let run = existing_run(c, key)?;
     if run.quarantined != value.is_some() {
         c.execute(
@@ -531,7 +648,9 @@ fn set_quarantine(c: &Connection, key: &RunKey, value: Option<(&str, &str)>, now
         )
         .map_err(db)?;
     }
-    Ok(QuarantineChanged { quarantined: value.is_some() })
+    Ok(QuarantineChanged {
+        quarantined: value.is_some(),
+    })
 }
 
 #[async_trait]
@@ -596,43 +715,77 @@ impl Store for SqliteStore {
     }
 
     async fn append_event(&self, q: AppendEvent) -> R<Receipt<EventAccepted>> {
-        self.mutate("append_event", Some("append-event"), &q.key, &q.mutation, |c, now| {
-            verify(&q.body)?;
-            existing_run(c, &q.key)?;
-            if q.kind == "run.started" || q.kind == "activity.result" {
-                return Err(conflict("event.reserved-kind"));
-            }
-            if q.body.body.len() > MAX_EVENT_BYTES {
-                return Err(fail(StoreFailureKind::Quota, "event.too-large", "event.too-large"));
-            }
-            let prior = c
-                .query_row(
-                    "SELECT kind, body_digest, sequence, accepted_at_ms FROM events
-                     WHERE tenant = ?1 AND run_id = ?2 AND event_id = ?3",
-                    params![q.key.tenant, q.key.run, q.event_id],
-                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?)),
-                )
-                .optional()
-                .map_err(db)?;
-            match prior {
-                Some((kind, body_digest, sequence, at)) if kind == q.kind && body_digest == q.body.digest => {
-                    Ok(Outcome::Same(EventAccepted { sequence: sequence as u64, accepted_at_ms: at as u64 }))
+        self.mutate(
+            "append_event",
+            Some("append-event"),
+            &q.key,
+            &q.mutation,
+            |c, now| {
+                verify(&q.body)?;
+                existing_run(c, &q.key)?;
+                if q.kind == "run.started" || q.kind == "activity.result" {
+                    return Err(conflict("event.reserved-kind"));
                 }
-                Some(_) => Err(conflict("event.id-conflict")),
-                None => push_event(c, &q.key, &q.event_id, &q.kind, &q.body.body, now).map(Outcome::Applied),
-            }
-        })
+                if q.body.body.len() > MAX_EVENT_BYTES {
+                    return Err(fail(
+                        StoreFailureKind::Quota,
+                        "event.too-large",
+                        "event.too-large",
+                    ));
+                }
+                let prior = c
+                    .query_row(
+                        "SELECT kind, body_digest, sequence, accepted_at_ms FROM events
+                     WHERE tenant = ?1 AND run_id = ?2 AND event_id = ?3",
+                        params![q.key.tenant, q.key.run, q.event_id],
+                        |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, String>(1)?,
+                                r.get::<_, i64>(2)?,
+                                r.get::<_, i64>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(db)?;
+                match prior {
+                    Some((kind, body_digest, sequence, at))
+                        if kind == q.kind && body_digest == q.body.digest =>
+                    {
+                        Ok(Outcome::Same(EventAccepted {
+                            sequence: sequence as u64,
+                            accepted_at_ms: at as u64,
+                        }))
+                    }
+                    Some(_) => Err(conflict("event.id-conflict")),
+                    None => push_event(c, &q.key, &q.event_id, &q.kind, &q.body.body, now)
+                        .map(Outcome::Applied),
+                }
+            },
+        )
     }
 
     async fn load_turn(&self, key: &RunKey) -> R<Option<Turn>> {
         self.read(|c| {
-            let Some(view) = c.query_row(&format!("{RUN_VIEW} WHERE tenant = ?1 AND run_id = ?2"), params![key.tenant, key.run], run_view).optional().map_err(db)? else {
+            let Some(view) = c
+                .query_row(
+                    &format!("{RUN_VIEW} WHERE tenant = ?1 AND run_id = ?2"),
+                    params![key.tenant, key.run],
+                    run_view,
+                )
+                .optional()
+                .map_err(db)?
+            else {
                 return Ok(None);
             };
             if view.quarantine.is_some() || view.applied_sequence + 1 == view.next_sequence {
                 return Ok(None);
             }
-            let event = list_events(c, key, view.applied_sequence, 1)?.items.remove(0).event;
+            let event = list_events(c, key, view.applied_sequence, 1)?
+                .items
+                .remove(0)
+                .event;
             Ok(Some(Turn {
                 key: view.key,
                 revision: view.revision,
@@ -647,16 +800,24 @@ impl Store for SqliteStore {
 
     async fn get_package(&self, digest: &str) -> R<Option<Vec<u8>>> {
         self.read(|c| {
-            c.query_row("SELECT body FROM packages WHERE digest = ?1", params![digest], |r| r.get(0))
-                .optional()
-                .map_err(db)
+            c.query_row(
+                "SELECT body FROM packages WHERE digest = ?1",
+                params![digest],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db)
         })
     }
 
     async fn commit_turn(&self, q: CommitTurn) -> R<Receipt<CommitReceipt>> {
-        self.mutate("commit_turn", Some("commit-turn"), &q.key, &q.mutation, |c, now| {
-            apply_commit(c, &q, now).map(Outcome::Applied)
-        })
+        self.mutate(
+            "commit_turn",
+            Some("commit-turn"),
+            &q.key,
+            &q.mutation,
+            |c, now| apply_commit(c, &q, now).map(Outcome::Applied),
+        )
     }
 
     async fn get_receipt(&self, key: &RunKey, request_id: &str) -> R<Option<StoredReceipt>> {
@@ -679,9 +840,13 @@ impl Store for SqliteStore {
     }
 
     async fn claim_attempt(&self, q: ClaimAttempt) -> R<Receipt<Claim>> {
-        self.mutate("claim_attempt", Some("claim-attempt"), &q.key, &q.mutation, |c, now| {
-            apply_claim(c, &q, now).map(Outcome::Applied)
-        })
+        self.mutate(
+            "claim_attempt",
+            Some("claim-attempt"),
+            &q.key,
+            &q.mutation,
+            |c, now| apply_claim(c, &q, now).map(Outcome::Applied),
+        )
     }
 
     async fn heartbeat(&self, q: Heartbeat) -> R<Receipt<LeaseExtended>> {
@@ -701,36 +866,63 @@ impl Store for SqliteStore {
     }
 
     async fn finish_attempt(&self, q: FinishAttempt) -> R<Receipt<ResultAccepted>> {
-        self.mutate("finish_attempt", Some("finish-attempt"), &q.attempt.key, &q.mutation, |c, now| {
-            verify(&q.result)?;
-            let a = &q.attempt;
-            let result: ActivityResult = canonical::decode(&q.result.body).map_err(|_| conflict("result.invalid"))?;
-            let number = ids::attempt(&a.invocation_id, result.attempt) == a.attempt_id;
-            if result.invocation_id != a.invocation_id || result.attempt_id != a.attempt_id || !number || result.status == AttemptStatus::Expired {
-                return Err(conflict("result.invalid"));
-            }
-            match attempt_row(c, a)? {
-                Some(row) if row.status == "running" && now < row.lease_until_ms && row.attempt_number == result.attempt => {}
-                _ => return Err(stale("lease.lost")),
-            }
-            settle(c, a, "finished", &q.result.body, now).map(Outcome::Applied)
-        })
+        self.mutate(
+            "finish_attempt",
+            Some("finish-attempt"),
+            &q.attempt.key,
+            &q.mutation,
+            |c, now| {
+                verify(&q.result)?;
+                let a = &q.attempt;
+                let result: ActivityResult =
+                    canonical::decode(&q.result.body).map_err(|_| conflict("result.invalid"))?;
+                let number = ids::attempt(&a.invocation_id, result.attempt) == a.attempt_id;
+                if result.invocation_id != a.invocation_id
+                    || result.attempt_id != a.attempt_id
+                    || !number
+                    || result.status == AttemptStatus::Expired
+                {
+                    return Err(conflict("result.invalid"));
+                }
+                match attempt_row(c, a)? {
+                    Some(row)
+                        if row.status == "running"
+                            && now < row.lease_until_ms
+                            && row.attempt_number == result.attempt => {}
+                    _ => return Err(stale("lease.lost")),
+                }
+                settle(c, a, "finished", &q.result.body, now).map(Outcome::Applied)
+            },
+        )
     }
 
     async fn expire_attempt(&self, q: ExpireAttempt) -> R<Receipt<ResultAccepted>> {
-        self.mutate("expire_attempt", Some("expire-attempt"), &q.attempt.key, &q.mutation, |c, now| {
-            let Some(row) = attempt_row(c, &q.attempt)? else {
-                return Err(fail(StoreFailureKind::NotFound, "attempt.not-found", "attempt.not-found"));
-            };
-            if row.status != "running" {
-                return Err(stale("lease.lost"));
-            }
-            if now < row.lease_until_ms {
-                return Err(conflict("lease.not-due"));
-            }
-            let body = encode(&ActivityResult::expired(&q.attempt.invocation_id, row.attempt_number))?;
-            settle(c, &q.attempt, "expired", &body, now).map(Outcome::Applied)
-        })
+        self.mutate(
+            "expire_attempt",
+            Some("expire-attempt"),
+            &q.attempt.key,
+            &q.mutation,
+            |c, now| {
+                let Some(row) = attempt_row(c, &q.attempt)? else {
+                    return Err(fail(
+                        StoreFailureKind::NotFound,
+                        "attempt.not-found",
+                        "attempt.not-found",
+                    ));
+                };
+                if row.status != "running" {
+                    return Err(stale("lease.lost"));
+                }
+                if now < row.lease_until_ms {
+                    return Err(conflict("lease.not-due"));
+                }
+                let body = encode(&ActivityResult::expired(
+                    &q.attempt.invocation_id,
+                    row.attempt_number,
+                ))?;
+                settle(c, &q.attempt, "expired", &body, now).map(Outcome::Applied)
+            },
+        )
     }
 
     async fn record_late_evidence(&self, q: RecordLateEvidence) -> R<Receipt<AuditRecorded>> {
@@ -786,7 +978,9 @@ impl Store for SqliteStore {
                 )
                 .map_err(db)?;
             let items = stmt
-                .query_map(params![tenant, run, i64::from(limit) + 1], |r| Ok(RunKey::new(r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .query_map(params![tenant, run, i64::from(limit) + 1], |r| {
+                    Ok(RunKey::new(r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })
                 .and_then(Iterator::collect)
                 .map_err(db)?;
             Ok(page(items, limit, |k: &RunKey| json!([k.tenant, k.run])))
@@ -858,13 +1052,22 @@ impl Store for SqliteStore {
 
     async fn get_run(&self, key: &RunKey) -> R<Option<RunView>> {
         self.read(|c| {
-            c.query_row(&format!("{RUN_VIEW} WHERE tenant = ?1 AND run_id = ?2"), params![key.tenant, key.run], run_view)
-                .optional()
-                .map_err(db)
+            c.query_row(
+                &format!("{RUN_VIEW} WHERE tenant = ?1 AND run_id = ?2"),
+                params![key.tenant, key.run],
+                run_view,
+            )
+            .optional()
+            .map_err(db)
         })
     }
 
-    async fn list_runs(&self, tenant: &str, cursor: Option<String>, limit: u32) -> R<Page<RunView>> {
+    async fn list_runs(
+        &self,
+        tenant: &str,
+        cursor: Option<String>,
+        limit: u32,
+    ) -> R<Page<RunView>> {
         let after = cursor_value(cursor)?;
         self.read(|c| {
             let run = match &after {
@@ -872,7 +1075,9 @@ impl Store for SqliteStore {
                 None => String::new(),
             };
             let mut stmt = c
-                .prepare(&format!("{RUN_VIEW} WHERE tenant = ?1 AND run_id > ?2 ORDER BY run_id LIMIT ?3"))
+                .prepare(&format!(
+                    "{RUN_VIEW} WHERE tenant = ?1 AND run_id > ?2 ORDER BY run_id LIMIT ?3"
+                ))
                 .map_err(db)?;
             let items = stmt
                 .query_map(params![tenant, run, i64::from(limit) + 1], run_view)
@@ -882,7 +1087,12 @@ impl Store for SqliteStore {
         })
     }
 
-    async fn list_events(&self, key: &RunKey, after_sequence: u64, limit: u32) -> R<Page<EventRecord>> {
+    async fn list_events(
+        &self,
+        key: &RunKey,
+        after_sequence: u64,
+        limit: u32,
+    ) -> R<Page<EventRecord>> {
         self.read(|c| list_events(c, key, after_sequence, limit))
     }
 
@@ -933,18 +1143,28 @@ fn list_events(c: &Connection, key: &RunKey, after: u64, limit: u32) -> R<Page<E
         )
         .map_err(db)?;
     let rows: Vec<(EventRecord, Option<String>)> = stmt
-        .query_map(params![key.tenant, key.run, i(after), i64::from(limit) + 1], |r| {
-            let event = StoredEvent {
-                id: r.get(0)?,
-                sequence: r.get::<_, i64>(1)? as u64,
-                accepted_at_ms: r.get::<_, i64>(2)? as u64,
-                kind: r.get(3)?,
-                body: r.get(4)?,
-                body_digest: r.get(5)?,
-            };
-            let consumed_revision = r.get::<_, Option<i64>>(6)?.map(|v| v as u64);
-            Ok((EventRecord { event, consumed_revision, diagnostics: Vec::new() }, r.get(7)?))
-        })
+        .query_map(
+            params![key.tenant, key.run, i(after), i64::from(limit) + 1],
+            |r| {
+                let event = StoredEvent {
+                    id: r.get(0)?,
+                    sequence: r.get::<_, i64>(1)? as u64,
+                    accepted_at_ms: r.get::<_, i64>(2)? as u64,
+                    kind: r.get(3)?,
+                    body: r.get(4)?,
+                    body_digest: r.get(5)?,
+                };
+                let consumed_revision = r.get::<_, Option<i64>>(6)?.map(|v| v as u64);
+                Ok((
+                    EventRecord {
+                        event,
+                        consumed_revision,
+                        diagnostics: Vec::new(),
+                    },
+                    r.get(7)?,
+                ))
+            },
+        )
         .and_then(Iterator::collect)
         .map_err(db)?;
     let mut items = Vec::with_capacity(rows.len());
@@ -955,5 +1175,7 @@ fn list_events(c: &Connection, key: &RunKey, after: u64, limit: u32) -> R<Page<E
         }
         items.push(record);
     }
-    Ok(page(items, limit, |e: &EventRecord| json!(e.event.sequence)))
+    Ok(page(items, limit, |e: &EventRecord| {
+        json!(e.event.sequence)
+    }))
 }
