@@ -1,0 +1,26 @@
+[package]
+name = "runspore-host"
+description = "Runspore engine: coordinates transitions and runs activities"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+runspore-types.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+nix = { version = "0.31.3", features = ["signal", "process"] }
+
+[dev-dependencies]
+runspore-store-sqlite = { path = "../runspore-store-sqlite" }
+runspore-store-conformance = { path = "../runspore-store-conformance" }
+runspore-kernel.workspace = true
+runspore-wasmtime = { path = "../runspore-wasmtime" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+[lints]
+workspace = true
