@@ -1,112 +1,19 @@
 //! Engine behaviour with a scripted reducer and the real SQLite store.
 
-use std::path::PathBuf;
+mod common;
+
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
-use runspore_host::{
-    ActivityOutput, ActivityRegistry, Engine, EngineConfig, NativeRunner, TickReport,
-};
-use runspore_store_conformance::{schedule, ManualClock};
+use common::*;
+use runspore_host::{ActivityOutput, EngineConfig, NativeRunner, TickReport};
+use runspore_store_conformance::ManualClock;
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::canonical;
 use runspore_types::digest;
 use runspore_types::reducer::*;
-use runspore_types::store::{Disposition, RunKey, Store};
+use runspore_types::store::Disposition;
 use serde_json::{json, Value};
-
-type Step = dyn Fn(&TransitionRequest) -> Result<Decision, Failure> + Send + Sync;
-
-/// A reducer that answers with whatever its closure decides.
-pub struct Scripted(pub Box<Step>);
-
-impl Reducer for Scripted {
-    fn describe(&self) -> Descriptor {
-        Descriptor {
-            abi_version: "test".into(),
-            semantics_version: "test".into(),
-            graph_format_version: "test".into(),
-            codec_version: "test".into(),
-        }
-    }
-    fn kernel_digest(&self) -> String {
-        "scripted".into()
-    }
-    fn transition(&self, request: &TransitionRequest) -> Result<Decision, Failure> {
-        (self.0)(request)
-    }
-}
-
-fn decision(request: &TransitionRequest, status: &str, commands: Vec<Command>) -> Decision {
-    let seq = request.input_event.sequence;
-    let snapshot = canonical::encode(&json!({"status": status, "seq": seq})).unwrap();
-    Decision {
-        snapshot_digest: digest::state(&snapshot),
-        snapshot,
-        commands,
-        diagnostics: Vec::new(),
-    }
-}
-
-fn run_key(request: &TransitionRequest) -> RunKey {
-    let started: Value = serde_json::from_slice(&request.input_event.payload).unwrap();
-    RunKey::new("default", started["runId"].as_str().unwrap_or_default())
-}
-
-/// `run.started` schedules node `a`; anything else completes the run.
-pub fn one_step(request: &TransitionRequest) -> Result<Decision, Failure> {
-    if request.input_event.kind == "run.started" {
-        let (command, _) = schedule(&run_key(request), "a", 0);
-        Ok(decision(request, "running", vec![command]))
-    } else {
-        Ok(decision(request, "completed", Vec::new()))
-    }
-}
-
-pub const WORKFLOW: &[u8] = br#"{"actions": {"echo": {"kind": "native", "function": "echo"}}}"#;
-
-pub fn temp_db(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("runspore-host-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join("store.db")
-}
-
-fn engine(
-    store: Arc<dyn Store>,
-    reducer: impl Fn(&TransitionRequest) -> Result<Decision, Failure> + Send + Sync + 'static,
-    native: NativeRunner,
-    config: EngineConfig,
-) -> Engine {
-    let reducer = Arc::new(Scripted(Box::new(reducer)));
-    Engine::new(
-        store,
-        reducer,
-        ActivityRegistry::with_builtins(native),
-        config,
-    )
-}
-
-pub fn counting_echo(count: Arc<AtomicUsize>) -> NativeRunner {
-    NativeRunner::new().function("echo", move |_ctx, input| {
-        count.fetch_add(1, Ordering::SeqCst);
-        async move {
-            ActivityOutput::Success {
-                outcome: "ok".into(),
-                output: input,
-            }
-        }
-    })
-}
-
-pub async fn results(engine: &Engine, key: &RunKey) -> Vec<Value> {
-    let events = engine.list_events(key, 0, 100).await.unwrap().items;
-    events
-        .iter()
-        .filter(|e| e.event.kind == "activity.result")
-        .map(|e| serde_json::from_slice(&e.event.body).unwrap())
-        .collect()
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn h2_the_losing_coordinator_dispatches_nothing() {
@@ -256,11 +163,7 @@ async fn h3_a_lost_lease_stops_the_runner_and_keeps_late_evidence() {
     let results = results(&engine, &key).await;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["status"], "expired");
-    let db = rusqlite::Connection::open(&path).unwrap();
-    let audits: i64 = db
-        .query_row("SELECT count(*) FROM audit", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(audits, 1, "late evidence was not recorded");
+    assert_eq!(audits(&path), 1, "late evidence was not recorded");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
