@@ -1,0 +1,156 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "unsafe-unknown-resolve-fail",
+  "description": "An expired attempt on an unsafe action pauses the run; the operator resolves it as fail and the failed route carries the operator's error to completion.",
+  "workflow": {
+    "format": "runspore.workflow/0.1",
+    "name": "unsafe-unknown-resolve-fail",
+    "start": "charge",
+    "actions": {
+      "charge": {"kind": "command", "argv": ["charge"], "effect": "unsafe"}
+    },
+    "nodes": {
+      "charge": {
+        "kind": "activity", "action": "charge",
+        "input": {"amount": {"$get": ["input", "amount"]}},
+        "outcomes": {"ok": "done", "failed": "cancelled"}
+      },
+      "done": {"kind": "complete", "output": {"receipt": {"$get": ["nodes", "charge", "output", "receipt"]}}},
+      "cancelled": {
+        "kind": "complete",
+        "output": {"status": "cancelled", "error": {"$get": ["nodes", "charge", "output", "error"]}}
+      }
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start", "sequence": "1", "acceptedAtMs": "1000", "kind": "run.started",
+        "payload": {"tenant": "default", "runId": "run_unsafe_c", "input": {"amount": 1200}}
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_c",
+          "status": "running",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_eeb36893c37dec72c5086ca3f7c06607", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "scheduled",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "1", "lastAcceptedAtMs": "1000"
+        },
+        "snapshotDigest": "sha256:12bbdfae42d43e289fc61cdb49a0fd477d8d62073be1310dfd2f0c3b78ee84f4",
+        "commands": [
+          {
+            "commandId": "cmd_f23bffa8399fc7db39551aaa98a6ff74", "activationId": "charge/1", "kind": "activity.schedule",
+            "payload": {
+              "invocationId": "inv_eeb36893c37dec72c5086ca3f7c06607", "activationId": "charge/1",
+              "nodeId": "charge", "actionId": "charge", "effectKey": "inv_eeb36893c37dec72c5086ca3f7c06607",
+              "attempt": 1, "notBeforeMs": "1000",
+              "input": {"amount": 1200}
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:87158a2cd29a64387b045f80cdaab85486bb75428911925595880b76b74cb7e2"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_eeb36893c37dec72c5086ca3f7c06607.1", "sequence": "2", "acceptedAtMs": "4000", "kind": "activity.result",
+        "payload": {
+          "invocationId": "inv_eeb36893c37dec72c5086ca3f7c06607", "attemptId": "inv_eeb36893c37dec72c5086ca3f7c06607.1", "attempt": 1,
+          "status": "expired",
+          "outcome": null, "output": null, "error": null, "retryable": true
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_c",
+          "status": "needs-intervention",
+          "input": {"amount": 1200},
+          "nodes": {},
+          "visits": {"charge": 1},
+          "activations": 1,
+          "position": {"nodeId": "charge", "activationId": "charge/1", "visit": 1},
+          "invocation": {
+            "invocationId": "inv_eeb36893c37dec72c5086ca3f7c06607", "activationId": "charge/1",
+            "nodeId": "charge", "actionId": "charge", "attempt": 1, "state": "unknown",
+            "inputDigest": "sha256:ce544c7c9056efdb46b31f12be7ad9fa85860ea3571e57d0f0749c63dac4d817"
+          },
+          "signals": [],
+          "result": null,
+          "lastSequence": "2", "lastAcceptedAtMs": "4000"
+        },
+        "snapshotDigest": "sha256:39224248be28d72c86fb2bfe216734591298e545f4f84844fea091a6b2621c88",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.unknown", "nodeId": "charge",
+            "details": {"invocationId": "inv_eeb36893c37dec72c5086ca3f7c06607", "attempt": 1, "status": "expired"}
+          }
+        ],
+        "decisionDigest": "sha256:fff3d92b518e4f3c2fbda33ee431a366611cb454d9736a30d023764856de1237"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:op-1", "sequence": "3", "acceptedAtMs": "9000", "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_eeb36893c37dec72c5086ca3f7c06607",
+          "resolution": {
+            "action": "fail",
+            "error": {"code": "operator.failed", "message": "charge abandoned by operator"}
+          }
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "format": "runspore.state/0.1", "semantics": "0.1",
+          "tenant": "default", "runId": "run_unsafe_c",
+          "status": "completed",
+          "input": {"amount": 1200},
+          "nodes": {
+            "charge": {
+              "visit": 1, "outcome": "failed",
+              "output": {
+                "error": {
+                  "code": "operator.failed", "message": "charge abandoned by operator",
+                  "nodeId": "charge", "details": null
+                }
+              }
+            }
+          },
+          "visits": {"charge": 1, "cancelled": 1},
+          "activations": 2,
+          "position": null,
+          "invocation": null,
+          "signals": [],
+          "result": {
+            "output": {
+              "status": "cancelled",
+              "error": {
+                "code": "operator.failed", "message": "charge abandoned by operator",
+                "nodeId": "charge", "details": null
+              }
+            }
+          },
+          "lastSequence": "3", "lastAcceptedAtMs": "9000"
+        },
+        "snapshotDigest": "sha256:afe7111d3bc51d91fbcfeeb2872d2b421cfe99aee4d6d6352a024a97abf7c4ff",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:4786822a6825a40cb8600b466bd27d0ff95220455b9e89e589f33a6b61cd6c2c"
+      }
+    }
+  ]
+}

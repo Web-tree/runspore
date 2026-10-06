@@ -1,0 +1,18 @@
+[package]
+name = "runspore-trace"
+description = "Golden kernel traces: the runspore.trace/0.1 format, a replaying runner, a compiler for non-Rust runners, and a deterministic trace generator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+runspore-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+runspore-kernel.workspace = true
+
+[lints]
+workspace = true
