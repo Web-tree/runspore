@@ -109,11 +109,11 @@ See R4 for how file references fit into this shape without breaking it.
 - *B — one export `bundle() -> list<u8>` with everything inlined in one JSON document.* Lost because it makes the component a wrapper around one blob, which is Q8's option A in disguise.
 - *C — typed exports per kind (`packages()`, `assets()`, `source-map()`).* Lost because the WIT grows with every new kind and still has to carry bytes.
 
-An import-free artifact also composes with the kernel (R3) by a plain `wasm-tools compose`.
+An import-free artifact also composes with the kernel (R3) without wiring: neither component imports anything, so the composition only instantiates both and re-exports their interfaces (L9).
 
 ### L9. What the composed artifact exports (Q16 → A)
 
-**Decision.** The composed artifact exports both worlds unchanged: the kernel's `runspore:machine` and the artifact's `runspore:artifact`. A host loads one file, reads the package with `blob(main)`, and drives `transition` exactly as with the separate kernel. It is `wasm-tools compose` of the certified kernel component and the workflow artifact; the kernel inside is the certified build byte for byte, so nothing new is certified per workflow.
+**Decision.** The composed artifact exports both worlds unchanged: the kernel's `runspore:machine` and the artifact's `runspore:artifact`. A host loads one file, reads the package with `blob(main)`, and drives `transition` exactly as with the separate kernel. It is a fixed WAC composition, run by `spore build`, that instantiates the certified kernel component and the workflow artifact side by side and re-exports both interfaces. A plain `wasm-tools compose` cannot produce it: wasm-compose only plugs the root component's imports, needs at least one of them satisfied, and exports only the root's exports, and neither component has an import. The kernel inside is the certified build byte for byte, so nothing new is certified per workflow.
 
 **Rejected.**
 - *B — only `machine`, with the kernel reading the graph from the embedded artifact.* Lost because it needs a `machine` 0.2 (the kernel importing the artifact interface) and puts a per-workflow kernel variant behind a new WIT whose conformance is proven only for the standalone kernel.
@@ -125,10 +125,10 @@ An import-free artifact also composes with the kernel (R3) by a plain `wasm-tool
 - **R2. Public inputs (Q7, Max's words).** `spore` accepts DOT source (a workflow folder or its `workflow.dot`) and prebuilt workflow artifacts. Starting from DOT builds and stores the artifact automatically. JSON workflow files are not public inputs; the package is an internal representation. Consequence: spec/cli.md 0.1 takes `<workflow.json>` on `validate`, `start` and `run`, so this is a CLI 0.2 change; `examples/*.json` and the golden traces become internal fixtures; a debugging `spore inspect <artifact>` that prints the internal form stays possible, marked not a stable interface (like text output today).
 - **R3. The composed artifact is a second distribution form in this map (Q9 → B).** Max first accepted A (later and optional) and 46 seconds later sent B; B stands. Rejected: A, and C (drop it from the architecture). Produced by `spore build` with a flag (name provisional); L9 fixes what it exports.
 - **R4. The workflow folder and how files find each other (Q11, Max's words).** One folder per workflow with fixed names `workflow.dot` and `settings.json`. Optional instructions and assets live in the folder and are referenced by relative path from the settings; only declared files enter the artifact; a stray file is ignored. Entry point is the folder or its `workflow.dot`. The workflow `name` is the DOT graph id, not the folder name (folder names are not portable). Max's example: `deploy/ ├ workflow.dot ├ settings.json ├ instructions/review.md └ assets/calculate.wasm`. Rejected (as drafted before the text answer): B (a graph attribute naming the settings file) because the DOT would carry a file path, its only non-topology fact; C (`w/<node>.md` by convention) because a stray `.md` would silently join a workflow.
-  *File references and the package shape (my resolution of L6 against this answer; Max did not rule on it, see Open threads):* package nodes reject unknown fields, so a file reference cannot sit on a node and keep the settings file a pure slice. The settings schema is therefore the package schema plus two optional reference fields that the build resolves into manifest entries and strips before producing the package: `instructions` (a relative path) on a node, and `assets` (a list of relative paths) on an action. After stripping, the result validates with the package's own types. The manifest entry records which node or action declared the file.
+  *File references and the package shape (my resolution of L6 against this answer; Max did not rule on it, see Open threads):* package nodes reject unknown fields, so a file reference cannot sit on a node and keep the settings file a pure slice. The settings schema is therefore the package schema plus two optional reference fields that the build resolves into manifest entries and strips before producing the package: `instructions` (a relative path) on a node, and `assets` (a list of relative paths) on an action. After stripping, the result validates with the package's own types. The manifest entry records which node or action declared the file. A reference must stay inside the workflow folder: the build resolves `..` and every symlink and checks the final path, and an absolute path, a traversal or a symlink whose target lies outside the folder is a build error (the path-or-symlink-escape control in `docs/11-security.md`). A workflow folder from another author therefore cannot pull local files into a distributable artifact.
 - **R5. Dialect version (Q13 → A).** Required graph attribute `dialect="runspore/0.1"`, checked before any other rule; a missing or unknown value is the first error reported. `settings.json` keeps the package's `format` field; the two must agree; the manifest records both. Rejected: B (optional, absent means current) hides a mismatch until an attribute happens to be unknown; C (none) ties files to a binary version nobody records.
 - **R6. What the run record pins (Q14 → B).** The run keeps `package_digest` as its identity (kernel identity and `get_package` untouched) and adds `artifact_digest`, the digest of the file the run was started from (workflow artifact or composed artifact), as provenance. The store adds one content-addressed artifact table beside packages: an additive store 0.2 change, nothing frozen is redefined. Rejected: A (the run pins the artifact digest and the host extracts the package every turn) because it reopens two frozen contracts for the same guarantee, and because artifact bytes depend on component tooling, which must not become the kernel's identity.
-- **R7. Build errors.** A settings entry for a node the DOT lacks, or a DOT `activity` node with no settings entry, is a build error naming both files. A `complete` or `fail` node with an outgoing edge, a declared outcome of the bound action with no edge, or two edges from one node with the same `on`, are build errors naming the line.
+- **R7. Build errors.** A settings entry for a node the DOT lacks, or a DOT `activity` node with no settings entry, is a build error naming both files. A file reference that is absolute or resolves outside the folder (R4) is a build error naming the reference. A `complete` or `fail` node with an outgoing edge, a declared outcome of the bound action with no edge, or two edges from one node with the same `on`, are build errors naming the line.
 - **R8. `spore build` output (visual feedback).** `spore build deploy/` runs without `-o` and writes `deploy.wasm` next to the folder (a sibling, so the artifact never lands inside the source folder); `-o <file>` overrides. The composed form defaults to `deploy-composed.wasm` with its flag; both the flag and that name are provisional until the CLI spec.
 - **R9. Manifest contents (Q15 thread).** `format: "runspore.artifact/0.1"`, `dialect`, `name`, `main` (the package digest the run pins), `entries[]` of `{path, digest, kind, owner}` with kinds `source`, `instructions`, `asset`; paths are folder-relative. `workflow.dot` and `settings.json` ride along as `source` entries so `spore inspect` shows what was built and a rebuild is checkable.
 
@@ -166,19 +166,21 @@ Grammar: R1. Attributes with meaning: graph `dialect` (required), `start` (requi
   "format": "runspore.workflow/0.1",
   "limits": { "maxVisitsPerNode": 16, "maxActivations": 256 },
   "actions": {
-    "make-plan": { "kind": "command", "argv": ["./plan.sh"], "outcomes": ["ok"], "exitOutcomes": { "0": "ok" } },
-    "build":     { "kind": "command", "argv": ["cargo", "build"], "outcomes": ["ok", "failed"],
-                   "exitOutcomes": { "0": "ok" }, "assets": ["assets/calculate.wasm"] }
+    "make-plan": { "kind": "command", "effect": "read-only", "argv": ["./plan.sh"],
+                   "outcomes": ["ok"], "exitOutcomes": { "0": "ok" } },
+    "build":     { "kind": "command", "effect": "idempotent", "argv": ["cargo", "build"],
+                   "outcomes": ["ok"], "exitOutcomes": { "0": "ok" }, "assets": ["assets/calculate.wasm"] }
   },
   "nodes": {
     "plan":   { "action": "make-plan" },
     "build":  { "action": "build" },
-    "review": { "signal": "review", "instructions": "instructions/review.md" }
+    "review": { "signal": "review", "instructions": "instructions/review.md" },
+    "rejected": { "error": { "code": "review.rejected", "message": "the reviewer rejected the change" } }
   }
 }
 ```
 
-Shape: L6 and R4. `nodes.<id>` carries no routing (`routes`, `start`, kinds come from the DOT). After the build strips `instructions` and `assets`, the merged document must validate as a `runspore.workflow/0.1` package with the existing types.
+Shape: L6 and R4. `nodes.<id>` carries no routing (`routes`, `start`, kinds come from the DOT). After the build strips `instructions` and `assets`, the merged document must validate as a `runspore.workflow/0.1` package with the existing types. Every action declares `effect`; `failed` is never declared in `outcomes` (the kernel reserves it), yet a DOT edge `on="failed"` still routes a failure.
 
 ### The `runspore:artifact` world
 

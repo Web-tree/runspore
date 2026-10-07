@@ -468,7 +468,7 @@ spore build deploy/
         </div>
         <div class="blk st hl" data-q="q9 q16">
           <div class="hd"><b>Composed artifact</b><span>second distribution form</span><span class="hchip" data-chip="q9"></span><span class="hchip" data-chip="q16"></span></div>
-          <code>wasm-tools compose</code> of the kernel component and the workflow artifact. Exports <code>runspore:machine</code> and <code>runspore:artifact</code>, both unchanged: a host reads <code>blob(main)</code>, then calls <code>transition</code> as today.
+          A WAC composition instantiating the kernel component and the workflow artifact side by side. Exports <code>runspore:machine</code> and <code>runspore:artifact</code>, both unchanged: a host reads <code>blob(main)</code>, then calls <code>transition</code> as today.
         </div>
         <p class="mut" style="margin:0">Definitions only: no run state, no credentials. The programs a <code>command</code> names are not inside; they run on the worker.</p>
       </div>
@@ -1043,7 +1043,7 @@ var boxes = {
     M("example digest `sha256:9c41…`")
   ]},
   composed:{id:"composed", p:"embed", style:"settled", level:"L3", head:"SECOND FORM", title:"Composed artifact", chips:["q9","q16"], lines:[
-    T("`wasm-tools compose` of the kernel"),
+    T("WAC composition of the kernel"),
     T("component and `deploy.wasm`;"),
     T("exports both worlds, unchanged:"),
     C("runspore:machine"),
