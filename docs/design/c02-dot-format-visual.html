@@ -1,0 +1,1215 @@
+<!--
+Topic: C02 - The DOT format spore reads. Visual v4, kind: diagram.
+
+v4 changes (feedback: "spore build deploy/ should be runnable without -o; then the file should
+be the same as the folder name"):
+  - spore build deploy/ needs no -o: it writes deploy.wasm beside the folder (sibling of
+    deploy/, not inside it). -o <file> is shown only as an optional override.
+  - The composed form keeps its provisional flag and defaults to deploy-composed.wasm, marked
+    provisional the same way as the flag.
+  - Touched: L2 "Explicit build, to ship" block, L2 author card, the terminal session example,
+    the pipeline Build box and the composed box. Nothing else moved.
+
+v3 changes (redraw around levels x personas, per Max's visual feedback: "the programmable
+interface for each level ... for each user persona", custom steps, embedding, DX):
+  - New main view: a levels x personas matrix. Five levels top to bottom (L1 authoring, L2 CLI,
+    L3 artifact, L4 kernel, L5 host/store), the exact programmable interface of each level, and
+    four persona columns (workflow author, custom-node developer, embedding developer,
+    integration tooling) saying what each one writes or calls there, or "not touched".
+  - New "DX reading" cards, one per persona: strengths, friction, gaps. Labelled as this
+    visual's reading, not a decision.
+  - The v2 pipeline is kept as one compact panel ("How the levels connect"), every box tagged
+    with its level. Now drawn: Q11 workflow folder (workflow.dot, settings.json, instructions/,
+    assets/), Q9 B composed artifact box (second distribution form, exports both worlds, Q16 A),
+    Q14 B artifacts table and artifact_digest beside package_digest.
+  - Q9..Q15 moved from "open, drawn as recommendation" to answered; nothing is assumed now.
+  - Worked example switched from the coding loop (w.dot <-> w.json pairing, which Q11 replaced)
+    to Max's deploy/ folder. Tool-specific wording from the v2 example removed; Runspore stays generic.
+  - New styles: amber dashed = provisional (decided in substance, spelling or stability not
+    fixed); red dashed = gap, "not in this map".
+  - Persona filter buttons (dim everything a persona does not touch) next to the Q-chip
+    highlighting kept from v2.
+
+Questions reflected (all answered except Q6):
+  Q1  C: DOT holds topology and kinds; one settings file per workflow; prose only where needed
+  Q2  ".dot file should be compiled to wasm" (split into Q4, Q7, Q8)
+  Q3  A: strict DOT subset, line-numbered errors, Graphviz render attributes kept
+  Q4  one immutable WebAssembly artifact; Runspore supplies the runtime; runs pin it by digest
+  Q5  step nodes here; kind=workflow goes to a separate map
+  Q6  deferred with Q5 (expansion vs child run), drawn grey
+  Q7  public inputs: folder, workflow.dot, built .wasm; JSON workflow files not public; package internal
+  Q8  B: the artifact is a component whose exports return bytes
+  Q9  B: the composed artifact is a second distribution form, specified in this map
+  Q10 A: settings.json is JSON in the package's shape minus topology
+  Q11 one workflow folder, fixed names, instructions/ and assets/ named by relative path
+  Q12 A: on="<outcome>" per edge (absent = ok, on="failed" = failure route); start graph attr;
+      label render-only; node kind in activity | await-signal | complete | fail
+  Q13 A: required dialect="runspore/0.1", checked first
+  Q14 B: run keeps package_digest as identity, adds artifact_digest as provenance; artifact table
+  Q15 A: import-free world runspore:artifact@0.1.0, manifest() and blob(digest)
+  Q16 A: the composed artifact exports runspore:machine and runspore:artifact unchanged
+
+Assumed regions: none (no open question).
+Provisional (amber): the spore build flag that selects the composed form (name not fixed) and
+  its default output name deploy-composed.wasm; spore inspect output (debug, not a stable interface).
+Gaps, "not in this map" (red): an action kind that runs a module from assets/; adding an action
+  kind to spore; how a step reads instructions/ or assets/ out of the artifact at dispatch
+  (map fog, Q15 thread); a host library / SDK for embedding (Q16 thread: the application API is
+  meant as the primary contract; candidate new map ticket).
+From the repo, drawn as it is (not from a question): CLI 0.1 commands, --json, exit codes
+  (spec/cli.md); command action fields, RUNSPORE_* variables, native kind, ActivityRunner,
+  ActivityRegistry::with, NativeRunner::function, Engine API (spec/host.md, crates/runspore-host,
+  crates are publish = false); machine.wit; store tables (spec/store.md).
+Inferences of the visual: the DX readings; persona-to-level mapping beyond the brief; the deploy/
+  example content (node names, commands, ship.sh, input) and every digest are made up.
+Self-contained: system fonts, no network requests.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C02 levels and personas</title>
+<style>
+:root{
+  --bg:#f6f6f3; --panel:#ffffff; --ink:#1c2229; --muted:#5a636f; --line:#d3d7dd; --code:#f0f1f3;
+  --ex:#27774f; --ex-bg:#e8f4ed; --on-ex:#ffffff;
+  --st:#3450ad; --st-bg:#edf0fb; --on-st:#ffffff;
+  --op:#a35606; --op-bg:#fff3df; --on-op:#ffffff;
+  --gap:#b3261e; --gap-bg:#fdeceb; --on-gap:#ffffff;
+  --gh:#868d97; --gh-bg:#f0f1f3;
+  --badge:#1c2229; --badge-ink:#ffffff;
+  --hl:#1c2229;
+  --sans:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#13161b; --panel:#1b1f25; --ink:#e3e6eb; --muted:#9aa2ad; --line:#353c46; --code:#20252c;
+    --ex:#5bbf8f; --ex-bg:#142319; --on-ex:#0d1a12;
+    --st:#93a5ff; --st-bg:#1a2040; --on-st:#10142b;
+    --op:#f0a44a; --op-bg:#2a2012; --on-op:#1d1407;
+    --gap:#ff8a80; --gap-bg:#2b1716; --on-gap:#2b0d0b;
+    --gh:#7c8490; --gh-bg:#1d2127;
+    --badge:#e3e6eb; --badge-ink:#13161b;
+    --hl:#e3e6eb;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+.wrap{padding:18px 16px 32px;max-width:1480px;margin:0 auto}
+h1{font-size:19px;margin:0 0 4px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:15px;margin:0 0 4px}
+h2 + .sub{font-size:12.5px;color:var(--muted);margin:0 0 10px}
+h3{font-size:12px;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+p{margin:0 0 8px}
+code{font-family:var(--mono);font-size:.9em;background:var(--code);padding:0 3px;border-radius:3px;overflow-wrap:anywhere}
+.lede{color:var(--muted);max-width:1040px}
+section.blockh{margin-top:22px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:10px 0 8px;font-size:12.5px;align-items:center}
+.legend span.k{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:26px;height:14px;border-radius:4px;border:1.5px solid}
+.sw.ex{background:var(--ex-bg);border-color:var(--ex)}
+.sw.st{background:var(--st-bg);border-color:var(--st)}
+.sw.pv{background:var(--op-bg);border-color:var(--op);border-style:dashed}
+.sw.gap{background:var(--gap-bg);border-color:var(--gap);border-style:dashed}
+.sw.gh{background:var(--gh-bg);border-color:var(--gh);border-style:dotted}
+.dotm{display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--ink);vertical-align:-1px}
+.dotm.main{background:var(--ink)}
+.dotm.none{border-style:dashed;border-color:var(--muted)}
+
+/* chips and badges */
+.hchip{display:inline-block;font-size:11px;font-weight:650;padding:0 7px;border-radius:9px;line-height:16px;border:1px solid;white-space:nowrap;cursor:pointer;text-transform:none;letter-spacing:0;vertical-align:1px}
+.hchip.answered{background:var(--st);border-color:var(--st);color:var(--on-st)}
+.hchip.deferred{background:var(--gh-bg);border-color:var(--gh);border-style:dotted;color:var(--gh)}
+.bdg{display:inline-block;font-size:10.5px;font-weight:700;padding:0 7px;border-radius:9px;line-height:16px;border:1px solid;white-space:nowrap;letter-spacing:0;text-transform:none;vertical-align:1px}
+.bdg.ex{background:var(--ex);border-color:var(--ex);color:var(--on-ex)}
+.bdg.st{background:var(--panel);border-color:var(--st);color:var(--st)}
+.bdg.pv{background:var(--op-bg);border-color:var(--op);border-style:dashed;color:var(--op)}
+.bdg.gap{background:var(--gap);border-color:var(--gap);color:var(--on-gap)}
+.bdg.int{background:var(--panel);border-color:var(--ink);color:var(--ink)}
+.bdg.gh{background:var(--gh-bg);border-color:var(--gh);border-style:dotted;color:var(--gh)}
+
+/* persona filter */
+.pbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 2px;font-size:12.5px}
+.pbar .lbl{color:var(--muted);margin-right:4px}
+.pbtn{font:inherit;font-size:12.5px;padding:3px 10px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.pbtn:hover{border-color:var(--ink)}
+.pbtn.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.hint{font-size:12px;color:var(--muted);margin:6px 2px 0}
+
+/* dimming: question highlight and persona filter */
+.hl,.pd{transition:opacity .15s}
+body.qsel .hl:not(.hit){opacity:.17}
+body.qsel .hl.hit .hl:not(.hit){opacity:.5}
+.pdim{opacity:.13 !important}
+
+/* panels */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+
+/* matrix */
+.mx{display:grid;grid-template-columns:118px minmax(440px,1.7fr) repeat(4,minmax(196px,1fr));gap:6px;padding:8px;min-width:1340px}
+.mx > div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:12.5px;line-height:1.45;min-width:0}
+.mx .corner{background:transparent;border:none;display:flex;align-items:flex-end;font-size:11px;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.05em}
+.mx .ifh{background:var(--code)}
+.mx .ph{background:var(--code)}
+.mx .ph .nm,.mx .ifh .nm{font-weight:700;font-size:13.5px}
+.mx .ph .ds,.mx .ifh .ds{color:var(--muted);font-size:12px;margin:1px 0 5px}
+.touches{display:flex;flex-wrap:wrap;gap:4px 9px;font-size:11.5px;color:var(--muted)}
+.touches span{display:inline-flex;align-items:center;gap:4px}
+.mx .lv .n{font-size:22px;font-weight:750;letter-spacing:-.02em;line-height:1}
+.mx .lv .t{font-weight:700;font-size:13.5px;margin-top:3px}
+.mx .lv .s{color:var(--muted);font-size:11.5px;margin:2px 0 6px}
+.mx .lv .chips{display:flex;flex-wrap:wrap;gap:3px}
+.mx .lv.ex{border-left:4px solid var(--ex)}
+.mx .lv.st{border-left:4px solid var(--st)}
+.mx .pc .tc{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.mx .pc.none{background:transparent;border-style:dashed;color:var(--muted)}
+.mx .pc.none .tc{margin:0}
+.mx .pc p{margin:0 0 5px}
+.mx ul,.card ul{margin:3px 0 0;padding-left:16px}
+.mx li,.card li{margin:1px 0}
+.blk{border-radius:6px;padding:6px 8px;margin:0 0 6px;border:1px solid var(--line);background:var(--panel)}
+.blk:last-child{margin-bottom:0}
+.blk.ex{border-left:3px solid var(--ex)}
+.blk.st{border-left:3px solid var(--st)}
+.blk.pv{border:1.5px dashed var(--op);background:var(--op-bg)}
+.blk.gap{border:1.5px dashed var(--gap);background:var(--gap-bg)}
+.blk.gh{border:1.5px dotted var(--gh);background:var(--gh-bg);color:var(--muted)}
+.blk .hd{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin-bottom:3px}
+.blk .hd b{font-weight:650}
+.blk.gap .hd{color:var(--gap);font-weight:650}
+.mut{color:var(--muted);font-size:12px}
+pre{font-family:var(--mono);font-size:11.5px;line-height:1.5;background:var(--code);border-radius:6px;padding:6px 9px;margin:4px 0;overflow-x:auto;white-space:pre}
+.pc pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10.8px}
+h3 code{text-transform:none;letter-spacing:0}
+.blk .hd span{font-weight:400}
+pre .c{color:var(--muted)} pre .a{color:var(--st)} pre .s{color:var(--ex)} pre .r{color:var(--op);font-weight:650} pre .g{color:var(--gap);font-weight:650}
+
+/* DX cards */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.cards{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:12.8px}
+.card .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.card .nm{font-weight:700;font-size:14px}
+.card .vd{font-size:11px;font-weight:700;padding:1px 8px;border-radius:9px;border:1px solid}
+.vd.good{color:var(--ex);border-color:var(--ex);background:var(--ex-bg)}
+.vd.mid{color:var(--op);border-color:var(--op);background:var(--op-bg)}
+.vd.thin{color:var(--gap);border-color:var(--gap);background:var(--gap-bg)}
+.card .lab{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:9px 0 1px}
+.card .touches{margin-top:4px}
+
+/* example */
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1000px){.grid2{grid-template-columns:1fr}}
+.mini{width:100%;max-width:640px;height:auto;display:block;margin:2px 0 4px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{text-align:left;padding:5px 6px;border-top:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;border-top:none}
+.ptag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:2px}
+
+/* decisions */
+.dec{columns:2 460px;column-gap:22px}
+.dec .grp{break-inside:avoid;margin-bottom:6px}
+.dec h3{margin:8px 0 4px}
+.dec ul{list-style:none;margin:0;padding:0}
+.dec li{padding:6px 8px;border-radius:7px;cursor:pointer;border:1px solid transparent;break-inside:avoid}
+.dec li:hover{background:var(--code)}
+.dec li.active{border-color:var(--hl);background:var(--code)}
+.dec li .tt{font-weight:600}
+.dec li .dr{display:block;font-size:12.5px;margin-top:2px}
+.dec li .wh{display:block;font-size:11.5px;color:var(--muted)}
+
+/* pipeline svg */
+#dg svg{display:block;width:100%;min-width:1180px;height:auto}
+#dg text{fill:var(--ink);font-family:var(--sans);white-space:pre}
+#dg tspan.m{font-family:var(--mono)}
+#dg .t-head{font-size:9.5px;font-weight:700;letter-spacing:.06em}
+#dg .h-exists,#dg .h-container{fill:var(--ex)}
+#dg .h-settled{fill:var(--st)}
+#dg .t-title{font-size:13px;font-weight:650}
+#dg .t-text{font-size:11.5px}
+#dg .t-muted{font-size:10.5px;fill:var(--muted)}
+#dg .t-stage{font-size:12px;font-weight:700;letter-spacing:.05em}
+#dg .t-stage-sub{font-size:10.5px;fill:var(--muted)}
+#dg .t-label{font-size:10.5px;fill:var(--muted);paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+#dg .t-barrier{font-size:11px;font-weight:650}
+#dg .box{stroke-width:1.4}
+#dg .b-exists{fill:var(--ex-bg);stroke:var(--ex)}
+#dg .b-settled{fill:var(--st-bg);stroke:var(--st)}
+#dg .b-container{fill:var(--panel);stroke:var(--ex)}
+#dg .sub-settled{fill:var(--panel);stroke:var(--st);stroke-width:1.1}
+#dg .sub-exists{fill:var(--panel);stroke:var(--ex);stroke-width:1.1}
+#dg .sub-prov{fill:var(--op-bg);stroke:var(--op);stroke-dasharray:5 3;stroke-width:1.3}
+#dg .sec{fill:var(--code);stroke:var(--line)}
+#dg .chip{cursor:pointer}
+#dg .chip text,#dg .pill text{font-size:9.5px;font-weight:650}
+#dg .chip.answered rect{fill:var(--st);stroke:var(--st)}
+#dg .chip.answered text{fill:var(--on-st)}
+#dg .chip.deferred rect{fill:var(--gh-bg);stroke:var(--gh);stroke-dasharray:2 2}
+#dg .chip.deferred text{fill:var(--gh)}
+#dg .pill.exists rect{fill:var(--ex);stroke:var(--ex)}
+#dg .pill.exists text{fill:var(--on-ex)}
+#dg .pill.internal rect{fill:var(--panel);stroke:var(--ink)}
+#dg .pill.internal text{fill:var(--ink)}
+#dg .pill.settled rect{fill:var(--panel);stroke:var(--st)}
+#dg .pill.settled text{fill:var(--st)}
+#dg .pill.prov rect{fill:var(--op-bg);stroke:var(--op);stroke-dasharray:3 2}
+#dg .pill.prov text{fill:var(--op)}
+#dg .pill.level rect{fill:var(--ink);stroke:var(--ink)}
+#dg .pill.level text{fill:var(--bg)}
+#dg .badge{fill:var(--badge)}
+#dg .badge.answered{fill:var(--st)} #dg .badge.exists{fill:var(--ex)}
+#dg .badge-t{font-size:9.5px;font-weight:700;fill:var(--badge-ink)}
+#dg .badge-t.answered{fill:var(--on-st)} #dg .badge-t.exists{fill:var(--on-ex)}
+#dg .ar{fill:none;stroke-width:1.5}
+#dg .ar-st{stroke:var(--st)} #dg .ar-ex{stroke:var(--ex)}
+#dg .mk-st{fill:var(--st)} #dg .mk-ex{fill:var(--ex)}
+#dg .barrier{stroke:var(--ink);stroke-width:1.4;stroke-dasharray:9 5;fill:none}
+#dg .chip.hit rect{stroke:var(--hl);stroke-width:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>C02 · Who programs Runspore, at which level</h1>
+  <p class="lede">Version 3, drawn from the answered questions. Five levels, from the workflow folder down to the store, each with its exact programmable interface, and four personas with what each one writes or calls there. Gaps this map does not close are marked red; spellings not yet fixed are marked amber.</p>
+  <div class="legend">
+    <span class="k"><span class="sw ex"></span>exists in the repo today</span>
+    <span class="k"><span class="sw st"></span>settled by an answered question</span>
+    <span class="k"><span class="sw pv"></span><span class="bdg pv">provisional</span> decided, but the spelling or stability is not fixed</span>
+    <span class="k"><span class="sw gap"></span><span class="bdg gap">not in this map</span> a gap: nothing here provides it</span>
+    <span class="k"><span class="sw gh"></span>separate map or deferred</span>
+    <span class="k"><span class="bdg int">internal</span> a form only spore uses, never an input</span>
+    <span class="k"><span class="hchip answered">Q4</span> answered question</span>
+    <span class="k"><span class="dotm main"></span> main surface <span class="dotm"></span> sometimes <span class="dotm none"></span> not touched</span>
+  </div>
+  <div class="pbar" id="pbar">
+    <span class="lbl">Show one persona:</span>
+    <button class="pbtn on" data-pf="">All</button>
+    <button class="pbtn" data-pf="author">Workflow author</button>
+    <button class="pbtn" data-pf="node">Custom-node developer</button>
+    <button class="pbtn" data-pf="embed">Embedding developer</button>
+    <button class="pbtn" data-pf="tool">Integration tooling</button>
+  </div>
+  <p class="hint">A persona button dims every level, cell and box that persona does not touch. A Q chip highlights where that decision sits; click it again to clear.</p>
+
+  <!-- ===================== matrix ===================== -->
+  <section class="blockh">
+    <h2>Levels × personas</h2>
+    <p class="sub">Each row is one level. The interface column is the contract at that level; each persona column says what that persona writes or calls there. Example names come from the <code>deploy/</code> folder below.</p>
+    <div class="scroll">
+    <div class="mx" id="mx">
+      <!-- header row -->
+      <div class="corner">Level</div>
+      <div class="ifh">
+        <div class="nm">Programmable interface</div>
+        <div class="ds">exact names; anything not listed here is not specified</div>
+      </div>
+      <div class="ph pd" data-p="author">
+        <div class="nm">Workflow author</div>
+        <div class="ds">writes workflows; a custom step is a <code>command</code> action</div>
+        <div class="touches"><span><i class="dotm main"></i>L1</span><span><i class="dotm main"></i>L2</span><span><i class="dotm"></i>L3</span></div>
+      </div>
+      <div class="ph pd" data-p="node">
+        <div class="nm">Custom-node developer</div>
+        <div class="ds">writes the program a step runs</div>
+        <div class="touches"><span><i class="dotm main"></i>L1</span><span><i class="dotm main"></i>L2</span><span><i class="dotm"></i>L3</span><span><i class="dotm"></i>L5</span></div>
+      </div>
+      <div class="ph pd" data-p="embed">
+        <div class="nm">Embedding developer</div>
+        <div class="ds">runs workflows from their own code. Routes: <b>a</b> CLI subprocess · <b>b</b> own host on the two WIT worlds · <b>c</b> composed artifact</div>
+        <div class="touches"><span><i class="dotm"></i>L1</span><span><i class="dotm main"></i>L2</span><span><i class="dotm main"></i>L3</span><span><i class="dotm main"></i>L4</span><span><i class="dotm main"></i>L5</span></div>
+      </div>
+      <div class="ph pd" data-p="tool">
+        <div class="nm">Integration tooling</div>
+        <div class="ds">editors, viewers and other programs that read definitions</div>
+        <div class="touches"><span><i class="dotm main"></i>L1</span><span><i class="dotm"></i>L2</span><span><i class="dotm main"></i>L3</span></div>
+      </div>
+
+      <!-- ===== L1 authoring ===== -->
+      <div class="lv st hl pd" data-p="author node embed tool">
+        <div class="n">L1</div><div class="t">Authoring</div><div class="s">the workflow folder</div>
+        <div class="chips"><span class="hchip" data-chip="q1"></span><span class="hchip" data-chip="q3"></span><span class="hchip" data-chip="q10"></span><span class="hchip" data-chip="q11"></span><span class="hchip" data-chip="q12"></span><span class="hchip" data-chip="q13"></span></div>
+      </div>
+      <div class="if pd" data-p="author node embed tool">
+<pre>deploy/                      <span class="c">the entry point</span>
+├── workflow.dot             <span class="c">fixed name</span>
+├── settings.json            <span class="c">fixed name</span>
+├── instructions/review.md   <span class="c">optional, named in settings</span>
+└── assets/calculate.wasm    <span class="c">optional, named in settings</span></pre>
+        <div class="blk st hl" data-q="q3 q12 q13">
+          <div class="hd"><b><code>workflow.dot</code></b><span>DOT dialect, strict subset</span><span class="hchip" data-chip="q3"></span><span class="hchip" data-chip="q12"></span><span class="hchip" data-chip="q13"></span></div>
+          <ul>
+            <li>graph: <code>dialect="runspore/0.1"</code>, required, checked first; <code>start="&lt;node&gt;"</code></li>
+            <li>node: <code>kind</code> = <code>activity</code> (default) | <code>await-signal</code> | <code>complete</code> | <code>fail</code></li>
+            <li>edge: <code>on="&lt;outcome&gt;"</code>; absent = <code>ok</code>; one outcome per edge; <code>on="failed"</code> is the failure route</li>
+            <li><code>label</code>, <code>shape</code>, … Graphviz render attributes: kept, no meaning</li>
+            <li>error with a line number: subgraphs, ports, HTML labels, <code>strict</code>, undirected graphs, unknown attributes</li>
+          </ul>
+        </div>
+        <div class="blk st hl" data-q="q10 q11">
+          <div class="hd"><b><code>settings.json</code></b><span>JSON, the package's shape minus topology</span><span class="hchip" data-chip="q10"></span><span class="hchip" data-chip="q11"></span></div>
+          <ul>
+            <li><code>format</code> (agrees with <code>dialect</code>), <code>limits</code>, <code>actions.&lt;id&gt;</code></li>
+            <li><code>nodes.&lt;id&gt;</code>: <code>action</code>, <code>input</code>, <code>output</code>, <code>error</code>, <code>signal</code>, <code>instructions: "instructions/review.md"</code></li>
+            <li>only the files it names enter the artifact; a stray file is ignored</li>
+            <li>build errors name both files: a settings node the DOT lacks, an activity with no settings entry, an outcome with no edge</li>
+          </ul>
+        </div>
+        <div class="blk gh hl" data-q="q5 q6">
+          <div class="hd"><span class="bdg gh">separate map</span> <code>kind=workflow</code>, a whole workflow as one step <span class="hchip" data-chip="q5"></span><span class="hchip" data-chip="q6"></span></div>
+        </div>
+      </div>
+      <div class="pc hl pd" data-p="author" data-q="q1 q12">
+        <div class="tc"><i class="dotm main"></i>main surface</div>
+        <p>Writes the whole folder. Topology, <code>kind</code> and <code>on=</code> in <code>workflow.dot</code>; one action per activity, mappings and limits in <code>settings.json</code>; prose only for a step a person performs.</p>
+        <p>A custom step is an <code>activity</code> bound to a <code>command</code>: any executable. The four <code>kind</code> values are fixed by the kernel.</p>
+      </div>
+      <div class="pc hl pd" data-p="node" data-q="q1 q10">
+        <div class="tc"><i class="dotm main"></i>main surface</div>
+        <p>Ships the binding next to the program: <code>actions.&lt;id&gt;</code> with <code>"kind": "command"</code>, <code>argv</code>, <code>outcomes</code>, <code>exitOutcomes</code>, <code>effect</code>, <code>retry</code>. The node stays a plain <code>activity</code>.</p>
+        <div class="blk gap hl" data-q="q11">
+          <div class="hd"><span class="bdg gap">not in this map</span></div>
+          A module such as <code>assets/calculate.wasm</code> can ride in the artifact, but no action kind runs it.
+        </div>
+      </div>
+      <div class="pc hl pd" data-p="embed" data-q="q7">
+        <div class="tc"><i class="dotm"></i>sometimes</div>
+        <p>Takes a folder or a built artifact someone else wrote; authoring is optional.</p>
+      </div>
+      <div class="pc hl pd" data-p="tool" data-q="q3 q12">
+        <div class="tc"><i class="dotm main"></i>main surface</div>
+        <p>Reads <code>workflow.dot</code> as plain DOT: render attributes survive, so Graphviz draws it unchanged, <code>label</code> included.</p>
+        <p>A writer must stay inside the strict subset. <code>settings.json</code> uses the package's own field names.</p>
+      </div>
+
+      <!-- ===== L2 CLI ===== -->
+      <div class="lv st hl pd" data-p="author node embed tool">
+        <div class="n">L2</div><div class="t">CLI</div><div class="s"><code>spore</code>: 0.1 exists, inputs change in 0.2</div>
+        <div class="chips"><span class="hchip" data-chip="q7"></span><span class="hchip" data-chip="q4"></span><span class="hchip" data-chip="q9"></span><span class="hchip" data-chip="q11"></span></div>
+      </div>
+      <div class="if pd" data-p="author node embed tool">
+        <div class="blk st hl" data-q="q7 q11">
+          <div class="hd"><b>Run commands take source or an artifact</b> <span class="hchip" data-chip="q7"></span><span class="hchip" data-chip="q11"></span></div>
+<pre>spore validate | start | run  &lt;input&gt;
+  <span class="c">&lt;input&gt; =</span> deploy/ | deploy/workflow.dot | deploy.wasm</pre>
+          A folder or <code>.dot</code> builds automatically and the artifact is saved; a started run never rereads the source. JSON workflow files are not public inputs.
+        </div>
+        <div class="blk st hl" data-q="q4 q9">
+          <div class="hd"><b>Explicit build, to ship</b> <span class="hchip" data-chip="q4"></span><span class="hchip" data-chip="q9"></span></div>
+<pre>spore build deploy/
+  <span class="c">→</span> deploy.wasm  <span class="c">workflow artifact</span>
+spore build deploy/ <span class="r">‹flag›</span>
+  <span class="c">→</span> <span class="r">deploy-composed.wasm</span>  <span class="c">composed artifact</span></pre>
+          No <code>-o</code> needed: the file is named after the folder and written beside it, not inside it (<code>deploy/</code> → <code>./deploy.wasm</code>). <code>-o &lt;file&gt;</code> overrides the path.
+          <span class="bdg pv">flag and composed file name provisional</span>
+        </div>
+        <div class="blk pv hl" data-q="q7">
+          <div class="hd"><b><code>spore inspect deploy.wasm</code></b> <span class="bdg pv">debug, not a stable interface</span></div>
+          prints the manifest and the internal package
+        </div>
+        <div class="blk ex">
+          <div class="hd"><b>Run control</b> <span class="bdg ex">exists, CLI 0.1</span></div>
+<pre>spore signal &lt;runId&gt; &lt;name&gt; [--outcome &lt;o&gt;]
+             [--data &lt;json&gt;] [--id &lt;id&gt;]
+spore status &lt;runId&gt;
+<span class="c">also: list, events, resolve, release, worker</span></pre>
+          <code>--json</code>: one <code>runspore.cli/0.1</code> object. Exit code: 0 completed · 1 failed · 2 usage or validation · 3 waiting for a signal · 4 needs intervention · 5 quarantined
+        </div>
+        <div class="blk ex">
+          <div class="hd"><b>What a <code>command</code> process gets</b> <span class="bdg ex">exists</span></div>
+          env <code>RUNSPORE_RUN_ID</code> <code>RUNSPORE_NODE_ID</code> <code>RUNSPORE_INVOCATION_ID</code> <code>RUNSPORE_ATTEMPT</code> <code>RUNSPORE_EFFECT_KEY</code> (the same on every attempt of one invocation); stdin: the canonical input JSON
+        </div>
+      </div>
+      <div class="pc hl pd" data-p="author" data-q="q7 q4">
+        <div class="tc"><i class="dotm main"></i>main surface</div>
+<pre>spore validate deploy/
+spore run deploy/ \
+  --key rel-42
+spore signal &lt;runId&gt; \
+  review \
+  --outcome approved
+spore build deploy/
+  <span class="c">→ deploy.wasm</span></pre>
+        <p>Errors carry file and line, before any run starts.</p>
+      </div>
+      <div class="pc hl pd" data-p="node">
+        <div class="tc"><i class="dotm main"></i>main surface</div>
+        <p>The worker starts your program from <code>argv</code>, no shell: input JSON on stdin, <code>RUNSPORE_*</code> in env. Stdout is the output (<code>text</code>, <code>json</code> or <code>none</code>).</p>
+        <p>Exit 0 = <code>ok</code>; <code>exitOutcomes</code> maps other codes; any other code is a retryable failure. Pass <code>RUNSPORE_EFFECT_KEY</code> on, so a retry is safe.</p>
+      </div>
+      <div class="pc hl pd" data-p="embed" data-q="q7">
+        <div class="tc"><i class="dotm main"></i>route a</div>
+<pre>spore --json run \
+  deploy.wasm \
+  --key order-42</pre>
+        <p>One JSON object; the exit code is the run's state. On 3: <code>spore signal</code>, then the same <code>run --key</code> resumes the run.</p>
+      </div>
+      <div class="pc hl pd" data-p="tool" data-q="q7">
+        <div class="tc"><i class="dotm"></i>sometimes</div>
+        <p><code>spore inspect</code> to look inside an artifact <span class="bdg pv">not stable</span></p>
+        <p><code>spore --json status</code> and <code>events</code> for runs: stable JSON.</p>
+      </div>
+
+      <!-- ===== L3 artifact ===== -->
+      <div class="lv st hl pd" data-p="author node embed tool">
+        <div class="n">L3</div><div class="t">Artifact</div><div class="s">one immutable file per workflow version</div>
+        <div class="chips"><span class="hchip" data-chip="q4"></span><span class="hchip" data-chip="q8"></span><span class="hchip" data-chip="q15"></span><span class="hchip" data-chip="q9"></span><span class="hchip" data-chip="q16"></span></div>
+      </div>
+      <div class="if pd" data-p="author node embed tool">
+        <div class="blk st hl" data-q="q8 q15">
+          <div class="hd"><b>Workflow artifact <code>deploy.wasm</code></b><span>WebAssembly component, no imports</span><span class="hchip" data-chip="q8"></span><span class="hchip" data-chip="q15"></span></div>
+<pre>world runspore:artifact@0.1.0
+  manifest() -&gt; list&lt;u8&gt;
+  blob(digest) -&gt; option&lt;list&lt;u8&gt;&gt;</pre>
+          <code>manifest()</code> is canonical JSON: <code>format: "runspore.artifact/0.1"</code>, <code>dialect</code>, <code>main</code> (the package digest a run pins), <code>entries[]</code> of <code>{path, digest, kind}</code>, kind = <code>package</code> | <code>source</code> | <code>instructions</code> | <code>asset</code>
+        </div>
+        <div class="blk st hl" data-q="q9 q16">
+          <div class="hd"><b>Composed artifact</b><span>second distribution form</span><span class="hchip" data-chip="q9"></span><span class="hchip" data-chip="q16"></span></div>
+          <code>wasm-tools compose</code> of the kernel component and the workflow artifact. Exports <code>runspore:machine</code> and <code>runspore:artifact</code>, both unchanged: a host reads <code>blob(main)</code>, then calls <code>transition</code> as today.
+        </div>
+        <p class="mut" style="margin:0">Definitions only: no run state, no credentials. The programs a <code>command</code> names are not inside; they run on the worker.</p>
+      </div>
+      <div class="pc hl pd" data-p="author" data-q="q4 q14">
+        <div class="tc"><i class="dotm"></i>sometimes</div>
+        <p>Gets one file from <code>spore build</code>. A run pins it by digest, so edits reach new runs only.</p>
+        <div class="blk gap hl" data-q="q15">
+          <div class="hd"><span class="bdg gap">not in this map</span></div>
+          How the person doing <code>review</code> reads <code>instructions/review.md</code> out of the artifact.
+        </div>
+      </div>
+      <div class="pc hl pd" data-p="node" data-q="q15">
+        <div class="tc"><i class="dotm"></i>sometimes</div>
+        <p>Your program is not inside the artifact; it has to be installed on every worker.</p>
+        <div class="blk gap">
+          <div class="hd"><span class="bdg gap">not in this map</span></div>
+          An <code>asset</code> entry is readable with <code>blob()</code>, but nothing hands it to a step at dispatch.
+        </div>
+      </div>
+      <div class="pc hl pd" data-p="embed" data-q="q8 q15 q9 q16">
+        <div class="tc"><i class="dotm main"></i>routes b, c</div>
+        <p><b>b</b>: instantiate it (Wasmtime or jco); <code>manifest()</code> gives <code>main</code>; <code>blob(main)</code> gives the package bytes for <code>transition</code>.</p>
+        <p><b>c</b>: load the composed artifact instead: one file, the same calls.</p>
+      </div>
+      <div class="pc hl pd" data-p="tool" data-q="q15 q8">
+        <div class="tc"><i class="dotm main"></i>main surface</div>
+        <p><code>manifest()</code> lists every entry; <code>blob(digest)</code> returns its bytes. <code>source</code> entries give back <code>workflow.dot</code> and <code>settings.json</code> as built, so an editor can show the exact source of a running version.</p>
+        <p class="mut">Reading means instantiating a component (the Q8 trade-off).</p>
+      </div>
+
+      <!-- ===== L4 kernel ===== -->
+      <div class="lv ex pd" data-p="embed">
+        <div class="n">L4</div><div class="t">Kernel</div><div class="s">kernel component, frozen 0.1</div>
+        <div class="chips"><span class="bdg ex">exists</span></div>
+      </div>
+      <div class="if pd" data-p="embed">
+        <div class="blk ex">
+          <div class="hd"><b><code>contracts/wit/machine/machine.wit</code></b> <span class="bdg ex">exists</span></div>
+<pre>package runspore:machine@0.1.0
+world machine { export reducer; }   <span class="c">no imports</span>
+
+interface reducer
+  describe() -&gt; descriptor
+  transition(request) -&gt; result&lt;decision, failure&gt;
+
+request  { identity, graph, snapshot,
+           input-event, frozen-limits }
+identity { package-digest, kernel-digest,
+           semantics-version, codec-version }
+decision { snapshot, snapshot-digest,
+           commands, diagnostics }
+failure-kind: invalid-input | incompatible-version
+            | resource-limit | invariant-violation</pre>
+        </div>
+        <div class="blk st hl" data-q="q7">
+          <code>graph</code> = the package bytes, <code>runspore.workflow/0.1</code> canonical JSON <span class="bdg int">internal</span>: never a public input. <span class="hchip" data-chip="q7"></span>
+        </div>
+        <p class="mut" style="margin:0">Same bytes on every host; matched in Wasmtime, Node and Bun at the trace level.</p>
+      </div>
+      <div class="pc none pd" data-p="author"><div class="tc"><i class="dotm none"></i>not touched</div></div>
+      <div class="pc none pd" data-p="node"><div class="tc"><i class="dotm none"></i>not touched</div></div>
+      <div class="pc hl pd" data-p="embed" data-q="q15">
+        <div class="tc"><i class="dotm main"></i>route b</div>
+        <p>One <code>transition</code> per event: <code>graph</code> = <code>blob(main)</code>, <code>identity.package-digest</code> = <code>main</code>, your stored snapshot, the next event envelope.</p>
+        <p>Keep <code>decision.snapshot</code>; carry out <code>decision.commands</code>. <code>describe()</code> checks versions.</p>
+      </div>
+      <div class="pc none pd" data-p="tool"><div class="tc"><i class="dotm none"></i>not touched</div></div>
+
+      <!-- ===== L5 host / store ===== -->
+      <div class="lv ex hl pd" data-p="node embed">
+        <div class="n">L5</div><div class="t">Host / store</div><div class="s">engine, SQLite store, dispatch; one new table</div>
+        <div class="chips"><span class="bdg ex">exists</span><span class="hchip" data-chip="q14"></span></div>
+      </div>
+      <div class="if pd" data-p="node embed">
+        <div class="blk ex">
+          <div class="hd"><b>SQLite store</b><span><code>spec/store.md</code>, trait <code>runspore_types::store::Store</code></span></div>
+          <code>packages</code> by package digest; a run pins <code>package_digest</code> (its identity); events, snapshots, invocations, attempts, receipts.
+          <div class="blk st hl" data-q="q14" style="margin-top:5px">
+            <div class="hd"><b>+ <code>artifacts</code></b> by artifact digest; runs add <code>artifact_digest</code> (provenance) <span class="hchip" data-chip="q14"></span></div>
+            an additive store 0.2 change; kernel identity and <code>get_package</code> untouched
+          </div>
+        </div>
+        <div class="blk ex">
+          <div class="hd"><b>Engine</b> <code>crates/runspore-host</code></div>
+          per turn: <code>load_turn</code> → <code>get_package</code> → <code>transition</code> → <code>commit_turn</code>; only committed work is dispatched
+        </div>
+        <div class="blk ex">
+          <div class="hd"><b>Dispatch</b><span>action <code>kind</code> → runner</span></div>
+          <ul>
+            <li><code>command</code>: <code>argv</code> (no shell), <code>cwd</code>, <code>env</code>, <code>timeoutMs</code>, <code>output</code> (<code>text</code> | <code>json</code> | <code>none</code>), <code>exitOutcomes</code>; the kernel reads <code>outcomes</code>, <code>effect</code>, <code>retry</code></li>
+            <li><code>native</code>: <code>{"kind": "native", "function": "&lt;name&gt;"}</code> calls a registered Rust function; any other kind via <code>ActivityRegistry::with(kind, runner)</code> <span class="bdg ex">Rust embedding only</span></li>
+          </ul>
+        </div>
+        <div class="blk ex">
+          <div class="hd"><b>Signals</b></div>
+          <code>spore signal</code> or <code>Engine::signal</code>; a repeated message ID is a no-op
+        </div>
+      </div>
+      <div class="pc none pd" data-p="author"><div class="tc"><i class="dotm none"></i>not touched</div><p class="mut" style="margin-top:4px">sees runs only through <code>spore status</code></p></div>
+      <div class="pc hl pd" data-p="node">
+        <div class="tc"><i class="dotm"></i>sometimes, in Rust</div>
+        <p>Embedding in Rust: <code>NativeRunner::function(name, f)</code> for a <code>native</code> step, or a new kind through trait <code>ActivityRunner { validate, run }</code>. <code>spore</code> registers neither.</p>
+        <div class="blk gap">
+          <div class="hd"><span class="bdg gap">not in this map</span></div>
+          An action kind that runs a WebAssembly module; any way to add an action kind to <code>spore</code> itself.
+        </div>
+      </div>
+      <div class="pc hl pd" data-p="embed" data-q="q14 q7 q16">
+        <div class="tc"><i class="dotm main"></i>route b</div>
+        <p>Route b means writing this level: store, ordering, receipts, leases, dispatch, signals (<code>spec/store.md</code>, <code>spec/host.md</code>).</p>
+        <p>The Rust crates do it (<code>Engine::new(store, reducer, registry, config)</code>, <code>start</code>, <code>signal</code>, <code>run_until_parked</code>) but are unpublished, and <code>start</code> takes the package JSON that Q7 made internal.</p>
+        <div class="blk gap">
+          <div class="hd"><span class="bdg gap">not in this map</span></div>
+          A host library or SDK. Q16 discussion: the application API is meant as the primary contract and the CLI as one client. Candidate for a new map ticket.
+        </div>
+      </div>
+      <div class="pc none pd" data-p="tool"><div class="tc"><i class="dotm none"></i>not touched</div></div>
+    </div>
+    </div>
+  </section>
+
+  <!-- ===================== DX cards ===================== -->
+  <section class="blockh">
+    <h2>DX by persona</h2>
+    <p class="sub">This visual's reading of the matrix above, not a decision. Strengths and friction follow from the answers; gaps are what this map leaves open.</p>
+    <div class="cards">
+      <div class="card pd" data-p="author">
+        <div class="top"><span class="nm">Workflow author</span><span class="vd good">strong</span></div>
+        <div class="touches"><span><i class="dotm main"></i>L1</span><span><i class="dotm main"></i>L2</span><span><i class="dotm"></i>L3</span></div>
+        <div class="lab">Works well</div>
+        <ul>
+          <li>one folder, two fixed names, one command: <code>spore run deploy/</code></li>
+          <li>strict grammar: a typo in <code>on=</code> fails at <code>validate</code> with a line number</li>
+          <li>the file renders in any Graphviz viewer</li>
+          <li>a run keeps the version it started with</li>
+        </ul>
+        <div class="lab">Friction</div>
+        <ul>
+          <li>a step's facts are split across <code>workflow.dot</code> and <code>settings.json</code>, joined by node ID</li>
+          <li>settings are JSON: no comments</li>
+        </ul>
+        <div class="lab">Gaps</div>
+        <div class="blk gap"><span class="bdg gap">not in this map</span> how a step's performer gets <code>instructions/*.md</code> out of the artifact</div>
+      </div>
+      <div class="card pd" data-p="node">
+        <div class="top"><span class="nm">Custom-node developer</span><span class="vd mid">workable, coarse</span></div>
+        <div class="touches"><span><i class="dotm main"></i>L1</span><span><i class="dotm main"></i>L2</span><span><i class="dotm"></i>L3</span><span><i class="dotm"></i>L5</span></div>
+        <div class="lab">Works well</div>
+        <ul>
+          <li>any language: argv, stdin JSON, five env variables, stdout, exit code</li>
+          <li><code>RUNSPORE_EFFECT_KEY</code> makes retries safe downstream</li>
+        </ul>
+        <div class="lab">Friction</div>
+        <ul>
+          <li>outcomes only through exit codes and <code>exitOutcomes</code></li>
+          <li>stdout capped at 64 KiB; no typed input or output in 0.1</li>
+          <li>the program lives outside the artifact, on every worker</li>
+        </ul>
+        <div class="lab">Gaps</div>
+        <div class="blk gap"><span class="bdg gap">not in this map</span> a module action kind for <code>assets/*.wasm</code>; new kinds only by embedding in Rust</div>
+      </div>
+      <div class="card pd" data-p="embed">
+        <div class="top"><span class="nm">Embedding developer</span><span class="vd thin">thin</span></div>
+        <div class="touches"><span><i class="dotm"></i>L1</span><span><i class="dotm main"></i>L2</span><span><i class="dotm main"></i>L3</span><span><i class="dotm main"></i>L4</span><span><i class="dotm main"></i>L5</span></div>
+        <div class="lab">Works well</div>
+        <ul>
+          <li><b>a</b>: works now; stable JSON and exit codes; resume by key</li>
+          <li><b>b</b>, <b>c</b>: two small, versioned WIT worlds any component runtime can load</li>
+        </ul>
+        <div class="lab">Friction</div>
+        <ul>
+          <li><b>a</b>: a process per call; a waiting run returns and must be run again</li>
+          <li><b>b</b>, <b>c</b>: you write the store, leases and dispatch, most of the runtime</li>
+          <li>Rust crates exist but are unpublished and take the internal package</li>
+        </ul>
+        <div class="lab">Gaps</div>
+        <div class="blk gap"><span class="bdg gap">not in this map</span> a host library or SDK with the same operations as the CLI</div>
+      </div>
+      <div class="card pd" data-p="tool">
+        <div class="top"><span class="nm">Integration tooling</span><span class="vd good">good for reading</span></div>
+        <div class="touches"><span><i class="dotm main"></i>L1</span><span><i class="dotm"></i>L2</span><span><i class="dotm main"></i>L3</span></div>
+        <div class="lab">Works well</div>
+        <ul>
+          <li>typed <code>manifest()</code> and <code>blob()</code>; new entry kinds need no WIT change</li>
+          <li>the source rides inside the artifact</li>
+          <li><code>workflow.dot</code> stays plain, renderable DOT</li>
+        </ul>
+        <div class="lab">Friction</div>
+        <ul>
+          <li>reading an artifact needs Wasmtime or jco</li>
+          <li><code>spore inspect</code> output is not stable</li>
+        </ul>
+        <div class="lab">Gaps</div>
+        <p class="mut" style="margin:0">none beyond the provisional <code>inspect</code></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== pipeline ===================== -->
+  <section class="blockh">
+    <h2>How the levels connect</h2>
+    <p class="sub">The build pipeline from v2, compacted. Each box carries its level.</p>
+    <div class="scroll"><div id="dg"></div></div>
+  </section>
+
+  <!-- ===================== example ===================== -->
+  <section class="blockh">
+    <h2>Worked example · <code>deploy/</code></h2>
+    <p class="sub">Max's folder layout (Q11). Node names, commands and digests are examples, not decisions.</p>
+    <div class="grid2">
+      <div class="panel pd" data-p="author node tool">
+        <svg class="mini" viewBox="0 0 640 196" role="img" aria-label="build, then review, then release, then done; build red and release failed go to broken; review rejected goes to rejected">
+          <defs>
+            <marker id="mm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink)"/></marker>
+            <marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--op)"/></marker>
+          </defs>
+          <g style="fill:none;stroke-width:1.5">
+            <path d="M12,86 L38,86" style="stroke:var(--ink)" marker-end="url(#mm)"/>
+            <path d="M140,86 L186,86" style="stroke:var(--ink)" marker-end="url(#mm)"/>
+            <path d="M296,86 L352,86" style="stroke:var(--ink)" marker-end="url(#mm)"/>
+            <path d="M452,86 L506,86" style="stroke:var(--ink)" marker-end="url(#mm)"/>
+            <path d="M241,64 L241,46" style="stroke:var(--ink)" marker-end="url(#mm)"/>
+            <path d="M90,108 C90,168 250,170 350,166" style="stroke:var(--op)" marker-end="url(#mr)"/>
+            <path d="M402,108 L402,146" style="stroke:var(--op)" marker-end="url(#mr)"/>
+          </g>
+          <circle cx="9" cy="86" r="5" style="fill:var(--ink)"/>
+          <text x="3" y="72" style="font-size:10px;fill:var(--muted)">start</text>
+          <g style="stroke-width:1.4">
+            <rect x="40" y="64" width="100" height="44" rx="8" style="fill:var(--st-bg);stroke:var(--st)"/>
+            <rect x="188" y="64" width="108" height="44" rx="8" style="fill:var(--st-bg);stroke:var(--st)"/>
+            <rect x="354" y="64" width="98" height="44" rx="8" style="fill:var(--st-bg);stroke:var(--st)"/>
+            <rect x="508" y="66" width="104" height="40" rx="20" style="fill:var(--ex-bg);stroke:var(--ex)"/>
+            <rect x="188" y="6" width="108" height="38" rx="19" style="fill:var(--op-bg);stroke:var(--op)"/>
+            <rect x="352" y="148" width="100" height="38" rx="19" style="fill:var(--op-bg);stroke:var(--op)"/>
+          </g>
+          <g style="font-family:var(--mono);font-size:12.5px;font-weight:650;fill:var(--ink)" text-anchor="middle">
+            <text x="90" y="83">build</text><text x="242" y="83">review</text><text x="403" y="83">release</text>
+            <text x="560" y="85">done</text><text x="242" y="24">rejected</text><text x="402" y="166">broken</text>
+          </g>
+          <g style="font-family:var(--mono);font-size:10px;fill:var(--muted)" text-anchor="middle">
+            <text x="90" y="99">activity</text><text x="242" y="99">await-signal</text><text x="403" y="99">activity</text>
+            <text x="560" y="98">complete</text><text x="242" y="37">fail</text><text x="402" y="179">fail</text>
+          </g>
+          <g style="font-size:10.5px;fill:var(--muted)">
+            <text x="163" y="80" text-anchor="middle">ok</text>
+            <text x="324" y="80" text-anchor="middle">approved</text>
+            <text x="479" y="80" text-anchor="middle">ok</text>
+            <text x="248" y="56">rejected</text>
+            <text x="196" y="188" style="fill:var(--op);font-family:var(--mono)">on="red"</text>
+            <text x="408" y="132" style="fill:var(--op);font-family:var(--mono)">on="failed"</text>
+          </g>
+        </svg>
+
+        <h3><code>deploy/workflow.dot</code> <span class="ptag">author</span> <span class="hchip" data-chip="q3"></span><span class="hchip" data-chip="q12"></span><span class="hchip" data-chip="q13"></span></h3>
+<pre>digraph <span class="s">"deploy"</span> {
+  <span class="a">dialect</span> = <span class="s">"runspore/0.1"</span>          <span class="c">// required, checked first</span>
+  <span class="a">start</span>   = <span class="s">"build"</span>
+
+  build    [<span class="a">kind</span>=<span class="s">"activity"</span>]
+  review   [<span class="a">kind</span>=<span class="s">"await-signal"</span>, shape=diamond]  <span class="c">// shape: render only</span>
+  release                                <span class="c">// no kind: activity</span>
+  done     [<span class="a">kind</span>=<span class="s">"complete"</span>]
+  rejected [<span class="a">kind</span>=<span class="s">"fail"</span>]
+  broken   [<span class="a">kind</span>=<span class="s">"fail"</span>]
+
+  build   -&gt; review                      <span class="c">// no on= means "ok"</span>
+  build   -&gt; broken   [<span class="a">on</span>=<span class="s">"red"</span>]
+  review  -&gt; release  [<span class="a">on</span>=<span class="s">"approved"</span>, label=<span class="s">"approved"</span>]
+  review  -&gt; rejected [<span class="a">on</span>=<span class="s">"rejected"</span>]
+  release -&gt; done
+  release -&gt; broken   [<span class="a">on</span>=<span class="s">"failed"</span>]   <span class="c">// the failure route</span>
+}</pre>
+
+        <h3><code>deploy/settings.json</code> <span class="ptag">author</span> <span class="ptag">node</span> <span class="hchip" data-chip="q10"></span><span class="hchip" data-chip="q11"></span></h3>
+<pre>{
+  <span class="a">"format"</span>: <span class="s">"runspore.workflow/0.1"</span>,
+  <span class="a">"limits"</span>: { <span class="a">"maxVisitsPerNode"</span>: 3 },
+  <span class="a">"actions"</span>: {
+    <span class="a">"build"</span>: { <span class="a">"kind"</span>: <span class="s">"command"</span>, <span class="a">"effect"</span>: <span class="s">"idempotent"</span>,
+               <span class="a">"argv"</span>: [<span class="s">"make"</span>, <span class="s">"release"</span>], <span class="a">"timeoutMs"</span>: <span class="s">"600000"</span>,
+               <span class="a">"outcomes"</span>: [<span class="s">"ok"</span>, <span class="s">"red"</span>], <span class="a">"exitOutcomes"</span>: { <span class="s">"1"</span>: <span class="s">"red"</span> } },
+    <span class="a">"ship"</span>:  { <span class="a">"kind"</span>: <span class="s">"command"</span>, <span class="a">"effect"</span>: <span class="s">"unsafe"</span>,
+               <span class="a">"argv"</span>: [<span class="s">"./ship.sh"</span>], <span class="a">"env"</span>: { <span class="s">"STAGE"</span>: <span class="s">"prod"</span> },
+               <span class="a">"output"</span>: <span class="s">"json"</span> }
+  },
+  <span class="a">"nodes"</span>: {
+    <span class="a">"build"</span>:    { <span class="a">"action"</span>: <span class="s">"build"</span> },
+    <span class="a">"review"</span>:   { <span class="a">"signal"</span>: <span class="s">"review"</span>,
+                  <span class="r">"instructions"</span>: <span class="s">"instructions/review.md"</span> },
+    <span class="a">"release"</span>:  { <span class="a">"action"</span>: <span class="s">"ship"</span>,
+                  <span class="a">"input"</span>: { <span class="a">"version"</span>: { <span class="a">"$get"</span>: [<span class="s">"input"</span>, <span class="s">"version"</span>] } } },
+    <span class="a">"done"</span>:     { <span class="a">"output"</span>: { <span class="a">"$get"</span>: [<span class="s">"nodes"</span>, <span class="s">"release"</span>, <span class="s">"output"</span>] } },
+    <span class="a">"rejected"</span>: { <span class="a">"error"</span>: { <span class="a">"code"</span>: <span class="s">"review.rejected"</span>, <span class="a">"message"</span>: <span class="s">"rejected in review"</span> } },
+    <span class="a">"broken"</span>:   { <span class="a">"error"</span>: { <span class="a">"code"</span>: <span class="s">"deploy.broken"</span>, <span class="a">"message"</span>: <span class="s">"build or release failed"</span> } }
+  }
+}</pre>
+        <div class="blk gap" style="margin-top:6px"><span class="bdg gap">not in this map</span> <code>assets/calculate.wasm</code> is named in settings by relative path (Q11), but the field that names it belongs to an action kind that would run it, and no such kind exists. The example therefore leaves it out.</div>
+
+        <h3>Where each piece lands in the artifact</h3>
+        <table>
+          <tr><th>Entry or package part</th><th>From</th></tr>
+          <tr><td>package: <code>name</code> (graph ID), <code>start</code>, node <code>kind</code>, node <code>outcomes</code> (routes)</td><td><code>workflow.dot</code></td></tr>
+          <tr><td>package: <code>format</code>, <code>actions</code>, <code>limits</code>, node <code>action</code>, <code>input</code>, <code>output</code>, <code>error</code>, <code>signal</code></td><td><code>settings.json</code></td></tr>
+          <tr><td><code>package</code> entry: canonical JSON <span class="bdg int">internal</span>, returned by <code>blob(main)</code></td><td>the build</td></tr>
+          <tr><td><code>instructions</code> entry <code>instructions/review.md</code>; the kernel's node never sees it (nodes take no extra fields; this visual's inference)</td><td><code>settings.json</code> <code>instructions</code></td></tr>
+          <tr><td><code>source</code> entries: <code>workflow.dot</code>, <code>settings.json</code></td><td>the build (Q15)</td></tr>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="pd" data-p="author">
+          <h3>A session at the terminal <span class="ptag">author</span></h3>
+<pre><span class="c">$</span> spore validate deploy/
+<span class="g">deploy/workflow.dot:9: unknown attribute "lable"</span>   <span class="c">// wording illustrative</span>
+<span class="c">$</span> spore run deploy/ --key rel-42 --input '{"version":"1.4.0"}'
+<span class="c">  build, save the artifact, start; exit 3: waiting for "review"</span>
+<span class="c">$</span> spore signal &lt;runId&gt; review --outcome approved
+<span class="c">$</span> spore run deploy/ --key rel-42
+<span class="c">  same key, unchanged source: the same run resumes; exit 0</span>
+<span class="c">  same key, edited source: refused, run.exists</span>
+<span class="c">$</span> spore build deploy/
+<span class="c">  writes deploy.wasm beside deploy/</span>
+<span class="c">$</span> spore run deploy.wasm --key rel-43 --input '{"version":"1.4.1"}'
+<span class="c">  on another machine; no source tree needed</span></pre>
+          <h3><code>deploy/instructions/review.md</code> <span class="ptag">author</span></h3>
+<pre># Review
+
+Read the release notes for the version in the run's input.
+Approve or reject:
+
+    spore signal &lt;runId&gt; review --outcome approved</pre>
+        </div>
+
+        <div class="pd" data-p="node">
+          <h3><code>ship.sh</code>, the program behind <code>release</code> <span class="ptag">node</span></h3>
+<pre>#!/bin/sh
+<span class="c"># started by the worker from argv; no shell in between</span>
+version=$(jq -r .version)                 <span class="c"># stdin: {"version": "1.4.0"}</span>
+./push "$version" --request-id "$RUNSPORE_EFFECT_KEY" || exit 1
+echo "{\"shipped\": \"$version\"}"         <span class="c"># output: "json"</span>
+<span class="c"># exit 1 is not in exitOutcomes: a retryable failure,</span>
+<span class="c"># then on="failed" routes to broken</span></pre>
+          <p class="mut"><code>ship.sh</code> and <code>push</code> live on the worker, not in the artifact.</p>
+        </div>
+
+        <div class="pd" data-p="tool embed">
+          <h3><code>manifest()</code> of <code>deploy.wasm</code> <span class="ptag">tooling</span> <span class="ptag">embed</span> <span class="hchip" data-chip="q15"></span></h3>
+<pre>{
+  <span class="a">"format"</span>: <span class="s">"runspore.artifact/0.1"</span>,
+  <span class="a">"dialect"</span>: <span class="s">"runspore/0.1"</span>,
+  <span class="a">"main"</span>: <span class="s">"sha256:4be0…"</span>,
+  <span class="a">"entries"</span>: [
+    { <span class="a">"path"</span>: <span class="s">"instructions/review.md"</span>, <span class="a">"digest"</span>: <span class="s">"sha256:71c2…"</span>, <span class="a">"kind"</span>: <span class="s">"instructions"</span> },
+    { <span class="a">"path"</span>: <span class="s">"settings.json"</span>,          <span class="a">"digest"</span>: <span class="s">"sha256:5e72…"</span>, <span class="a">"kind"</span>: <span class="s">"source"</span> },
+    { <span class="a">"path"</span>: <span class="s">"workflow.dot"</span>,           <span class="a">"digest"</span>: <span class="s">"sha256:a1d9…"</span>, <span class="a">"kind"</span>: <span class="s">"source"</span> }
+  ]
+}
+<span class="c">// plus the package entry for main; its path spelling is not fixed here</span>
+<span class="c">// all digests are examples</span></pre>
+        </div>
+
+        <div class="pd" data-p="embed">
+          <h3>Route b, as pseudo-code <span class="ptag">embed</span> <span class="hchip" data-chip="q15"></span><span class="hchip" data-chip="q16"></span></h3>
+<pre>art = instantiate(deploy.wasm)            <span class="c">// runspore:artifact</span>
+m   = parse(art.manifest())
+pkg = art.blob(m.main)                    <span class="c">// the package bytes</span>
+k   = instantiate(&lt;kernel component&gt;)     <span class="c">// runspore:machine</span>
+d   = k.transition({ identity: { package-digest: m.main, … },
+                     graph: pkg, snapshot, input-event, frozen-limits })
+<span class="g">save(d.snapshot); run(d.commands)</span>         <span class="c">// yours to write: no SDK in this map</span>
+<span class="c">// route c: instantiate the composed artifact once; both calls go to it</span></pre>
+          <p class="mut">Route a needs none of this: <code>spore --json run deploy.wasm --key order-42</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== decisions ===================== -->
+  <section class="blockh">
+    <h2>Decisions, by level</h2>
+    <p class="sub">All answered except Q6, deferred with Q5 to a separate map. Click one to highlight it above.</p>
+    <div class="panel"><div class="dec" id="declist"></div></div>
+  </section>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- questions (from state.json) ---------- */
+var Q = {
+  q1:{st:"answered", t:"Where action settings and optional prose live", d:"C: DOT holds topology and kinds; one settings file per workflow; a prose file only where a step has instructions.", w:"L1 row; the folder box"},
+  q2:{st:"answered", t:"The compile boundary", d:"“.dot file should be compiled to wasm”; split into Q4, Q7 and Q8.", w:"the build box"},
+  q3:{st:"answered", t:"Parser posture: the accepted DOT subset", d:"A: strict subset; unknown attributes fail with a line number; Graphviz render attributes are kept.", w:"L1 interface; tooling at L1; build step 1"},
+  q4:{st:"answered", t:"What “compiled to WASM” means", d:"One immutable WebAssembly artifact from DOT, settings and assets; Runspore supplies the runtime; a run pins it by digest and resumes from it plus stored state; updates reach new runs only; built automatically or explicitly.", w:"L2 explicit build; L3; the immutability line"},
+  q5:{st:"answered", t:"Workflows built from workflows", d:"Step nodes in this map; the `workflow` node type goes to a separate map.", w:"grey line in L1"},
+  q6:{st:"deferred", t:"Same-run expansion or child run", d:"Deferred with Q5 to the separate map.", w:"grey line in L1"},
+  q7:{st:"answered", t:"Does spore take a .dot directly?", d:"`validate`, `start` and `run` take source or a built `.wasm`; DOT builds automatically and the artifact is saved. JSON workflow files are not public inputs; the package is internal.", w:"L2 run commands; L4 `graph` note; build step 3"},
+  q8:{st:"answered", t:"Inside the artifact: how the host reads the package", d:"B: a WebAssembly component exporting functions that return the bytes; reading it means instantiating it.", w:"L3; the artifact box"},
+  q9:{st:"answered", t:"A kernel-plus-workflow .wasm", d:"B: the composed artifact is a second distribution form, specified in this map; `spore build` gains a flag for it (name provisional).", w:"L2 explicit build; L3; the composed box"},
+  q10:{st:"answered", t:"The settings file: shape and format", d:"A: JSON in the package's own shape minus topology: `actions`, `limits`, `nodes.<id>` non-routing fields.", w:"L1 settings.json; build step 2"},
+  q11:{st:"answered", t:"How the files find each other", d:"One workflow folder: fixed `workflow.dot` and `settings.json`; optional `instructions/` and `assets/` named by relative path in settings; only declared files enter the artifact; entry point is the folder or its `workflow.dot`.", w:"L1 folder tree; L2 inputs; the folder box"},
+  q12:{st:"answered", t:"Edge outcomes and the start node", d:"A: `on=\"<outcome>\"` per edge, absent means `ok`, `on=\"failed\"` is the failure route; `start` is a graph attribute; `label` is render-only; node `kind` takes the four kernel values, default `activity`.", w:"L1 workflow.dot; the example"},
+  q13:{st:"answered", t:"A dialect version in the file", d:"A: required graph attribute `dialect=\"runspore/0.1\"`, checked first.", w:"L1 workflow.dot; the example"},
+  q14:{st:"answered", t:"What the run record pins", d:"B: the run keeps `package_digest` as identity and adds `artifact_digest` as provenance; the store gains a content-addressed artifact table.", w:"L5 store; the store box"},
+  q15:{st:"answered", t:"The artifact component's interface", d:"A: import-free world `runspore:artifact@0.1.0`: `manifest()` (canonical JSON: format, dialect, main, entries) and `blob(digest)`; source files ride along as `source` entries.", w:"L3; tooling and embedding at L3; the manifest example"},
+  q16:{st:"answered", t:"What the composed artifact exports", d:"A: both worlds unchanged, `runspore:machine` and `runspore:artifact`; the host reads the package with `blob(main)` and drives `transition` as today.", w:"L3 composed artifact; the composed box"}
+};
+var GROUPS = [
+  ["L1 · Authoring", ["q1","q3","q10","q11","q12","q13"]],
+  ["L2 · CLI", ["q2","q7"]],
+  ["L3 · Artifact", ["q4","q8","q15","q9","q16"]],
+  ["L5 · Host / store", ["q14"]],
+  ["Separate map", ["q5","q6"]]
+];
+function chipLabel(q){ var st = Q[q].st, id = q.toUpperCase(); return st==="answered" ? id : id+" "+st; }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+/* ---------- text measuring for the svg ---------- */
+var SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+var MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+var cx2d = document.createElement("canvas").getContext("2d");
+function tw(s, size, weight, mono){ cx2d.font = (weight||400)+" "+size+"px "+(mono?MONO:SANS); return cx2d.measureText(s).width; }
+var SIZE = {text:11.5, muted:10.5, title:13, label:10.5, barrier:11};
+var WEIGHT = {title:650, barrier:650};
+function rich(s, x, y, cls, anchor){
+  var size = SIZE[cls], wt = WEIGHT[cls]||400, ms = +(size-0.7).toFixed(1);
+  var parts = s.split("`"), w = 0, inner = "";
+  for (var i=0;i<parts.length;i++){
+    if (!parts[i]) continue;
+    if (i%2){ inner += '<tspan class="m" font-size="'+ms+'">'+esc(parts[i])+'</tspan>'; w += tw(parts[i], ms, wt, true); }
+    else { inner += '<tspan>'+esc(parts[i])+'</tspan>'; w += tw(parts[i], size, wt, false); }
+  }
+  return {w:w, svg:'<text x="'+x+'" y="'+y+'" class="t-'+cls+'"'+(anchor?' text-anchor="'+anchor+'"':'')+'>'+inner+'</text>'};
+}
+var CUR = null;
+function note(q){ if (CUR && q) CUR[q] = 1; }
+function chipW(q){ return tw(chipLabel(q), 9.5, 650) + 12; }
+function chip(q, x, y){
+  note(q);
+  var w = chipW(q);
+  return '<g class="chip '+Q[q].st+'" data-chip="'+q+'"><rect x="'+x+'" y="'+y+'" width="'+w+'" height="15" rx="7.5"/>'+
+         '<text x="'+(x+w/2)+'" y="'+(y+10.8)+'" text-anchor="middle">'+chipLabel(q)+'</text></g>';
+}
+function pillW(s){ return tw(s, 9.5, 650) + 12; }
+function pill(s, kind, x, y){
+  var w = pillW(s);
+  return '<g class="pill '+kind+'"><rect x="'+x+'" y="'+y+'" width="'+w+'" height="15" rx="7.5"/>'+
+         '<text x="'+(x+w/2)+'" y="'+(y+10.8)+'" text-anchor="middle">'+esc(s)+'</text></g>';
+}
+var TAGWORD = {settled:"settled", exists:"exists", prov:"provisional"};
+function tag(kind, qs, right, top){
+  var word = TAGWORD[kind] || kind;
+  var items = [{w:pillW(word), f:function(x,y){ return pill(word, kind, x, y); }}];
+  (qs||[]).forEach(function(q){ items.push({w:chipW(q), f:function(x,y){ return chip(q,x,y); }}); });
+  var total = items.reduce(function(a,b){ return a+b.w; }, 0) + 4*(items.length-1);
+  var x = right - total, out = "";
+  items.forEach(function(it){ out += it.f(x, top-7.5); x += it.w + 4; });
+  return out;
+}
+function badge(cx, cy, n, st){
+  var c = st ? " "+st : "";
+  return '<circle class="badge'+c+'" cx="'+cx+'" cy="'+cy+'" r="7"/><text class="badge-t'+c+'" x="'+cx+'" y="'+(cy+3.4)+'" text-anchor="middle">'+n+'</text>';
+}
+function T(s){ return {t:"text", s:s}; }
+function M(s){ return {t:"muted", s:s}; }
+function C(s){ return {t:"mono", s:s}; }
+
+function lines(arr, x, w, y, out){
+  arr.forEach(function(it){
+    if (typeof it === "string") it = T(it);
+    if (it.t==="text" || it.t==="muted" || it.t==="mono"){
+      var base = y + 11, tx = x + (it.indent||0);
+      var r = rich(it.t==="mono" ? "`"+it.s+"`" : it.s, tx, base, it.t==="muted" ? "muted" : "text");
+      out.push(r.svg);
+      if (it.chip) out.push(chip(it.chip, tx + r.w + 7, base - 11));
+      if (it.pill) out.push(pill(it.pill, it.pill, tx + r.w + 7, base - 11));
+      y += it.t==="muted" ? 14 : 15;
+    } else if (it.t==="num"){
+      var b2 = y + 12;
+      out.push(badge(x+7, b2-4, it.n, it.st));
+      out.push(rich(it.s, x+19, b2, "text").svg);
+      y += 17;
+    } else if (it.t==="sub"){
+      y += 9; var top = y; y += 11;
+      var inner = []; y = lines(it.lines, x+8, w-16, y, inner); y += 5;
+      (it.q||[]).forEach(note);
+      out.push('<g class="sub hl" data-q="'+(it.q||[]).join(" ")+'"><rect class="sub-'+it.kind+'" x="'+(x-4)+'" y="'+top+'" width="'+(w+8)+'" height="'+(y-top)+'" rx="6"/>'+
+               inner.join("") + tag(it.kind, it.q, x+w-2, top) + '</g>');
+      y += 4;
+    } else if (it.t==="step"){
+      y += 5; var t2 = y; y += 8;
+      var inner2 = []; var yy = lines(it.lines, x+22, w-26, y, inner2); var bot = yy + 4;
+      var cls = it.st==="exists" ? "exists" : "settled";
+      var tg = it.st==="exists" ? tag("exists", [], x+w-2, t2) : chip(it.q, x+w-2-chipW(it.q), t2-7.5);
+      note(it.q);
+      out.push('<g class="sub hl" data-q="'+(it.q||"")+'"><rect class="sub-'+cls+'" x="'+(x-4)+'" y="'+t2+'" width="'+(w+8)+'" height="'+(bot-t2)+'" rx="6"/>'+
+               badge(x+7, y+7, it.n, it.st) + inner2.join("") + tg + '</g>');
+      y = bot + 6;
+    } else if (it.t==="section"){
+      y += 2;
+      var rows = [["`"+it.name+"`","text"]];
+      if (it.name2) rows.push(["`"+it.name2+"`","text"]);
+      if (it.note) rows.push([it.note,"muted"]);
+      out.push('<rect class="sec" x="'+x+'" y="'+y+'" width="'+w+'" height="'+(rows.length*13+6)+'" rx="4"/>');
+      rows.forEach(function(r, i){ out.push(rich(r[0], x+6, y+13+13*i, r[1]).svg); });
+      y += rows.length*13 + 10;
+    } else if (it.t==="gap"){ y += it.h||6; }
+  });
+  return y;
+}
+
+var G = {};
+function renderBox(b){
+  CUR = {};
+  (b.q||[]).forEach(note);
+  var P = 10, x = b.x+P, w = b.w-2*P, y = b.y+8, out = [];
+  if (b.head){
+    var lw = pillW(b.level);
+    out.push(pill(b.level, "level", x, y));
+    out.push('<text x="'+(x+lw+6)+'" y="'+(y+11)+'" class="t-head h-'+b.style+'">'+esc(b.head)+'</text>');
+    y += 19;
+  }
+  if (b.title){
+    out.push(rich(b.mono ? "`"+b.title+"`" : b.title, x, y+13, "title").svg);
+    var right = x + w;
+    (b.chips||[]).slice().reverse().forEach(function(q){ right -= chipW(q); out.push(chip(q, right, y+2)); right -= 4; });
+    y += 21;
+  }
+  y = lines(b.lines||[], x, w, y, out);
+  var h = Math.max(b.minH||0, y + 8 - b.y);
+  b.h = h;
+  G[b.id] = {x:b.x, y:b.y, w:b.w, h:h, r:b.x+b.w, b:b.y+h, cx:b.x+b.w/2, cy:b.y+h/2};
+  var qs = Object.keys(CUR).join(" ");
+  CUR = null;
+  return {content: out.join(""), qs: qs};
+}
+function wrapBox(b, r){
+  return '<g class="node hl pd" data-p="'+(b.p||"")+'" data-q="'+r.qs+'"><rect class="box b-'+b.style+'" x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx="9"/>'+r.content+'</g>';
+}
+
+/* ---------- the pipeline boxes ---------- */
+var X = {c1:16, c2:272, c3:566, c4:866, c5:1150};
+var W = {c1:214, c2:222, c3:244, c4:222, c5:234};
+var boxes = {
+  folder:{id:"folder", p:"author node tool embed", style:"settled", level:"L1", head:"WORKFLOW FOLDER", title:"deploy/", mono:true, chips:["q1","q11"], lines:[
+    T("`workflow.dot` topology, kinds"),
+    T("`settings.json` actions, limits"),
+    T("`instructions/review.md`"),
+    T("`assets/calculate.wasm`"),
+    M("fixed names; only files settings"),
+    M("name enter the artifact")
+  ]},
+  build:{id:"build", p:"author", style:"settled", level:"L2", head:"SPORE BUILDS", title:"Build", chips:["q2","q4"], lines:[
+    {t:"text", s:"on `validate`, `start`, `run`", chip:"q7"},
+    {t:"text", s:"or explicitly:", chip:"q9"},
+    {t:"mono", s:"spore build deploy/", indent:8},
+    {t:"muted", s:"→ `deploy.wasm` beside the folder", indent:8},
+    {t:"muted", s:"`-o <file>` overrides", indent:8},
+    {t:"gap", h:5},
+    {t:"step", n:1, st:"answered", q:"q3", lines:[T("Parse `workflow.dot`: strict,"), T("dialect first, line numbers")]},
+    {t:"step", n:2, st:"answered", q:"q10", lines:[T("Merge `settings.json`"), T("(package shape, no topology)")]},
+    {t:"step", n:3, st:"answered", q:"q7", lines:[{t:"text", s:"Package, canonical JSON", pill:"internal"}]},
+    {t:"step", n:4, st:"exists", q:null, lines:[T("Validate: `validate_workflow`")]},
+    {t:"step", n:5, st:"answered", q:"q15", lines:[T("Wrap package, sources and"), T("named files in the component")]}
+  ]},
+  art:{id:"art", p:"author embed tool node", style:"settled", level:"L3", head:"WORKFLOW ARTIFACT", title:"deploy.wasm", mono:true, chips:["q8","q15"], lines:[
+    T("import-free WebAssembly component"),
+    M("world `runspore:artifact@0.1.0`"),
+    {t:"section", name:"manifest() -> list<u8>", note:"format, dialect, main, entries[]"},
+    {t:"section", name:"blob(digest)", name2:"  -> option<list<u8>>", note:"package · source · instructions · asset"},
+    M("example digest `sha256:9c41…`")
+  ]},
+  composed:{id:"composed", p:"embed", style:"settled", level:"L3", head:"SECOND FORM", title:"Composed artifact", chips:["q9","q16"], lines:[
+    T("`wasm-tools compose` of the kernel"),
+    T("component and `deploy.wasm`;"),
+    T("exports both worlds, unchanged:"),
+    C("runspore:machine"),
+    C("runspore:artifact"),
+    {t:"sub", kind:"prov", q:["q9"], lines:[T("`spore build deploy/ ‹flag›`"), M("→ `deploy-composed.wasm`")]}
+  ]},
+  store:{id:"store", p:"embed node", style:"container", level:"L5", head:"SQLITE STORE", title:"Store", lines:[
+    M("`spec/store.md`, content-addressed"),
+    {t:"sub", kind:"settled", q:["q14","q15"], lines:[T("`artifacts` by artifact digest"), M("on save: `manifest()`, then"), M("`blob(main)` → `packages`")]},
+    {t:"sub", kind:"exists", lines:[T("`packages` by package digest")]},
+    {t:"sub", kind:"exists", lines:[T("`runs` pin `package_digest`"), M("identity, as today")]},
+    {t:"sub", kind:"settled", q:["q14"], lines:[T("+ `artifact_digest`"), M("provenance: the file it started from")]},
+    M("events, snapshots, attempts, receipts")
+  ]},
+  engine:{id:"engine", p:"embed node", style:"exists", level:"L5", head:"ENGINE · RUNSPORE-HOST", title:"Engine", lines:[
+    {t:"num", n:1, s:"`load_turn`"},
+    {t:"num", n:2, s:"`get_package(digest)`"},
+    {t:"num", n:3, s:"kernel `transition`"},
+    {t:"num", n:4, s:"`commit_turn`"},
+    M("dispatch by action kind:"),
+    T("`command`; `native` in Rust only")
+  ]},
+  kernel:{id:"kernel", p:"embed", style:"exists", level:"L4", head:"EXISTS · FROZEN 0.1", title:"Kernel component", lines:[
+    M("`runspore:machine@0.1.0`, no imports"),
+    C("describe()"),
+    C("transition(request)"),
+    {t:"text", s:"`graph` = package bytes", pill:"internal"},
+    M("same bytes on every host")
+  ]}
+};
+
+var svgParts = [];
+function place(b, x, w, y){ b.x = x; b.w = w; b.y = y; var r = renderBox(b); svgParts.push(wrapBox(b, r)); }
+var TOP = 58;
+place(boxes.folder, X.c1, W.c1, TOP);
+place(boxes.build, X.c2, W.c2, TOP);
+place(boxes.art, X.c3, W.c3, TOP);
+place(boxes.composed, X.c3, W.c3, G.art.b + 46);
+place(boxes.store, X.c4, W.c4, TOP);
+place(boxes.engine, X.c5, W.c5, TOP);
+place(boxes.kernel, X.c5, W.c5, G.engine.b + 50);
+
+/* ---------- arrows ---------- */
+function ov(a, b, f){ var lo = Math.max(a.y, b.y), hi = Math.min(a.b, b.b); return Math.round(lo + (hi-lo)*(f==null?0.5:f)); }
+function arrow(a){
+  var k = a.k || "st";
+  var d = "M" + a.pts.map(function(p){ return p[0]+","+p[1]; }).join(" L");
+  var s = '<g class="node hl" data-q="'+(a.q||[]).join(" ")+'"><path class="ar ar-'+k+'" d="'+d+'" marker-end="url(#m-'+k+')"/>';
+  if (a.badge) s += badge(a.bx, a.by, a.badge);
+  if (a.label) s += rich(a.label, a.lx, a.ly, "label", a.anchor).svg;
+  return s + "</g>";
+}
+var A = [];
+var yF = ov(G.folder, G.build, 0.3);
+A.push({pts:[[G.folder.r, yF],[G.build.x, yF]], label:"read", lx:(G.folder.r+G.build.x)/2, ly:yF-6, anchor:"middle", q:["q1","q11"]});
+var yB = ov(G.build, G.art, 0.35);
+A.push({pts:[[G.build.r, yB],[G.art.x, yB]], label:"build", lx:Math.round((G.build.r+G.art.x)/2)+6, ly:yB-6, q:["q4"]});
+A.push({pts:[[G.art.x+40, G.art.b],[G.art.x+40, G.composed.y]], label:"compose with the kernel component", lx:G.art.x+48, ly:G.art.b+26, q:["q9","q16"]});
+var gapX = Math.round((G.art.r + G.store.x)/2);
+var ySave = ov(G.art, G.store, 0.3);
+A.push({pts:[[G.art.r, ySave],[G.store.x, ySave]], label:"save", lx:gapX, ly:ySave-6, anchor:"middle", q:["q4","q14"]});
+var yC = G.composed.cy;
+A.push({pts:[[G.composed.r, yC],[gapX, yC],[gapX, ySave+40],[G.store.x, ySave+40]], label:"save", lx:gapX+6, ly:Math.round((yC+ySave+40)/2), q:["q14"]});
+var gx2 = Math.round((G.store.r + G.engine.x)/2);
+var y1 = G.engine.y + 46, y2 = G.engine.y + 78, y4 = G.engine.y + 122;
+A.push({k:"ex", pts:[[G.store.r, y1],[G.engine.x, y1]], badge:1, bx:gx2, by:y1});
+A.push({k:"ex", pts:[[G.store.r, y2],[G.engine.x, y2]], badge:2, bx:gx2, by:y2});
+A.push({k:"ex", pts:[[G.engine.x, y4],[G.store.r, y4]], badge:4, bx:gx2, by:y4});
+var ky = Math.round((G.engine.b + G.kernel.y)/2);
+A.push({k:"ex", pts:[[G.kernel.x+50, G.engine.b],[G.kernel.x+50, G.kernel.y]], badge:3, bx:G.kernel.x+50, by:ky, label:"request", lx:G.kernel.x+62, ly:ky+4});
+A.push({k:"ex", pts:[[G.kernel.r-50, G.kernel.y],[G.kernel.r-50, G.engine.b]], label:"decision", lx:G.kernel.r-58, ly:ky+4, anchor:"end"});
+A.forEach(function(a){ svgParts.push(arrow(a)); });
+
+/* ---------- immutability line ---------- */
+var bx = Math.round((G.build.r + G.art.x)/2);
+var bBottom = Math.max(G.build.b, G.composed.b, G.store.b, G.kernel.b) + 12;
+CUR = {}; note("q4"); note("q7");
+var barrier = '<g class="node hl" data-q="q4 q7"><path class="barrier" d="M'+bx+',50 L'+bx+','+bBottom+'"/>';
+barrier += rich("←  editable source", bx-12, bBottom+18, "barrier", "end").svg + rich("immutable bytes, pinned by digest  →", bx+12, bBottom+18, "barrier").svg;
+var l3s = "A started run never rereads the source; edits reach new runs only.";
+var l3 = rich(l3s, 0, 0, "muted");
+var l3x = Math.round(bx + 12);
+barrier += rich(l3s, l3x, bBottom+35, "muted").svg + chip("q4", l3x + l3.w + 8, bBottom+24) + "</g>";
+CUR = null;
+svgParts.push(barrier);
+
+var stages = [
+  [X.c1, "AUTHORING", "what the author edits"],
+  [X.c2, "BUILD", "inside spore, automatic or explicit"],
+  [X.c3, "ARTIFACT", "one immutable file per version"],
+  [X.c4, "STORE", "exists, plus one table"],
+  [X.c5, "RUN", "engine and kernel, exist"]
+];
+var head = stages.map(function(s){
+  return '<text x="'+s[0]+'" y="20" class="t-stage">'+s[1]+'</text><text x="'+s[0]+'" y="35" class="t-stage-sub">'+s[2]+'</text>';
+}).join("");
+var H = bBottom + 46;
+var defs = '<defs>' + ["st","ex"].map(function(k){
+  return '<marker id="m-'+k+'" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-'+k+'" d="M0,0 L10,5 L0,10 z"/></marker>';
+}).join("") + '</defs>';
+var host = document.getElementById("dg");
+host.innerHTML = '<svg viewBox="0 0 1400 '+H+'" role="img" aria-label="Workflow folder, build inside spore, workflow artifact and composed artifact, store, engine and kernel, each tagged with its level">'+defs+head+svgParts.join("")+'</svg>';
+
+/* ---------- html chips ---------- */
+document.querySelectorAll(".hchip[data-chip]").forEach(function(el){
+  var q = el.getAttribute("data-chip"); if (!Q[q]) return;
+  el.classList.add(Q[q].st); el.textContent = chipLabel(q);
+});
+
+/* ---------- decisions list ---------- */
+function md(s){ return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>"); }
+var html = "";
+GROUPS.forEach(function(g){
+  html += '<div class="grp"><h3>'+g[0]+"</h3><ul>";
+  g[1].forEach(function(q){
+    var o = Q[q];
+    html += '<li data-q="'+q+'"><span class="hchip '+o.st+'" data-chip="'+q+'">'+chipLabel(q)+'</span> <span class="tt">'+md(o.t)+'</span>'+
+            '<span class="dr">'+md(o.d)+'</span><span class="wh">Where: '+md(o.w)+'</span></li>';
+  });
+  html += "</ul></div>";
+});
+document.getElementById("declist").innerHTML = html;
+
+/* ---------- union of question ids on every highlightable element ---------- */
+var HL = Array.prototype.slice.call(document.querySelectorAll(".mx .hl, #dg .hl"));
+HL.forEach(function(el){
+  var set = {};
+  (el.getAttribute("data-q")||"").split(" ").forEach(function(q){ if (q) set[q] = 1; });
+  el.querySelectorAll("[data-chip]").forEach(function(c){ set[c.getAttribute("data-chip")] = 1; });
+  el.querySelectorAll(".hl").forEach(function(c){ (c.getAttribute("data-q")||"").split(" ").forEach(function(q){ if (q) set[q] = 1; }); });
+  el.setAttribute("data-q", Object.keys(set).join(" "));
+});
+
+/* ---------- question highlighting ---------- */
+var sel = null;
+function select(q){
+  sel = (sel === q) ? null : q;
+  document.body.classList.toggle("qsel", !!sel);
+  HL.forEach(function(el){
+    var qs = (el.getAttribute("data-q")||"").split(" ");
+    el.classList.toggle("hit", !!sel && qs.indexOf(sel) >= 0);
+  });
+  document.querySelectorAll("#dg .chip").forEach(function(el){ el.classList.toggle("hit", !!sel && el.getAttribute("data-chip") === sel); });
+  document.querySelectorAll(".dec li").forEach(function(el){ el.classList.toggle("active", !!sel && el.getAttribute("data-q") === sel); });
+}
+document.addEventListener("click", function(e){
+  var pb = e.target.closest(".pbtn");
+  if (pb){ persona(pb.getAttribute("data-pf")); return; }
+  var el = e.target.closest("[data-chip], .dec li");
+  if (!el) return;
+  var q = el.getAttribute("data-chip") || el.getAttribute("data-q");
+  if (q && Q[q]) select(q);
+});
+
+/* ---------- persona filter ---------- */
+function persona(p){
+  document.querySelectorAll(".pbtn").forEach(function(b){ b.classList.toggle("on", b.getAttribute("data-pf") === p); });
+  document.querySelectorAll(".pd[data-p]").forEach(function(el){
+    var ps = (el.getAttribute("data-p")||"").split(" ");
+    el.classList.toggle("pdim", !!p && ps.indexOf(p) < 0);
+  });
+}
+
+var h0 = (location.hash||"").slice(1);
+if (Q[h0]) select(h0);
+})();
+</script>
+</body>
+</html>
