@@ -19,8 +19,6 @@
                   "outcomes": {"ok": "test"}},
     "approve": {"kind": "await-signal", "signal": "approval",
                 "outcomes": {"approved": "done", "rejected": "implement"}},
-    "done": {"kind": "complete",
-             "output": {"change": {"$get": ["nodes", "implement", "output", "result", "summary"]},
-                        "tests": {"$get": ["nodes", "test", "output", "stdout"]}}}
+    "done": {"kind": "complete", "output": {"tests": {"$get": ["nodes", "test", "output", "stdout"]}}}
   }
 }

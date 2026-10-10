@@ -24,7 +24,8 @@ import uuid
 SESSION_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://runspore.com/claude-code/session")
 FRONTMATTER_KEYS = {"model", "tools", "allow", "permissionMode"}
 MAX_SAFE_INTEGER = 2**53 - 1
-MAX_TEXT = 32 * 1024  # spore 0.1 caps stdout at 64 KiB
+MAX_STDOUT = 64 * 1024 - 1024  # spore 0.1 caps stdout at 64 KiB; keep a margin
+TRUNCATED = "\n[truncated; the full answer is in the session]"
 RESUME_PROMPT = (
     "This step was interrupted before it finished. Check the state of the work "
     "and finish the step as originally instructed."
@@ -123,6 +124,10 @@ def to_canonical(value, path="$"):
     return {k: to_canonical(v, f"{path}.{k}") for k, v in value.items()}
 
 
+def serialize(output):
+    return json.dumps(output, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
 def main():
     instructions, schema, exits = parse_args(sys.argv[1:])
     effect_key = os.environ.get("RUNSPORE_EFFECT_KEY")
@@ -158,8 +163,6 @@ def main():
         outcome = result.get("outcome", "ok") if isinstance(result, dict) else "ok"
     else:
         result = envelope.get("result") or ""
-        if len(result) > MAX_TEXT:
-            result = result[:MAX_TEXT] + "\n[truncated; the full answer is in the session]"
         outcome = "ok"
     if outcome not in exits:
         fail(f"claude chose outcome {outcome!r}, which has no --exit code")
@@ -173,7 +176,16 @@ def main():
         "costMicroUsd": round(envelope.get("total_cost_usd", 0) * 1_000_000),
         "deniedTools": denied,
     }
-    json.dump(output, sys.stdout, separators=(",", ":"))
+    data = serialize(output)
+    while len(data) > MAX_STDOUT:
+        # Escaping makes the size in bytes unpredictable from the text, so halve
+        # the text until the serialized whole fits.
+        text = output["result"]
+        if not isinstance(text, str) or not text:
+            fail(f"the step's output is {len(data)} bytes, over spore's 64 KiB limit")
+        output["result"] = text[: len(text) // 2].removesuffix(TRUNCATED) + TRUNCATED
+        data = serialize(output)
+    sys.stdout.buffer.write(data)
     sys.exit(exits[outcome])
 
 
