@@ -2,7 +2,7 @@
 
 This is the design record of the grill held on 2026-10-11 for the map ticket **C10 — Where the plugin lives and how it gets spore** (Web-tree/runspore#15, map #5). It settles which repository ships the Claude Code plugin, how a person ends up with a `spore` that works with it, the version check between the two, and the names earlier tickets left provisional.
 
-**Plugin side.** The plugin is `ml-spore` in Max's `max-skills` marketplace (`Max-Levitskiy/skills`), next to his other plugins. Its helper program `claude-spore` is a Bun script in the plugin's `bin/`. The plugin's own spec, the Claude part of this map's destination, lives beside it in `max-skills`, so this repository names no Claude at all.
+**Plugin side.** The plugin is `ml-workflow` in Max's `max-skills` marketplace (`Max-Levitskiy/skills`), next to his other plugins. Its helper program `claude-spore` is a Bun script in the plugin's `bin/`. The plugin's own spec, the Claude part of this map's destination, lives beside it in `max-skills`, so this repository names no Claude at all.
 
 **Runspore side.** The person installs `spore` themselves. Each runspore release publishes ready-built binaries with checksums, plus a one-line installer; `cargo install` also works. When `spore` or Bun is missing or too old, the plugin says so, shows the install or update line, and runs it only if the person says yes. The plugin uses the person's own `spore` whenever it is new enough.
 
@@ -32,7 +32,7 @@ Earlier tickets also left names here:
 
 ### L1. The plugin lives in `max-skills` (Q1 → B, Max)
 
-**Decision.** The plugin is a folder in `Max-Levitskiy/skills` (`plugins/ml-spore`), listed in its `max-skills` marketplace with a relative `./plugins/ml-spore` source like the other six plugins. People install it with `/plugin install ml-spore@max-skills`. Plugin releases follow that repository's own release flow and version numbers. They are not tied to runspore's.
+**Decision.** The plugin is a folder in `Max-Levitskiy/skills` (`plugins/ml-workflow`), listed in its `max-skills` marketplace with a relative `./plugins/ml-workflow` source like the other six plugins. People install it with `/plugin install ml-workflow@max-skills`. Plugin releases follow that repository's own release flow and version numbers. They are not tied to runspore's.
 
 **Rejected.**
 - *A — in this repo, which also serves as its own marketplace.* My recommendation. One pull request would change a format in `spore` and in the plugin at once, tested together under one version. Max chose to keep his plugins in one collection. The coupling is handled by the version check (R3) instead.
@@ -77,19 +77,19 @@ Max's answer: "plugin say runspore is missed and suggest to install."
   - Newer minor versions are accepted.
   - The session-start check is silent when everything fits.
   - Two different `spore` versions on one database are spore's own concern. A `spore` refuses a database whose store schema is newer than it understands (`store.md` 0.2, R6).
-- **R4. Where the Claude part of the spec lives (Q5 → A).** The profile spec lives next to the plugin, as `plugins/ml-spore/docs/spec.md` in `max-skills` (name routine). Runspore's `spec/` holds only generic contracts and names no Claude. This replaces the map's planned `spec/claude-code.md` in this repository.
+- **R4. Where the Claude part of the spec lives (Q5 → A).** The profile spec lives next to the plugin, as `plugins/ml-workflow/docs/spec.md` in `max-skills` (name routine). Runspore's `spec/` holds only generic contracts and names no Claude. This replaces the map's planned `spec/claude-code.md` in this repository.
 - **R5. The helper outside a Claude session (settled).**
   - Claude Code puts a plugin's `bin/` on the Bash tool's path only. A worker started from the menu, through the Bash tool, inherits that path and finds `claude-spore`.
-  - For a worker started in a plain terminal, the plugin offers once to install a launcher at `~/.local/bin/claude-spore`. The launcher finds the newest installed `ml-spore` under `~/.claude/plugins/cache/max-skills/ml-spore/` and runs its `bin/claude-spore`.
+  - For a worker started in a plain terminal, the plugin offers once to install a launcher at `~/.local/bin/claude-spore`. The launcher finds the newest installed `ml-workflow` under `~/.claude/plugins/cache/max-skills/ml-workflow/` and runs its `bin/claude-spore`.
   - A mod calls the helper by absolute path (`$.plugin.root + "/bin/claude-spore"`), because `$.process.run` does not see the plugin's `bin/`.
 - **R6. Store schema guard (settled, generic).** `store.md` 0.2 records the store schema version in the database. A `spore` that finds a newer one refuses with exit 10 (store error) and says which version wrote it. This is plain Runspore and needs no Claude.
 - **R7. Names (settled, replacing every "provisional, C10" mark).**
 
   | Was provisional | Settled |
   |---|---|
-  | plugin name | `ml-spore` (the collection's `ml-` prefix) |
+  | plugin name | `ml-workflow` (Max's call after the grill, with the collection's `ml-` prefix; it takes over from the skills-repo `workflow` plugin) |
   | `/spore` (menu) | `/spore`, registered by the mod with `$.command.register`; `/spore new`, `/spore change <name>` hand off to the interview |
-  | `spore-author` (C09) | skill `author`, shown as `/ml-spore:author`; its guide ships as `skills/author/references/authoring.md` |
+  | `spore-author` (C09) | skill `author`, shown as `/ml-workflow:author`; its guide ships as `skills/author/references/authoring.md` |
   | `claude-spore run\|start\|check\|probe\|watch\|stop\|report` | kept as is |
   | `spore init`, `spore step show`, exit code 7 (cancelled) | kept as is (generic, `cli.md` 0.2) |
   | actor label for a person | `person` |
@@ -128,20 +128,20 @@ Checked on 2026-10-11 against Claude Code 2.1.296, code.claude.com and the Claud
   - In the Notes, `docs/13` paragraph 1 ("keep the projects separate") partly stands again: the plugin is a separate project, and only `spore` lives here.
   - The spec-split fog line replaces "a new `spec/claude-code.md`" with the plugin's own spec in `max-skills`, and adds this ticket's `cli.md` 0.2 `capabilities` fields and `store.md` 0.2 schema guard.
 - **C09:** `spore-author` becomes skill `author`; "the plugin's default model" is R8; the tool sets are R9.
-- **C11 (#16):** the reference loop's test setup installs `spore` (R2) and `ml-spore`, and needs Bun.
+- **C11 (#16):** the reference loop's test setup installs `spore` (R2) and `ml-workflow`, and needs Bun.
 - **`docs/13`:** the integration section should point at `max-skills` for the plugin. Revise it when the spec lands, together with the paragraphs the map already marks as superseded.
 
 ## Risks
 
 - **Two installs before the first run.** A new person needs `spore`, Bun and the plugin. The plugin's offered install lines keep this to two yes answers, but a person without network access or `~/.local/bin` on their path gets stuck at the first one.
 - **Drift between two repositories.** A runspore change that breaks the plugin shows up only when the plugin's tests run against the new `spore`. The plugin's CI should test against the newest runspore release and against its oldest supported spore.
-- **`/spore` may be prefixed.** If a mod command's name gets the plugin prefix, the menu becomes `/ml-spore:spore`. The first build must check this, and fall back to a short skill name if it is.
+- **`/spore` may be prefixed.** If a mod command's name gets the plugin prefix, the menu becomes `/ml-workflow:spore`. The first build must check this, and fall back to a short skill name if it is.
 - **The launcher reads Claude Code's cache layout** (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`), which is not a documented contract.
 
 ## Deferred
 
 - **A Homebrew tap for `spore`.** Reopen when someone asks for it, or when a release has users outside Max's machines.
-- **Listing `ml-spore` in a Web-tree marketplace too.** Reopen if runspore gets its own marketplace.
+- **Listing `ml-workflow` in a Web-tree marketplace too.** Reopen if runspore gets its own marketplace.
 
 ## Open threads
 

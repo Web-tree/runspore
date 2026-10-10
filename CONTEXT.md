@@ -115,7 +115,7 @@ The Claude Code extension through which a person starts, watches and resumes run
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
 
 **Plugin**:
-The Claude Code package, `ml-spore` in the `max-skills` marketplace, that ships the mod, the authoring interview and the helper. It lives outside this repository.
+The Claude Code package, `ml-workflow` in the `max-skills` marketplace, that ships the mod, the authoring interview and the helper. It lives outside this repository.
 _Avoid_: extension, addon
 
 **Helper**:
