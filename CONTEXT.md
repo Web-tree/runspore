@@ -14,6 +14,14 @@ _Avoid_: pipeline, flow, "current workflow" (that is a run)
 One execution of a workflow, with its own identity and state.
 _Avoid_: workflow instance, job, session
 
+**Start key**:
+The name a caller gives a run so that starting it twice gives back the same run. It names a run only inside one database: the same start key in another database starts a different run.
+_Avoid_: run ID, workflow ID
+
+**Effect key**:
+The key a step hands to services outside Runspore so that a repeated try of the step is not carried out twice. Every other visit of the step, in any run and any database, gets a different one.
+_Avoid_: idempotency token, request ID
+
 **Worker**:
 The process that moves runs forward: it asks the kernel for each next step, records the decision, and carries out the actions it can perform itself.
 _Avoid_: engine (the library inside it), runner (that performs one kind of action), daemon
