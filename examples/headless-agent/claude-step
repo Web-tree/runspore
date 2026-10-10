@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Runs one workflow step as a background Claude session (`claude -p`).
+
+Usage: claude-step <instructions.md> [--schema <file>] [--exit <outcome>=<code>]...
+
+A `command` action under spore 0.1 runs this with the step's input on stdin. It
+prints one canonical-domain JSON object for `"output": "json"` and exits with 0
+for outcome `ok` or the code given by `--exit` for another outcome; the action's
+`exitOutcomes` maps those codes back. Any other exit is a failure the host
+retries (spore 0.1 has no way for a command to report a non-retryable failure).
+
+The session id is derived from RUNSPORE_EFFECT_KEY, so every attempt of one step
+visit uses the same id: the first attempt starts the session and later attempts
+resume it.
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import uuid
+
+SESSION_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://runspore.com/claude-code/session")
+FRONTMATTER_KEYS = {"model", "tools", "allow", "permissionMode"}
+MAX_SAFE_INTEGER = 2**53 - 1
+MAX_STDOUT = 64 * 1024 - 1024  # spore 0.1 caps stdout at 64 KiB; keep a margin
+TRUNCATED = "\n[truncated; the full answer is in the session]"
+RESUME_PROMPT = (
+    "This step was interrupted before it finished. Check the state of the work "
+    "and finish the step as originally instructed."
+)
+
+
+def fail(message):
+    print(f"claude-step: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_args(argv):
+    if not argv:
+        fail("usage: claude-step <instructions.md> [--schema <file>] [--exit <outcome>=<code>]...")
+    instructions, schema, exits = argv[0], None, {"ok": 0}
+    rest = argv[1:]
+    while rest:
+        flag, value, rest = rest[0], rest[1] if len(rest) > 1 else None, rest[2:]
+        if flag == "--schema" and value:
+            schema = value
+        elif flag == "--exit" and value and "=" in value:
+            outcome, code = value.split("=", 1)
+            exits[outcome] = int(code)
+        else:
+            fail(f"bad argument {flag!r}")
+    return instructions, schema, exits
+
+
+def read_instructions(path):
+    """Splits a `---` frontmatter block of `key: value` lines from the prose."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    settings = {}
+    if text.startswith("---\n"):
+        head, _, text = text[4:].partition("\n---\n")
+        for line in head.splitlines():
+            key, _, value = line.partition(":")
+            key, value = key.strip(), value.strip()
+            if key not in FRONTMATTER_KEYS:
+                fail(f"{path}: unknown frontmatter key {key!r}")
+            if value.startswith("[") and value.endswith("]"):
+                value = [v.strip() for v in value[1:-1].split(",") if v.strip()]
+            settings[key] = value
+    return settings, text.strip()
+
+
+def claude_args(settings, schema):
+    args = ["claude", "-p", "--output-format", "json"]
+    # Always pass a mode: otherwise the step inherits the user's own defaultMode.
+    args += ["--permission-mode", settings.get("permissionMode", "default")]
+    if "model" in settings:
+        args += ["--model", settings["model"]]
+    if "tools" in settings:
+        args += ["--tools", ",".join(settings["tools"])]
+    for rule in settings.get("allow", []):
+        args += ["--allowedTools", rule]
+    if schema:
+        with open(schema, encoding="utf-8") as f:
+            args += ["--json-schema", f.read()]
+    return args
+
+
+def run_claude(args, prompt):
+    parent = os.getppid()
+    proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    pending = prompt  # communicate() takes the input on its first call only
+    while True:
+        try:
+            out, err = proc.communicate(pending, timeout=1)
+            return proc.returncode, out, err
+        except subprocess.TimeoutExpired:
+            pending = None
+            if os.getppid() != parent:
+                # The worker died without stopping us. Its lease will expire and
+                # the next attempt resumes this session; a live Claude here would
+                # then share the conversation with it. spore starts each command
+                # in its own process group, so this kills Claude's tools too.
+                os.killpg(os.getpgrp(), signal.SIGKILL)
+
+
+def to_canonical(value, path="$"):
+    """Integral floats become integers; any other non-integer number is an error."""
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, float):
+        if value.is_integer() and abs(value) <= MAX_SAFE_INTEGER:
+            return int(value)
+        fail(f"structured output has a non-integer number at {path}; declare it as an integer or string in the schema")
+    if isinstance(value, int):
+        if abs(value) > MAX_SAFE_INTEGER:
+            fail(f"structured output has an integer beyond 2^53 - 1 at {path}")
+        return value
+    if isinstance(value, list):
+        return [to_canonical(v, f"{path}[{i}]") for i, v in enumerate(value)]
+    return {k: to_canonical(v, f"{path}.{k}") for k, v in value.items()}
+
+
+def serialize(output):
+    return json.dumps(output, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def main():
+    instructions, schema, exits = parse_args(sys.argv[1:])
+    effect_key = os.environ.get("RUNSPORE_EFFECT_KEY")
+    if not effect_key:
+        fail("RUNSPORE_EFFECT_KEY is not set; run this from a spore command action")
+    session = str(uuid.uuid5(SESSION_NAMESPACE, effect_key))
+    settings, prose = read_instructions(instructions)
+    step_input = sys.stdin.read()
+    args = claude_args(settings, schema)
+
+    prompt = f"{prose}\n\n## Input\n\n```json\n{step_input}\n```\n"
+    code, out, err = run_claude(args + ["--session-id", session], prompt)
+    if code != 0 and "is already in use" in err:
+        # An earlier attempt of this step visit started the session: continue it.
+        code, out, err = run_claude(args + ["--resume", session], RESUME_PROMPT)
+
+    try:
+        envelope = json.loads(out)
+    except json.JSONDecodeError:
+        fail(f"claude exited {code} without a JSON result: {err.strip()[-2000:]}")
+    if code != 0 or envelope.get("is_error"):
+        reason = envelope.get("errors") or envelope.get("result") or err.strip()
+        fail(f"claude ended with {envelope.get('subtype')} (exit {code}): {reason}")
+    # A denial is not a failure: Claude often finds another way (a compound
+    # command is denied, the plain one is allowed). Report it for the reader.
+    denied = sorted({d.get("tool_name", "?") for d in envelope.get("permission_denials", [])})
+
+    if schema:
+        result = envelope.get("structured_output")
+        if result is None:
+            fail("claude finished without structured output")
+        result = to_canonical(result)
+        outcome = result.get("outcome", "ok") if isinstance(result, dict) else "ok"
+    else:
+        result = envelope.get("result") or ""
+        outcome = "ok"
+    if outcome not in exits:
+        fail(f"claude chose outcome {outcome!r}, which has no --exit code")
+
+    output = {
+        "session": session,
+        "result": result,
+        "turns": envelope.get("num_turns", 0),
+        "durationMs": envelope.get("duration_ms", 0),
+        # total_cost_usd is a float, which canonical JSON rejects.
+        "costMicroUsd": round(envelope.get("total_cost_usd", 0) * 1_000_000),
+        "deniedTools": denied,
+    }
+    data = serialize(output)
+    while len(data) > MAX_STDOUT:
+        # Escaping makes the size in bytes unpredictable from the text, so halve
+        # the text until the serialized whole fits.
+        text = output["result"]
+        if not isinstance(text, str) or not text:
+            fail(f"the step's output is {len(data)} bytes, over spore's 64 KiB limit")
+        output["result"] = text[: len(text) // 2].removesuffix(TRUNCATED) + TRUNCATED
+        data = serialize(output)
+    sys.stdout.buffer.write(data)
+    sys.exit(exits[outcome])
+
+
+if __name__ == "__main__":
+    main()
