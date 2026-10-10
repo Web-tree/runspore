@@ -72,6 +72,10 @@ _Avoid_: healthcheck, ping
 An action's own wait on a holder handle that ends when the job behind it ends, and may deliver its result.
 _Avoid_: await, poll
 
+**Output schema**:
+The shape a step's data must have when the step ends a given way, such as "needs changes" carrying the list of changes. Runspore checks each step's data against it the moment the data arrives; a step with no output schema is not checked.
+_Avoid_: contract, type
+
 ### Claude Code integration
 
 **Mod**:
@@ -96,3 +100,7 @@ _Avoid_: in-session step, controlled mode, agent-driven step
 **Stuck step**:
 A step that cannot recover (its tries ran out, or it failed with nothing left to try) and has no failure path; the run waits at it for a person's decision.
 _Avoid_: failed step, blocked step
+
+**Repair**:
+Claude fixing its own answer in the same conversation after being told exactly why it does not fit the step's output schema. It happens before Runspore sees the answer, at most twice per try.
+_Avoid_: retry (a new try of the step), loop-back (a new visit)
