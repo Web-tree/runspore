@@ -82,12 +82,13 @@ A run started from the main checkout keeps its records in that checkout's `.spor
 
 ### L4. Runspore gains cancel (Q10, standard practice, not asked)
 
-**Decision.** `spore cancel <runId>` ends an unfinished run with status `cancelled`. Its events and invocations are kept, and a step in progress is told to stop:
-- **A running command:** its process group gets the engine's stop signal, as on shutdown (host §3).
-- **A held async step:** spore expires the attempt, which fences out the holder. If the action declares an optional `async.stop` command, spore then runs it with the holder handle. It is declared like `probe` and `watch`, and is best effort.
+**Decision.** `spore cancel <runId>` ends an unfinished run with status `cancelled`, at once and in one store operation. Its events and invocations are kept, and a step in progress is told to stop:
+- **The run is closed in the store, not by the kernel.** Like a quarantine, the cancel is recorded on the run, and from that moment no worker can coordinate, dispatch, claim, heartbeat or finish anything of it. A quarantined run can be cancelled too: the cancel clears the quarantine as part of the same operation. Pending events stay unconsumed, as evidence.
+- **A running command:** its worker's next heartbeat is refused, so it stops the command's process group, as on a lost lease (host §2), and stores what it knows as late evidence.
+- **A held async step:** the attempt is expired with reason `cancelled`, which fences out the holder. If the action declares an optional `async.stop` command, `spore cancel` then runs it with the holder handle. It is declared like `probe` and `watch`, and is best effort.
 - **The plugin's `claude-spore stop`:** this is what closes an interactive step's herdr pane.
 
-Cancelling a run that has already ended succeeds and changes nothing. The menu offers cancel on every unfinished run. This reverses ADR M12 ("no cancellation in 0.1") for 0.2.
+This is Temporal's *terminate*, not its *cancel*: the workflow gets no say and runs no clean-up steps. The kernel is unchanged. Cancelling a run that has already ended succeeds and changes nothing. The menu offers cancel on every unfinished run. This reverses ADR M12 ("no cancellation in 0.1") for 0.2.
 
 **Why it was settled, not asked.** Every workflow engine has it: Temporal cancel and terminate, Step Functions StopExecution, Argo stop. L2 makes it necessary, because without it an abandoned run would sit in the menu and in the session-start line forever.
 
@@ -123,7 +124,7 @@ Cancelling a run that has already ended succeeds and changes nothing. The menu o
 
 ## Spec
 
-Normative wording to carry into `spec/cli.md` 0.2, `spec/kernel.md` 0.2, `spec/host.md` 0.2, the package format `runspore.workflow/0.2`, and the profile spec. Names marked provisional are C10's.
+Normative wording to carry into `spec/cli.md` 0.2, `spec/store.md` 0.2, `spec/host.md` 0.2, the package format `runspore.workflow/0.2`, and the profile spec. Names marked provisional are C10's.
 
 ### The project folder
 
@@ -139,8 +140,15 @@ Normative wording to carry into `spec/cli.md` 0.2, `spec/kernel.md` 0.2, `spec/h
 └── runspore.db.files/      # C14 files_dir: steps/ and work/, not committed
 ```
 
-- `spore init` creates `.spore/`, `.spore/workflows/` and `.spore/.gitignore` in the current folder. It never overwrites an existing file, and running it twice changes nothing. The menu's "write a new workflow" (C09) runs it when no project folder exists.
-- Any `spore` command that opens the database creates `.spore/.gitignore` if `.spore/` exists without one.
+- `spore init` creates `.spore/`, `.spore/workflows/` and `.spore/.gitignore` at the repository root: the nearest folder at or above the current one that holds `.git`, or the current folder when there is none. It refuses, with exit 2, in three cases:
+  - a `.spore/` already exists at or above the current folder, at a different level from the root it would use;
+  - a 0.1 database (`runspore.db`, its `-wal`/`-shm` files or `runspore.db.files/`) exists at the root; the error prints the exact moves into `.spore/`;
+  - the target is otherwise unusable.
+
+  It never overwrites a file, and running it twice changes nothing. The menu's "write a new workflow" (C09) runs it when no project folder exists.
+- **The ignore file.** It must exclude `runspore.db`, `runspore.db-*` and `runspore.db.files/`. `init`, and any command that writes the database, add whichever of these lines are missing to `.spore/.gitignore`, keep every other line, and create the file if it is absent.
+- **Only writing commands create a database.** These are `start`, `run`, `init`, `signal`, `resolve`, `cancel` and the `step` commands that write. Read-only commands (`list`, `status`, `events`, `step show`, and `continue` when there is nothing to continue) treat a missing database as empty and never create one.
+- **Steps reach the same database.** The host sets `RUNSPORE_DB` to the absolute path of the database it runs on for every program it starts (command, async start, probe, watch, stop). So a `spore` call from inside a step, even in a git worktree with its own `.spore/`, reaches the run's own database, because `$RUNSPORE_DB` beats walk-up (R4). The plugin passes it on to the Claude session it starts.
 - Database resolution follows R4. `spore` prints the path it chose in `status --json` and `list --json` as `"db"`.
 
 ### `spore continue`
@@ -155,7 +163,7 @@ Normative wording to carry into `spec/cli.md` 0.2, `spec/kernel.md` 0.2, `spec/h
 
 For a single run, `continue`:
 1. **Quarantined:** prints the reason and `spore release <runId>`, then exits 5. It works nothing.
-2. **Held async step:** probes it (C03). A certain `dead` expires the attempt with `probe-dead`, and the run goes on. Anything else prints the actor label, the holder handle, the deadline and `spore step abandon <runId>`, then exits 6.
+2. **Held async step:** first expires the attempt if its deadline or lease has passed, as the worker's sweep would. Then it probes the attempt (C03). A certain `dead` expires the attempt with `probe-dead`. Either way the run goes on. Otherwise it prints the actor label, the holder handle, the deadline and `spore step abandon <runId>`, then exits 6.
 3. **Otherwise:** works the run exactly as `spore run` resumes it, until it is terminal or parked.
 4. **Then it prints what is needed:**
    - a signal: the node, `spore step show`, and the `spore signal` line with the node's allowed outcomes;
@@ -175,8 +183,14 @@ It works the run in the foreground. Whether the mod calls it in the background, 
 
 `spore cancel <runId> [--reason <text>] [--id <requestId>]` appends a cancel event. The request ID is derived from `--id`, which is generated if missing, so a repeat is a duplicate. Exit 0 once the run is `cancelled`, or when it had already ended.
 
-- **Kernel 0.2.** A new event `run.cancelled {reason}` is accepted in any non-terminal status. It ends the run with status `cancelled`, which is terminal, and emits no commands. An outstanding invocation is closed as `cancelled`. A result that arrives for it later is late evidence. The safety net, loop limits and stuck steps never produce `cancelled`. New golden traces cover cancel at a waiting signal, at a stuck step, during a running command, during a held async step, and after completion (no-op).
-- **Host 0.2.** On a committed cancel, a worker running the attempt stops it (its stop signal; the runner reports `unknown`, which the kernel drops as late). For a held async attempt, the host expires it with reason `cancelled`. If the action declares `async.stop` (tagged like `probe`: `{"command": {"argv": [...]}}`), the host runs it once with the holder handle on stdin and the C14 environment, records its output as late evidence, and ignores its failure.
+- **Store 0.2: `cancel_run(key, reason, requestId)`.** One atomic operation, idempotent by request ID:
+  - it records `cancelled {reason, at}` on the run, and clears a quarantine if there is one;
+  - it expires a held async attempt with reason `cancelled`.
+
+  After it, the run is invisible to `load_turn`, `scan_ready` and `scan_due`; `commit_turn` and `claim_attempt` refuse with `stale` / `run.cancelled`; `heartbeat_attempt` and `finish_attempt` answer `lease.lost`. Read views show status `cancelled`. On a run that has already ended, it changes nothing.
+  - New conformance rows: cancel at a waiting signal, at a stuck step, while quarantined, during a running command (its next heartbeat is refused), during a held async step, from two processes at once, and after completion.
+- **Kernel.** Unchanged. The snapshot keeps the state it had, and `cancelled` lives beside it in the store, as a quarantine does.
+- **Host 0.2.** A worker whose heartbeat answers `lease.lost` already stops its runner and stores late evidence (host §2), so a running command stops within one `heartbeat_ms`. After the store operation, `spore cancel` runs the action's `async.stop` for an expired held attempt, if declared (tagged like `probe`: `{"command": {"argv": [...]}}`). It runs once, with the holder handle on stdin and the C14 environment; its output is recorded as late evidence and its failure is ignored.
 - **CLI 0.2.** New exit code 7, "the run was cancelled", for `run`, `worker --until-parked` and `continue`.
 
 ### `inputSchema`
@@ -194,7 +208,7 @@ It works the run in the foreground. Whether the mod calls it in the background, 
 ```
 
 - It is a top-level field of `settings.json`, copied into the package (`runspore.workflow/0.2`) and covered by its digest.
-- It uses C12's schema subset.
+- It uses C12's schema subset, with one restriction: its root is `"type": "object"`, so a run's input always has named fields.
 - `validate` rejects a malformed schema with `workflow.invalid-schema`.
 - `start` and `run` check `--input` / `--input-file` against it before `create_run`. On a misfit they return `input.invalid` with the failing path and exit 2.
 - With no `inputSchema`, any input is accepted, as in 0.1.
@@ -215,7 +229,7 @@ Command name `/spore` (provisional, C10). The widget that carries the menu is C0
    |---|---|---|
    | `signal` | Decide: shows the step's instructions, then asks for an outcome (and data if the node's schema asks for it) | `spore step show <runId>`, then `spore signal <runId> <name> --outcome <o> [--data …]` |
    | `stuck` | Retry / mark done / fail | `spore resolve <runId> <inv> --retry` / `--complete <o> [--output …]` / `--fail <message>` |
-   | `held`, holder is a herdr session | Open its pane | herdr focus on the handle's agent name (C07 R9) |
+   | `held`, holder handle has the plugin's interactive form | Open its pane | herdr focus on the handle's agent name. The form is C07 Q20, still deferred; until it is settled this row falls back to the next one |
    | `held`, other holder | Shows the holder and deadline | `spore step abandon <runId>` on request |
    | `external-ready` | Shows the step | `spore step show <runId>`. A person claims it with `spore step claim` |
    | `working` | Continue | `spore continue <runId>` (foreground or background per C06) |
@@ -225,7 +239,7 @@ Command name `/spore` (provisional, C10). The widget that carries the menu is C0
 2. **Workflows to start**: each folder under `.spore/workflows/`, shown by name, always offered (L2). Choosing one:
    1. Runs `claude-spore check <folder>` (R9).
    2. Reads `inputSchema` from the folder's `settings.json`.
-   3. For each property, shows its `description` with Claude's draft from the conversation. The person confirms or edits it (R5).
+   3. For each top-level property, it shows the property's `description`, or the property's name when there is no description, together with Claude's draft from the conversation. The person confirms or edits it (R5). Properties that are not required can be left out. A property whose type is not `string` is entered as JSON. `spore start` checks the whole input either way.
    4. Runs `spore start <folder> --input-file <tmp>`.
    5. Prints the new run ID and where to watch it.
 3. **Write a new workflow**: hands off to C09's interview, which runs `spore init` when needed.
@@ -243,12 +257,13 @@ Established by reading the repo and the research notes, not by asking:
   - A hook's own run time is capped at 10 s.
   - `$.process.run` defaults to 30 s.
   - `$.command.register` with `immediate: true` runs a command with no Claude turn.
-- C07 R9 / Q20: an interactive step's holder handle carries the herdr agent name, which the menu can focus.
+- C07 Q20 defers the interactive step's holder handle. Its proposal carries the herdr agent name, which herdr clears on exit or manual release. So "open its pane" depends on Q20, and on the name still being live.
 
 ## Changes outside C08
 
 - **Map #5, "Locked during charting".** "start a run of a workflow when none is running" becomes "start a run of a workflow" (L2).
-- **ADR M12** (docs/02): cancellation added in 0.2 (L4).
+- **ADR M12** (docs/02): cancellation added in 0.2 as a store-level close (L4). The kernel stays unchanged.
+- **C07 Q20.** The interactive holder handle needs a form the menu can recognise, for "open its pane".
 - **C03.** `continue`, named there as C08's, is now specified. `async` gains optional `stop`, beside `probe` and `watch`.
 - **C06.** `continue` works a run in the foreground. Whether the mod runs it in the background, and how it learns the run moved, stays with C06.
 - **C09.** A new workflow is written to `.spore/workflows/<name>/` after `spore init`. The interview should ask for the run's inputs and write `inputSchema`.
@@ -261,6 +276,7 @@ Established by reading the repo and the research notes, not by asking:
 - **Two runs in one checkout can overwrite each other's files, silently** (L3, Max's call). The workflow author has to choose isolation. A reference loop without a worktree step is exposed when two runs run at once.
 - **Deleting a checkout deletes its run history** (L1). This is intended: runs belong to the checkout.
 - **Walk-up can find an unexpected `.spore/`**, for example a repository nested inside another that has one. `status --json` prints the chosen `db`, and `--db` overrides it.
+- **A step's spore calls follow `$RUNSPORE_DB`.** A program that clears its environment, or a person typing in an interactive step's pane, falls back to walk-up and may reach a worktree's database.
 - **Cancel's stop is best effort.** If herdr is unreachable, `claude-spore stop` fails and an interactive session may keep editing files after its run is cancelled. Its later result is only late evidence, but the edits stay.
 - **The session-start line depends on `spore list` answering within the hook budget.** A locked or very large database could exceed it, and the line is then skipped.
 
