@@ -1,0 +1,684 @@
+<!--
+Topic: C07 - The four kinds as Runspore actions. Visual v2 (redraw of v1), kind: diagram.
+
+Questions reflected:
+  Q1  A: profile kinds (cmd, skill, agent, human) are words only; files hold plain Runspore actions
+  Q2  A: human by purpose; a decision is an await-signal node, manual work an external step with a
+      person's actor label
+  Q3  B: a skill step names its skill in the instructions frontmatter (skill: ...), run as a slash command
+  Q4  B: opt-in command mode "output": "result"; stdout {"outcome", "output"}
+  Q5  A: probe declared on the action, tagged {"command": {...}} now, {"component": {...}} planned
+  Q6  A, reread after Q19: the started session's main conversation does the work, not a subagent
+  Q7  B: skill, model, tools in the instructions frontmatter; switching form changes only the action
+  Q8  A (rewritten): commands never receive outcome names; the workflow maps the result (exitOutcomes,
+      a wrapper, or opt-in output: "result") and the host rejects an undeclared outcome
+  Q9  C: a probe named by a folder path is bundled and pinned; a bare command name is looked up
+  Q10 A: a background Claude step that detaches records {pid, started, session}; dead = no such process
+  Q11 B: claude-spore check <folder> before the run (authoring interview, the menu's "start a run");
+      a bad key also fails the step when it starts
+  Q12 text "rerun automatically until we can't recover": Claude steps are idempotent; each rerun resumes
+      the same conversation
+  Q13 B: time limit per kind: interactive (herdr) 4 h, background 1 h, a person's manual task 7 days
+  Q14 A: 3 tries
+  Q15 text: the integration starts Claude with --session-id <uuid>, the UUID derived from the effect key,
+      so a retry runs claude --resume <uuid>
+  Q16 B: a step that can't recover pauses for the person (retry, mark done, fail); small core change
+  Q17 text: out of scope; the person's own session never does step work, it only runs the menu
+  Q18 text: only the step that can't recover waits; independent steps continue, dependants wait
+  Q19 text: two Claude forms only, both started by the integration: background (claude -p) and
+      interactive (a herdr-managed session); external stays only for a person's manual work
+  Q20 DEFERRED, drawn as its proposal: the probe asks herdr whether the session's name still exists
+  Q21 B: the watch waits until herdr shows the session quiet AND a result file named after the session
+      id exists; quiet without the file = waiting for the person
+  Q22 A: the pause is the default for every step with no "failed" path; a drawn "failed" path wins
+
+Assumed regions (amber dashed, tagged "assumed · Q20 deferred"):
+  Q20 - the herdr name in the interactive box's handle line, the interactive settings note on the probe,
+        the herdr name in interactive lane step 4, and the herdr check in kill lane step 3
+
+v2 changes from v1:
+  - The in-session form (external, actor claude-session) is gone (Q17, Q19). Its row and box became
+    "Interactive step (herdr)": activity + async command claude-spore start, with probe and watch.
+    "Headless step" is renamed "Background step". external remains only for a person's manual work.
+  - Q8 redrawn: RUNSPORE_OUTCOMES removed everywhere; the host checks a mapped outcome is declared.
+  - Q9, Q10, Q11 are answered: drawn plain. Q10's PID handle now belongs to a detached background step.
+  - New in the map: a session-id box (Q15). Timeouts per kind (Q13), effect idempotent (Q12),
+    retry maxAttempts 3 (Q14) in the boxes and the settings views.
+  - Lanes: interactive lane rewritten around the herdr pane and the watch (Q21); background lane drops
+    the outcomes env; the kill lane moved last, covers both Claude forms, shows resume (Q15) and the
+    "can't recover" pause (Q16, Q18, Q22, marked as a Runspore core change).
+  - Section 4 is now "settled, and one deferred": the Q20 card, the knock-on changes, Q1-Q22 summary.
+
+Inferences of the visual, not decided by a question: the example step "review" (outcomes ok / changes,
+  skill code-review, model opus, tools, prose); the claude-spore subcommands start / run / probe / watch;
+  the result file name <uuid>.result.json; the herdr name rs-3f9a...; the actor label "person"; the
+  folder name review-loop/; drawing the pause as needs-intervention answered by spore resolve (the
+  kernel's existing ask-a-person state).
+Self-contained: system fonts, no network requests. Arrows are drawn by script from box positions.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C07 four kinds</title>
+<style>
+:root{
+  --bg:#f6f6f3; --panel:#ffffff; --ink:#1c2229; --muted:#5a636f; --line:#d3d7dd; --code:#f0f1f3;
+  --rs:#3450ad; --rs-bg:#edf0fb; --on-rs:#ffffff;
+  --cl:#7a3fa6; --cl-bg:#f5eefa; --on-cl:#ffffff;
+  --pp:#27774f; --pp-bg:#e8f4ed;
+  --op:#a35606; --op-bg:#fff3df;
+  --gh:#7d848e; --gh-bg:#eef0f2;
+  --chg:#fff4b8;
+  --hl:#1c2229;
+  --sans:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#13161b; --panel:#1b1f25; --ink:#e3e6eb; --muted:#9aa2ad; --line:#353c46; --code:#22272e;
+    --rs:#93a5ff; --rs-bg:#1a2040; --on-rs:#10142b;
+    --cl:#d2a6f5; --cl-bg:#251a31; --on-cl:#1c1027;
+    --pp:#5bbf8f; --pp-bg:#142319;
+    --op:#f0a44a; --op-bg:#2a2012;
+    --gh:#8a929d; --gh-bg:#1f242a;
+    --chg:#3b3514;
+    --hl:#e3e6eb;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+.wrap{padding:18px 16px 36px;max-width:1360px;margin:0 auto}
+h1{font-size:19px;margin:0 0 4px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:15.5px;margin:0 0 2px}
+.sub{font-size:12.5px;color:var(--muted);margin:0 0 12px;max-width:980px}
+p{margin:0 0 8px}
+code{font-family:var(--mono);font-size:.88em;background:var(--code);padding:0 3px;border-radius:3px;overflow-wrap:anywhere}
+.lede{color:var(--muted);max-width:1000px}
+section{margin-top:26px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:10px 0 6px;font-size:12.5px;align-items:center}
+.legend .k{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.legend code{white-space:nowrap}
+.sw{display:inline-block;width:24px;height:13px;border-radius:4px;border:1.5px solid}
+.sw.rs{background:var(--rs-bg);border-color:var(--rs)}
+.sw.cl{background:var(--cl-bg);border-color:var(--cl)}
+.sw.pp{background:var(--pp-bg);border-color:var(--pp)}
+.sw.gh{background:var(--gh-bg);border-color:var(--gh);border-style:dotted}
+.sw.op{background:var(--op-bg);border-color:var(--op);border-style:dashed}
+
+/* question chips */
+.qbar{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:8px 0 0;font-size:12px}
+.qbar .lbl{color:var(--muted);margin-right:4px}
+.chip{font:inherit;font-size:11.5px;font-weight:650;padding:1px 8px;border-radius:10px;border:1.5px solid;cursor:pointer;line-height:17px;white-space:nowrap}
+.chip.s{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.chip.o{background:var(--op-bg);border-color:var(--op);border-style:dashed;color:var(--op)}
+.chip.on{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--hl)}
+.hint{font-size:11.5px;color:var(--muted);margin:5px 0 0}
+
+/* inline tags */
+.q{display:inline-block;font-size:10.5px;font-weight:700;padding:0 6px;border-radius:8px;line-height:15px;border:1px solid var(--ink);color:var(--ink);background:var(--panel);white-space:nowrap;vertical-align:1px;font-family:var(--sans)}
+.q.c{border-color:var(--gh);color:var(--gh);border-style:solid;background:transparent}
+.q.cc{border-color:var(--rs);background:var(--rs);color:var(--on-rs)}
+.tag{display:inline-block;font-size:10.5px;font-weight:700;padding:0 6px;border-radius:8px;line-height:15px;border:1px dashed var(--op);color:var(--op);background:var(--op-bg);white-space:nowrap;vertical-align:1px;font-family:var(--sans)}
+.asm{border:1.5px dashed var(--op);background:var(--op-bg);border-radius:6px;padding:3px 6px}
+span.asm{padding:0 3px;border-radius:4px}
+
+/* highlight */
+.u{transition:opacity .15s}
+.u.dim{opacity:.22}
+.hit{outline:2.5px solid var(--hl);outline-offset:2px;border-radius:6px}
+.edge{transition:opacity .15s}
+body.qsel .edge:not(.hit){opacity:.15}
+.edge.hit{outline:none;stroke-width:2.6}
+
+/* ---------- 1 the map ---------- */
+.mapwrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 14px 10px}
+.map{position:relative;display:grid;
+  grid-template-columns:minmax(170px,205px) minmax(150px,1fr) minmax(310px,1.9fr) minmax(118px,.75fr) minmax(220px,1.25fr);
+  row-gap:12px;column-gap:0}
+.colh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);align-self:end;padding:0 2px 2px}
+.colh small{display:block;text-transform:none;letter-spacing:0;font-weight:500;font-size:11.5px}
+.colh.rs{color:var(--rs)} .colh.cl{color:var(--cl)}
+.gut{grid-row:1}
+
+.pk{align-self:center;background:var(--gh-bg);border:1.5px dotted var(--gh);border-radius:8px;padding:7px 9px;font-size:12px;position:relative;z-index:1}
+.pk .nm{font-family:var(--mono);font-weight:700;font-size:13.5px}
+.pk .nm i{font-family:var(--sans);font-style:normal;font-weight:600;font-size:12px;color:var(--muted)}
+.pk .ds{color:var(--muted);margin-top:1px}
+.pk .alt{margin-top:4px;font-size:11.5px;color:var(--muted)}
+.mapsto{display:none;margin-top:4px;font-size:11.5px}
+
+.tb{background:var(--panel);border:1.5px solid var(--rs);border-left-width:4px;border-radius:8px;padding:8px 10px;font-size:12.2px;position:relative;z-index:1}
+.tb.pp{border-color:var(--pp)}
+.tb .hd{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-bottom:4px}
+.kc{font-family:var(--mono);font-size:11.5px;font-weight:700;padding:1px 6px;border-radius:5px;border:1px solid var(--rs);color:var(--rs);background:var(--rs-bg)}
+.kc .w{font-family:var(--sans);font-weight:600;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-right:4px}
+.kc.none{border-style:dashed;color:var(--muted);border-color:var(--gh);background:transparent}
+.tb .tn{font-weight:700;font-size:12.5px;margin-left:auto}
+.tb ul{margin:4px 0 0;padding-left:15px}
+.tb li{margin:2px 0}
+.tb li.asm{list-style:none;margin-left:-15px;margin-top:4px}
+.noch{font-size:11px;color:var(--muted);margin-top:4px;font-style:italic}
+
+.chb{align-self:center;background:var(--cl-bg);border:1.5px solid var(--cl);border-left-width:4px;border-radius:8px;padding:8px 10px;font-size:12.2px;position:relative;z-index:1}
+.chb .ttl{font-weight:700;color:var(--cl);font-size:12.5px}
+.chb ul{margin:4px 0 0;padding-left:15px}
+.chb li{margin:2px 0}
+
+pre{font-family:var(--mono);font-size:11.3px;line-height:1.5;background:var(--code);border-radius:6px;padding:5px 8px;margin:3px 0;overflow-x:auto;white-space:pre}
+pre .k{color:var(--rs)} pre .s{color:var(--pp)} pre .m{color:var(--cl);font-weight:650} pre .c{color:var(--muted)}
+
+#mapsvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible;z-index:0}
+#maplab{position:absolute;inset:0;pointer-events:none;z-index:2}
+.edge{fill:none;stroke-width:1.6}
+.edge.e-n{stroke:var(--muted)}
+.edge.e-c{stroke:var(--cl)}
+.edge.e-g{stroke:var(--gh);stroke-dasharray:3 4}
+.mk-n{fill:var(--muted)} .mk-c{fill:var(--cl)} .mk-g{fill:var(--gh)}
+.elab{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;text-align:center;font-size:11px;line-height:1.3;background:var(--panel);padding:1px 5px;border-radius:5px;color:var(--ink);border:1px solid var(--line)}
+.elab.e-c{color:var(--cl);border-color:var(--cl)}
+.foot{font-size:11.5px;color:var(--muted);margin-top:10px;border-top:1px dashed var(--line);padding-top:7px}
+
+/* ---------- 2 files ---------- */
+.tgl{display:inline-flex;border:1px solid var(--line);border-radius:16px;overflow:hidden;margin:0 0 10px;background:var(--panel)}
+.tgl button{font:inherit;font-size:12.5px;padding:4px 14px;border:0;background:transparent;color:var(--ink);cursor:pointer}
+.tgl button.on{background:var(--ink);color:var(--bg)}
+.files{display:grid;grid-template-columns:minmax(200px,.8fr) minmax(330px,1.5fr) minmax(280px,1.2fr);gap:12px}
+.fc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;min-width:0}
+.fc.rs{border:1.5px solid var(--rs);border-top-width:5px}
+.fc.cl{border:1.5px solid var(--cl);border-top-width:5px}
+.fc .fn{font-family:var(--mono);font-weight:700;font-size:13px}
+.fc .role{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.fc.rs .role{color:var(--rs)} .fc.cl .role{color:var(--cl)}
+.fc .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.fc pre{font-size:11.5px}
+.ln{display:block}
+.ln.chg{background:var(--chg);margin:0 -8px;padding:0 8px}
+.ln .q,.ln .tag{margin-left:8px}
+.rd{margin-top:8px;font-size:12px}
+.rd .h{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:2px}
+.rd ul{margin:2px 0 0;padding-left:15px}
+.rd li{margin:2px 0}
+.rd .asm{margin-top:6px}
+.same{display:inline-block;font-size:11px;font-weight:700;color:var(--cl);border:1px solid var(--cl);border-radius:9px;padding:0 7px}
+.tree{font-family:var(--mono);font-size:12px;line-height:1.75;background:var(--code);border-radius:6px;padding:6px 9px;white-space:pre;overflow-x:auto}
+.tree .a{font-family:var(--sans);font-size:10.5px;font-weight:700;margin-left:6px}
+.tree .a.rs{color:var(--rs)} .tree .a.cl{color:var(--cl)} .tree .a.n{color:var(--muted)}
+body[data-form="int"] .f-bg{display:none}
+body[data-form="bg"] .f-int{display:none}
+@keyframes flash{from{background:var(--op)}to{background:var(--chg)}}
+.flash .ln.chg{animation:flash .9s ease-out}
+
+/* ---------- 3 lanes ---------- */
+.lane{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.lane .lt{font-weight:700;font-size:13px;margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lane .lt .ls{font-weight:400;color:var(--muted);font-size:12px}
+.track{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);gap:18px;overflow-x:auto;padding:2px 2px 4px}
+.track.k6{grid-template-columns:repeat(5,minmax(140px,1fr)) minmax(270px,1.9fr)}
+.stp{position:relative;border-radius:7px;padding:6px 8px;font-size:11.8px;border:1px solid var(--line);border-top-width:4px;background:var(--panel)}
+.stp:not(:last-child)::after{content:"";position:absolute;right:-15px;top:50%;width:0;height:0;border-left:8px solid var(--muted);border-top:5px solid transparent;border-bottom:5px solid transparent;transform:translateY(-50%)}
+.stp .who{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+.stp.sp{border-top-color:var(--rs)} .stp.sp .who{color:var(--rs)}
+.stp.pl{border-top-color:var(--cl)} .stp.pl .who{color:var(--cl)}
+.stp.ps{border-top-color:var(--pp)} .stp.ps .who{color:var(--pp)}
+.stp.asm{border:1.5px dashed var(--op);border-top:4px solid var(--op);background:var(--op-bg)}
+.stp.asm .who{color:var(--op)}
+.stp code{font-size:.92em}
+.stp .tg{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px}
+.stp .or{display:block;margin-top:4px;padding-top:4px;border-top:1px dashed var(--line)}
+.lane.kill{border-style:dashed}
+.fork{display:grid;gap:5px;margin-top:5px}
+.fork > div{border:1px solid var(--line);border-left:3px solid var(--rs);border-radius:5px;padding:4px 7px;background:var(--bg)}
+.fork > div.pp{border-left-color:var(--pp)}
+.fork b{font-weight:700}
+
+/* ---------- 4 settled ---------- */
+.oq{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:12px}
+.oc{background:var(--op-bg);border:1.5px dashed var(--op);border-radius:10px;padding:10px 12px;font-size:12.3px}
+.oc .t{font-weight:700;font-size:13px;margin:3px 0 4px}
+.oc .rec{background:var(--panel);border-radius:6px;padding:5px 7px;margin:5px 0;border:1px solid var(--line)}
+.oc .rec b{color:var(--op)}
+.oc ul{margin:3px 0 0;padding-left:15px;color:var(--muted)}
+.oc .wh{font-size:11.5px;color:var(--muted);margin-top:5px}
+.kn{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.3px}
+.kn .t{font-weight:700;font-size:13px;margin:0 0 4px}
+.kn ul{margin:3px 0 0;padding-left:15px}
+.kn li{margin:3px 0}
+.done{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 14px;margin-top:12px;font-size:12px}
+.done div{display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:baseline}
+
+/* ---------- narrow ---------- */
+@media (max-width:1060px){
+  .files{grid-template-columns:1fr 1fr}
+  .files .fc.tr{grid-column:1 / -1}
+  .oq{grid-template-columns:1fr}
+}
+@media (max-width:900px){
+  .map{display:block}
+  .map > *{margin-bottom:9px}
+  .gut,#mapsvg,#maplab{display:none}
+  .mapsto{display:block}
+  .colh{margin-top:10px}
+  .files{grid-template-columns:1fr}
+  .track,.track.k6{grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:1fr;gap:14px}
+  .stp:not(:last-child)::after{right:auto;left:50%;top:auto;bottom:-12px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid var(--muted);border-bottom:0;transform:translateX(-50%)}
+}
+</style>
+</head>
+<body data-form="int">
+<div class="wrap">
+
+<h1>C07 — The four kinds as Runspore actions</h1>
+<p class="lede">How the Claude Code profile's four profile kinds land on Runspore's generic node kinds and action kinds, which file holds which half of a step, and what happens after a crash. v2: every question is answered except Q20, which is deferred and drawn as its proposal.</p>
+
+<div class="legend">
+  <span class="k"><span class="sw gh"></span>Profile kind: plugin words, never in a file (Q1)</span>
+  <span class="k"><span class="sw rs"></span>Runspore half: <code>workflow.dot</code> node kind + <code>settings.json</code> action; spore reads it</span>
+  <span class="k"><span class="sw cl"></span>Claude half: instructions frontmatter and the session the plugin starts; only the plugin reads it</span>
+  <span class="k"><span class="sw pp"></span>a person acts</span>
+  <span class="k"><span class="sw op"></span>assumed · Q20 deferred (drawn as its proposal)</span>
+  <span class="k"><span class="q">Q3</span> answered here</span>
+  <span class="k"><span class="q c">C03</span> settled before this grill</span>
+  <span class="k"><span class="q cc">core change</span> a small change to Runspore's core</span>
+</div>
+<p class="hint u" data-q="q17 q19">"Plugin" is the Claude Code profile: its mod, which runs the menu in the person's own Claude session and never does step work (Q17, Q19), and its <code>claude-spore</code> command, which starts, checks and resumes the Claude sessions that do.</p>
+
+<div class="qbar" id="qbar">
+  <span class="lbl">Highlight a question:</span>
+  <button class="chip s" data-k="q1" title="Answered A: words only; files hold plain Runspore actions">Q1 words only</button>
+  <button class="chip s" data-k="q2" title="Answered A: decision = await-signal; manual work = external step with a person's actor label">Q2 human by purpose</button>
+  <button class="chip s" data-k="q3" title="Answered B: skill named in the instructions frontmatter, run as a slash command">Q3 skill: in frontmatter</button>
+  <button class="chip s" data-k="q4" title="Answered B: opt-in command mode output: result">Q4 output: result</button>
+  <button class="chip s" data-k="q5" title="Answered A: probe on the action, tagged command or component">Q5 probe on the action</button>
+  <button class="chip s" data-k="q6" title="Answered A: the started session's main conversation does the work, not a subagent">Q6 main conversation</button>
+  <button class="chip s" data-k="q7" title="Answered B: skill, model, tools in frontmatter; switching form changes only the action">Q7 Claude settings in frontmatter</button>
+  <button class="chip s" data-k="q8" title="Answered A: commands never receive outcome names; the host rejects an undeclared outcome">Q8 no outcome names</button>
+  <button class="chip s" data-k="q9" title="Answered C: folder path bundled and pinned, bare name looked up">Q9 probe bundling</button>
+  <button class="chip s" data-k="q10" title="Answered A: a detached background step records pid + start time + session id">Q10 PID handle</button>
+  <button class="chip s" data-k="q11" title="Answered B: claude-spore check before the run; a bad key also fails the step at start">Q11 frontmatter check</button>
+  <button class="chip s" data-k="q12" title="Answered: Claude steps rerun on their own (idempotent); each rerun resumes the conversation">Q12 rerun on its own</button>
+  <button class="chip s" data-k="q13" title="Answered B: interactive 4 h, background 1 h, a person's manual task 7 days">Q13 time limit per kind</button>
+  <button class="chip s" data-k="q14" title="Answered A: 3 tries">Q14 3 tries</button>
+  <button class="chip s" data-k="q15" title="Answered: --session-id with a UUID derived from the effect key; retry = --resume">Q15 session id</button>
+  <button class="chip s" data-k="q16" title="Answered B: a step that can't recover pauses for the person">Q16 pause, don't fail</button>
+  <button class="chip s" data-k="q17" title="Answered: out of scope; the person's own session only runs the menu">Q17 own session: menu only</button>
+  <button class="chip s" data-k="q18" title="Answered: only that step waits; independent steps continue">Q18 only that step waits</button>
+  <button class="chip s" data-k="q19" title="Answered: background claude -p or a herdr-managed session, both started by the integration">Q19 two Claude forms</button>
+  <button class="chip o" data-k="q20" title="Deferred, drawn as the proposal: ask herdr whether the session's name still exists">Q20 deferred: herdr check</button>
+  <button class="chip s" data-k="q21" title="Answered B: watch waits for quiet AND a result file">Q21 quiet + result file</button>
+  <button class="chip s" data-k="q22" title="Answered A: the pause is the default; a drawn failed path wins">Q22 pause by default</button>
+</div>
+
+<!-- ======================= 1 MAP ======================= -->
+<section>
+<h2>1 · The mapping</h2>
+<p class="sub">Left, the plugin's words. Middle, what the workflow files say: one node kind and one action kind per step. Right, the Claude half, which exists only for the two Claude forms, both started by the integration (Q19).</p>
+<div class="mapwrap">
+<div class="map" id="map">
+  <svg id="mapsvg" aria-hidden="true"></svg>
+  <div id="maplab"></div>
+
+  <div class="colh" style="grid-column:1;grid-row:1">Profile kind<small>plugin words only; never in a file (Q1)</small></div>
+  <div class="gut" style="grid-column:2"></div>
+  <div class="gut" style="grid-column:4"></div>
+
+  <!-- profile kinds -->
+  <div class="pk u" id="p-cmd" style="grid-column:1;grid-row:2" data-q="q1">
+    <div class="nm">cmd</div><div class="ds">run a program</div>
+    <div class="mapsto">→ <code>activity</code> + <code>command</code></div>
+  </div>
+  <div class="pk u" id="p-head" style="grid-column:1;grid-row:3" data-q="q1 q19">
+    <div class="nm">agent <i>· background</i></div><div class="ds"><code>claude -p</code>, nobody watching live <span class="q">Q19</span></div>
+    <div class="mapsto">→ <code>activity</code> + <code>command</code> (<code>claude-spore run</code>)</div>
+  </div>
+  <div class="pk u" id="p-skill" style="grid-column:1;grid-row:4" data-q="q1 q3">
+    <div class="nm">skill</div><div class="ds">a Claude step whose instructions name a skill <span class="q">Q3</span></div>
+    <div class="alt" data-q="q7">background too: same file, other action <span class="q">Q7</span></div>
+    <div class="mapsto">→ either Claude form, frontmatter <code>skill:</code></div>
+  </div>
+  <div class="pk u" id="p-int" style="grid-column:1;grid-row:5" data-q="q1 q19">
+    <div class="nm">agent <i>· interactive (herdr)</i></div><div class="ds">a Claude session started for the step in a herdr pane; a person can watch and type <span class="q">Q19</span></div>
+    <div class="mapsto">→ <code>activity</code> + async <code>command</code> (<code>claude-spore start</code>)</div>
+  </div>
+  <div class="pk u" id="p-man" style="grid-column:1;grid-row:6" data-q="q1 q2">
+    <div class="nm">human <i>· manual work</i></div><div class="ds">a person does real work <span class="q">Q2</span></div>
+    <div class="mapsto">→ <code>activity</code> + <code>external</code>, a person's actor label</div>
+  </div>
+  <div class="pk u" id="p-dec" style="grid-column:1;grid-row:7" data-q="q1 q2">
+    <div class="nm">human <i>· decision</i></div><div class="ds">approve or reject <span class="q">Q2</span></div>
+    <div class="mapsto">→ <code>await-signal</code>, no action</div>
+  </div>
+
+  <!-- runspore shapes -->
+  <div class="colh rs" style="grid-column:3;grid-row:1">Node kind + action kind<small><code>workflow.dot</code> <code>kind</code> + <code>settings.json</code> action: the Runspore half</small></div>
+  <div class="tb u" id="t-cmd" style="grid-column:3;grid-row:2">
+    <div class="hd"><span class="kc"><span class="w">node</span>activity</span><span class="kc"><span class="w">action</span>command</span></div>
+<pre><span class="k">"argv"</span>: [<span class="s">"cargo"</span>, <span class="s">"test"</span>],
+<span class="k">"exitOutcomes"</span>: { <span class="s">"1"</span>: <span class="s">"red"</span> }</pre>
+    <ul>
+      <li>the worker runs it and waits</li>
+      <li data-q="q4 q8">the workflow maps its result: the exit code through <code>exitOutcomes</code>, or a named outcome on stdout with opt-in <code>"output": "result"</code> <span class="q">Q4</span></li>
+      <li data-q="q8">never told the outcome names; the host rejects an undeclared outcome <span class="q">Q8</span></li>
+    </ul>
+    <div class="noch">no Claude half</div>
+  </div>
+
+  <div class="tb u" id="t-head" style="grid-column:3;grid-row:3">
+    <div class="hd"><span class="kc"><span class="w">node</span>activity</span><span class="kc"><span class="w">action</span>command</span><span class="tn">Background step</span></div>
+<pre><span class="k">"argv"</span>: [<span class="s">"claude-spore"</span>, <span class="s">"run"</span>],
+<span class="k">"output"</span>: <span class="s">"result"</span>, <span class="k">"timeoutMs"</span>: <span class="s">"3600000"</span></pre>
+    <ul>
+      <li data-q="q19 q15">the worker starts the wrapper and waits; the wrapper runs <code>claude -p --session-id &lt;uuid&gt;</code> <span class="q">Q19</span> <span class="q">Q15</span></li>
+      <li data-q="q4 q8">stdout names the outcome: <code>{"outcome": "changes", "output": {…}}</code> <span class="q">Q4</span>; the host checks it is declared <span class="q">Q8</span></li>
+      <li data-q="q13">time limit 1 h <span class="q">Q13</span></li>
+      <li data-q="q10">if it detaches: async, handle <code>{"pid", "started", "session"}</code>, dead when no such process <span class="q">Q10</span></li>
+    </ul>
+  </div>
+
+  <div class="tb u" id="t-int" style="grid-column:3;grid-row:4 / span 2" data-q="q19">
+    <div class="hd"><span class="kc"><span class="w">node</span>activity</span><span class="kc"><span class="w">action</span>command + async</span><span class="tn">Interactive step (herdr)</span></div>
+<pre><span class="k">"argv"</span>: [<span class="s">"claude-spore"</span>, <span class="s">"start"</span>],
+<span class="k">"async"</span>: { <span class="k">"timeoutMs"</span>: <span class="s">"14400000"</span>,
+  <span class="k">"probe"</span>: { <span class="k">"command"</span>: { <span class="k">"argv"</span>:
+      [<span class="s">"claude-spore"</span>, <span class="s">"probe"</span>] } },
+  <span class="k">"watch"</span>: { <span class="k">"command"</span>: { <span class="k">"argv"</span>:
+      [<span class="s">"claude-spore"</span>, <span class="s">"watch"</span>] } } }</pre>
+    <ul>
+      <li data-q="q19 q15">the start command opens a herdr pane running <code>claude --session-id &lt;uuid&gt;</code>, prints what identifies it, and exits <span class="q">Q19</span> <span class="q c">C03</span></li>
+      <li class="asm" data-q="q20">the handle names the herdr session (<code>rs-3f9a…</code>) beside the session id; the probe asks herdr whether that name still exists <span class="tag">assumed · Q20 deferred</span></li>
+      <li data-q="q6 q3">that session's main conversation does the work, not a subagent <span class="q">Q6</span>; a <code>skill:</code> runs as a slash command <span class="q">Q3</span></li>
+      <li data-q="q21">the watch reports when herdr shows the session quiet <b>and</b> its result file exists; quiet with no file means it is waiting for the person <span class="q">Q21</span></li>
+      <li data-q="q5">probe and watch declared on the action, tagged by implementation <span class="q">Q5</span></li>
+      <li data-q="q13">time limit 4 h <span class="q">Q13</span></li>
+    </ul>
+  </div>
+
+  <div class="tb pp u" id="t-person" style="grid-column:3;grid-row:6" data-q="q2">
+    <div class="hd"><span class="kc"><span class="w">node</span>activity</span><span class="kc"><span class="w">action</span>external</span><span class="tn">External step</span></div>
+<pre><span class="k">"actor"</span>: <span class="s">"person"</span>, <span class="k">"effect"</span>: <span class="s">"unsafe"</span>,
+<span class="k">"async"</span>: { <span class="k">"timeoutMs"</span>: <span class="s">"604800000"</span> }</pre>
+    <ul>
+      <li>a person claims it (<code>spore step claim --actor person</code>) and reports with <code>spore step complete</code></li>
+      <li>the claim stops two people doing the same work</li>
+      <li data-q="q13">time limit 7 days <span class="q">Q13</span></li>
+      <li data-q="q19">the only use of <code>external</code>: Claude steps never claim <span class="q">Q19</span></li>
+    </ul>
+    <div class="noch">no Claude half</div>
+  </div>
+
+  <div class="tb pp u" id="t-sig" style="grid-column:3;grid-row:7" data-q="q2">
+    <div class="hd"><span class="kc"><span class="w">node</span>await-signal</span><span class="kc none">no action</span></div>
+<pre><span class="c">nodes:</span> <span class="k">"approve"</span>: { <span class="k">"signal"</span>: <span class="s">"approval"</span> }</pre>
+    <ul>
+      <li>the run waits; the person answers <code>spore signal &lt;run&gt; approval --outcome approved</code></li>
+      <li>no claim, no effect class, no deadline</li>
+    </ul>
+    <div class="noch">no Claude half</div>
+  </div>
+
+  <!-- claude half -->
+  <div class="colh cl" style="grid-column:5;grid-row:1">Claude half<small>instructions frontmatter and session id; read only by the plugin</small></div>
+  <div class="chb u" id="ch" style="grid-column:5;grid-row:3 / span 2">
+    <div class="ttl">instructions/review.md</div>
+<pre><span class="c">---</span>
+<span class="m">skill</span>: code-review
+<span class="m">model</span>: opus
+<span class="m">tools</span>: [Read, Grep, Bash]
+<span class="c">---</span>
+Review the diff against …</pre>
+    <ul>
+      <li data-q="q3"><code>skill</code> <span class="q">Q3</span>; <code>model</code>, <code>tools</code> <span class="q">Q7</span></li>
+      <li data-q="q7">the same file serves both forms <span class="q">Q7</span></li>
+      <li>spore builds it into the artifact unopened, so <code>spore validate</code> cannot see these keys <span class="q c">C02</span></li>
+      <li data-q="q11">checked by <code>claude-spore check &lt;folder&gt;</code> before the run; a bad key also fails the step when it starts <span class="q">Q11</span></li>
+    </ul>
+  </div>
+  <div class="chb u" id="sid" style="grid-column:5;grid-row:5 / span 2" data-q="q15">
+    <div class="ttl">Session id · one conversation per step visit</div>
+<pre><span class="m">uuid</span> = name-based UUID of
+       <span class="k">RUNSPORE_EFFECT_KEY</span>
+<span class="c">try 1 </span> claude --session-id &lt;uuid&gt;
+<span class="c">try 2+</span> claude --resume &lt;uuid&gt;</pre>
+    <ul>
+      <li>the integration picks it before Claude starts; every try computes the same UUID, so nothing needs storing <span class="q">Q15</span></li>
+      <li>background adds <code>-p</code>; interactive runs it in the herdr pane</li>
+      <li>a new visit (<code>review → fix → review</code>) has a new effect key, so a new conversation</li>
+    </ul>
+  </div>
+</div>
+<div class="foot u" data-q="q19">Not used by any profile kind: the <code>native</code> action kind (spec/host.md §3). <code>external</code> is used only for a person's manual work (Q19). <code>complete</code> and <code>fail</code> nodes end a run and are not steps. Every action declares an effect class; only <code>await-signal</code> has none.</div>
+</div>
+</section>
+
+<!-- ======================= 2 FILES ======================= -->
+<section>
+<h2>2 · One step, two files</h2>
+<p class="sub">An example Claude step, <code>review</code>, in both forms. Switching form rewrites only the highlighted lines of the <code>settings.json</code> action; the kind stays <code>command</code>, and the node and the instructions file stay the same (Q7, Q19).</p>
+<div class="tgl" role="group" aria-label="Form">
+  <button data-form="int" class="on">Interactive step (herdr)</button>
+  <button data-form="bg">Background step</button>
+</div>
+<div class="files" id="files">
+  <div class="fc tr u">
+    <div class="top"><span class="fn">review-loop/</span><span class="role" style="color:var(--muted)">workflow folder</span></div>
+<div class="tree">review-loop/
+├ workflow.dot<span class="a n">node kind</span>
+├ settings.json<span class="a rs">Runspore half</span>
+└ instructions/
+  └ review.md<span class="a cl">Claude half</span></div>
+    <div class="rd"><div class="h">workflow.dot · same in both forms</div></div>
+<pre>review [kind="activity"];
+review -> fix [on="changes"];
+review -> approve;</pre>
+    <div class="rd" style="margin-top:4px"><span class="q c">C02</span> the DOT carries topology and node kinds only</div>
+  </div>
+
+  <div class="fc rs u" id="fc-set">
+    <div class="top"><span class="fn">settings.json</span><span class="role">Runspore half</span></div>
+<pre class="f-int"><span class="ln"><span class="k">"actions"</span>: {</span><span class="ln">  <span class="k">"review"</span>: {</span><span class="ln">    <span class="k">"kind"</span>: <span class="s">"command"</span>,<span class="q c">C03</span></span><span class="ln chg" data-q="q19">    <span class="k">"argv"</span>: [<span class="s">"claude-spore"</span>, <span class="s">"start"</span>],<span class="q">Q19</span></span><span class="ln" data-q="q12">    <span class="k">"effect"</span>: <span class="s">"idempotent"</span>,<span class="q">Q12</span></span><span class="ln">    <span class="k">"outcomes"</span>: [<span class="s">"ok"</span>, <span class="s">"changes"</span>],</span><span class="ln" data-q="q14">    <span class="k">"retry"</span>: { <span class="k">"maxAttempts"</span>: 3 },<span class="q">Q14</span></span><span class="ln chg">    <span class="k">"async"</span>: {</span><span class="ln chg" data-q="q13">      <span class="k">"timeoutMs"</span>: <span class="s">"14400000"</span>,<span class="q">Q13 · 4 h</span></span><span class="ln chg" data-q="q5">      <span class="k">"probe"</span>: { <span class="k">"command"</span>: {<span class="q">Q5</span></span><span class="ln chg" data-q="q9">        <span class="k">"argv"</span>: [<span class="s">"claude-spore"</span>, <span class="s">"probe"</span>] } },<span class="q">Q9</span></span><span class="ln chg" data-q="q21">      <span class="k">"watch"</span>: { <span class="k">"command"</span>: {<span class="q">Q21</span></span><span class="ln chg">        <span class="k">"argv"</span>: [<span class="s">"claude-spore"</span>, <span class="s">"watch"</span>] } }</span><span class="ln chg">    }</span><span class="ln">  }</span><span class="ln">},</span><span class="ln"><span class="k">"nodes"</span>: {</span><span class="ln">  <span class="k">"review"</span>: { <span class="k">"action"</span>: <span class="s">"review"</span>,</span><span class="ln">              <span class="k">"instructions"</span>: <span class="s">"instructions/review.md"</span> }</span><span class="ln">}</span></pre>
+<pre class="f-bg"><span class="ln"><span class="k">"actions"</span>: {</span><span class="ln">  <span class="k">"review"</span>: {</span><span class="ln">    <span class="k">"kind"</span>: <span class="s">"command"</span>,<span class="q c">C03</span></span><span class="ln chg" data-q="q19">    <span class="k">"argv"</span>: [<span class="s">"claude-spore"</span>, <span class="s">"run"</span>],<span class="q">Q19</span></span><span class="ln" data-q="q12">    <span class="k">"effect"</span>: <span class="s">"idempotent"</span>,<span class="q">Q12</span></span><span class="ln">    <span class="k">"outcomes"</span>: [<span class="s">"ok"</span>, <span class="s">"changes"</span>],</span><span class="ln" data-q="q14">    <span class="k">"retry"</span>: { <span class="k">"maxAttempts"</span>: 3 },<span class="q">Q14</span></span><span class="ln chg" data-q="q4">    <span class="k">"output"</span>: <span class="s">"result"</span>,<span class="q">Q4</span></span><span class="ln chg" data-q="q13">    <span class="k">"timeoutMs"</span>: <span class="s">"3600000"</span><span class="q">Q13 · 1 h</span></span><span class="ln">  }</span><span class="ln">},</span><span class="ln"><span class="k">"nodes"</span>: {</span><span class="ln">  <span class="k">"review"</span>: { <span class="k">"action"</span>: <span class="s">"review"</span>,</span><span class="ln">              <span class="k">"instructions"</span>: <span class="s">"instructions/review.md"</span> }</span><span class="ln">}</span></pre>
+    <div class="rd">
+      <div class="h">Who reads it</div>
+      <ul>
+        <li><code>spore validate</code> / <code>build</code> merge it with the DOT into the package <span class="q c">C02</span></li>
+        <li>the kernel reads <code>outcomes</code>, <code>effect</code>, <code>retry</code>; the host reads <code>kind</code>, <code>argv</code>, <code>output</code>, <code>timeoutMs</code>, <code>async</code> and checks them against its capabilities at start <span class="q c">C03</span></li>
+        <li data-q="q8">the command gets the input on stdin and the generic <code>RUNSPORE_*</code> env (effect key<span class="f-int">, token</span>), never the outcome names; the host rejects an undeclared outcome as a non-retryable failure <span class="q">Q8</span></li>
+      </ul>
+      <div class="f-int">
+        <div style="margin-top:6px" data-q="q9"><code>claude-spore</code> is a bare name, so the probe and the watch are looked up on the machine and only the reference is pinned; a folder path such as <code>./probes/herdr.wasm</code> would be bundled and pinned. <span class="q">Q9</span></div>
+        <div class="asm" data-q="q20">The probe asks herdr whether the session's name (<code>rs-3f9a…</code>) still exists: gone means dead; herdr unreachable means unknown, so the step waits for its time limit. <span class="tag">assumed · Q20 deferred</span></div>
+        <div style="margin-top:6px" data-q="q5">Planned component form, a new tag value: <code>"probe": {"component": {"ref": "./probes/herdr.wasm", "export": "probe"}}</code> <span class="q">Q5</span></div>
+      </div>
+      <div class="f-bg">
+        <div style="margin-top:6px" data-q="q4">A malformed result on stdout is a non-retryable failure <span class="q">Q4</span></div>
+        <div style="margin-top:6px" data-q="q10">If the wrapper detaches, the action gains an <code>async</code> object and the start prints <code>{"pid": 4182, "started": "…", "session": "&lt;uuid&gt;"}</code>; its probe answers dead when no process has that PID and start time. <span class="q">Q10</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fc cl u" id="fc-md">
+    <div class="top"><span class="fn">instructions/review.md</span><span class="role">Claude half</span></div>
+    <div style="margin-bottom:4px" data-q="q7"><span class="same">unchanged in both forms</span> <span class="q">Q7</span></div>
+<pre><span class="ln"><span class="c">---</span></span><span class="ln" data-q="q3"><span class="m">skill</span>: code-review<span class="q">Q3</span></span><span class="ln" data-q="q7"><span class="m">model</span>: opus<span class="q">Q7</span></span><span class="ln" data-q="q7"><span class="m">tools</span>: [Read, Grep, Bash]<span class="q">Q7</span></span><span class="ln"><span class="c">---</span></span><span class="ln">Review the diff against the plan in the</span><span class="ln">step input. List each fix you would ask</span><span class="ln">for, with file and line.</span></pre>
+    <div class="rd">
+      <div class="h">Who reads it</div>
+      <ul>
+        <li>only the plugin: <span class="f-int">the start command, before it opens the pane</span><span class="f-bg">the wrapper, when the worker starts it</span>; how the bytes reach it is C14</li>
+        <li data-q="q3"><code>skill</code> makes the plugin run <code>/code-review</code> with the prose as context <span class="q">Q3</span></li>
+        <li>spore builds it into the artifact as an <code>instructions</code> entry, pinned by digest, and never opens it <span class="q c">C02</span></li>
+        <li class="f-int" data-q="q21">Claude is told to write its result to <code>&lt;uuid&gt;.result.json</code> as its last act; the watch reads it <span class="q">Q21</span></li>
+      </ul>
+      <div style="margin-top:6px" data-q="q11">A typo such as <code>modle: opus</code> is caught by <code>claude-spore check review-loop/</code>, which the authoring interview and the menu's "start a run" call before <code>spore start</code>; the step also fails when it starts. <span class="q">Q11</span></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ======================= 3 LANES ======================= -->
+<section>
+<h2>3 · When each half is read</h2>
+<p class="sub">The same <code>review</code> step through one run, per form, then what happens when its session is killed. Colour says who acts: <span style="color:var(--rs);font-weight:650">spore</span>, <span style="color:var(--cl);font-weight:650">plugin or Claude</span>, <span style="color:var(--pp);font-weight:650">a person</span>.</p>
+
+<div class="lane">
+  <div class="lt">Interactive step (herdr) <span class="ls">async <code>command</code>, argv <code>claude-spore start</code>, time limit 4 h</span></div>
+  <div class="track">
+    <div class="stp pl u" data-q="q11"><div class="who">plugin · before the run</div><code>claude-spore check review-loop/</code> reads the frontmatter keys<div class="tg"><span class="q">Q11</span></div></div>
+    <div class="stp sp u"><div class="who">spore</div><code>spore start review-loop/</code>: settings.json validated; review.md carried unopened<div class="tg"><span class="q c">C02</span></div></div>
+    <div class="stp sp u" data-q="q8"><div class="who">spore worker</div>reaches <code>review</code>, runs <code>claude-spore start</code>: input on stdin, <code>RUNSPORE_EFFECT_KEY</code>, <code>RUNSPORE_TOKEN</code>; no outcome names<div class="tg"><span class="q">Q8</span><span class="q c">C03</span></div></div>
+    <div class="stp pl u" data-q="q15 q19 q7"><div class="who">plugin · start command</div>UUID from the effect key; opens a herdr pane running <code>claude --session-id &lt;uuid&gt;</code> with <code>/code-review</code>, model, tools; prints <code>{"session": "&lt;uuid&gt;", <span class="asm" data-q="q20">"herdr": "rs-3f9a…"</span>}</code> and exits<div class="tg"><span class="q">Q15</span><span class="q">Q19</span><span class="q">Q7</span><span class="tag">assumed · Q20 deferred</span></div></div>
+    <div class="stp pl u" data-q="q6 q21"><div class="who">Claude · that session's main conversation</div>reviews; the person can watch and type in the pane; last act: writes <code>&lt;uuid&gt;.result.json</code><div class="tg"><span class="q">Q6</span><span class="q">Q21</span></div></div>
+    <div class="stp sp u" data-q="q21"><div class="who">spore worker · runs the watch</div>waits until herdr shows the session quiet <b>and</b> the result file exists; quiet with no file = waiting for the person, keep waiting<div class="tg"><span class="q">Q21</span></div></div>
+    <div class="stp sp u" data-q="q8"><div class="who">spore + kernel</div>the watch prints <code>{"outcome": "changes", …}</code>; the host checks it is declared; routes <code>review -&gt; fix</code><div class="tg"><span class="q">Q8</span><span class="q c">C03</span></div></div>
+  </div>
+</div>
+
+<div class="lane">
+  <div class="lt">Background step <span class="ls"><code>command</code>, argv <code>claude-spore run</code>, time limit 1 h</span></div>
+  <div class="track">
+    <div class="stp pl u" data-q="q11"><div class="who">plugin · before the run</div><code>claude-spore check review-loop/</code> reads the frontmatter keys<div class="tg"><span class="q">Q11</span></div></div>
+    <div class="stp sp u"><div class="who">spore</div><code>spore start review-loop/</code>: settings.json validated; review.md carried unopened<div class="tg"><span class="q c">C02</span></div></div>
+    <div class="stp sp u" data-q="q8"><div class="who">spore worker</div>runs <code>claude-spore run</code> and waits: input on stdin, generic <code>RUNSPORE_*</code> env with <code>RUNSPORE_EFFECT_KEY</code>; no outcome names<div class="tg"><span class="q">Q8</span></div></div>
+    <div class="stp pl u" data-q="q7 q11 q15"><div class="who">plugin · wrapper</div>reads review.md (delivery is C14), failing the step on a bad key; runs <code>claude -p --session-id &lt;uuid&gt;</code> with <code>/code-review</code>, model and tools<div class="tg"><span class="q">Q7</span><span class="q">Q11</span><span class="q">Q15</span></div></div>
+    <div class="stp pl u" data-q="q4"><div class="who">plugin · wrapper</div>prints <code>{"outcome": "changes", "output": {…}}</code> and exits<div class="tg"><span class="q">Q4</span></div></div>
+    <div class="stp sp u" data-q="q8"><div class="who">spore + kernel</div>the host checks the outcome is declared (else a non-retryable failure); routes <code>review -&gt; fix [on="changes"]</code><div class="tg"><span class="q">Q8</span><span class="q c">C02</span></div></div>
+  </div>
+</div>
+
+<div class="lane kill">
+  <div class="lt">If the session is killed mid-step <span class="ls">both Claude forms; the conversation and the edits stay on disk</span></div>
+  <div class="track k6">
+    <div class="stp pl u" data-q="q12"><div class="who">session</div>the herdr session or the <code>claude -p</code> process dies; the store still shows the attempt held<div class="tg"><span class="q c">C03</span><span class="q">Q12</span></div></div>
+    <div class="stp sp u" data-q="q5 q9 q13"><div class="who">spore notices</div><code>status</code> or the sweep runs the action's probe with the handle on stdin; <code>claude-spore</code> is found on the machine, not pinned<span class="or">or the time limit runs out (4 h / 1 h); a plain background step: its exit or the worker's lost lease</span><div class="tg"><span class="q">Q5</span><span class="q">Q9</span><span class="q">Q13</span></div></div>
+    <div class="stp pl u" data-q="q10 q20"><div class="who">plugin · probe → dead</div><span class="asm" data-q="q20">interactive: herdr has no session named <code>rs-3f9a…</code></span><span class="or" data-q="q10">detached background: no process with that PID and start time</span><div class="tg"><span class="tag">assumed · Q20 deferred</span><span class="q">Q10</span></div></div>
+    <div class="stp sp u" data-q="q12 q14"><div class="who">spore + kernel</div>attempt <code>expired</code>; the effect is <code>idempotent</code>, so a new attempt starts on its own, up to 3 tries<div class="tg"><span class="q">Q12</span><span class="q">Q14</span></div></div>
+    <div class="stp pl u" data-q="q15"><div class="who">plugin · next try</div>same effect key, same UUID: <code>claude --resume &lt;uuid&gt;</code> in a new herdr pane, or <code>claude -p --resume &lt;uuid&gt;</code>; the conversation continues on the tree as it is<div class="tg"><span class="q">Q15</span></div></div>
+    <div class="stp sp u" data-q="q16 q18 q22"><div class="who">spore + kernel · can't recover</div>3 tries used, or the plugin reports it can't continue (the resume failed):
+      <div class="fork">
+        <div data-q="q22"><b>the node draws a <code>failed</code> path</b> → that path is taken; a drawn path wins <span class="q">Q22</span></div>
+        <div class="pp" data-q="q16 q18 q22"><b>no <code>failed</code> path</b> → the step pauses (<code>needs-intervention</code>) instead of the run failing; the person picks <code>spore resolve --retry</code> (resumes the same conversation), <code>--complete ok</code> or <code>--fail</code>. Only that step waits; other runs carry on. The default for every step, not only Claude's. <span class="q">Q16</span> <span class="q">Q18</span> <span class="q">Q22</span></div>
+      </div>
+      <div class="tg"><span class="q cc">core change</span></div></div>
+  </div>
+</div>
+</section>
+
+<!-- ======================= 4 SETTLED ======================= -->
+<section>
+<h2>4 · Settled, and one deferred</h2>
+<p class="sub">Every question is answered except Q20, which is deferred: the amber dashed regions above draw its proposal. Answering it differently changes only those regions.</p>
+<div class="oq">
+  <div class="oc u" data-q="q20">
+    <span class="tag">Q20 deferred</span>
+    <div class="t">How Runspore checks on a herdr step</div>
+    <div class="rec"><b>Drawn: the proposal.</b> The start command runs Claude in herdr under a name made from the step (<code>rs-3f9a…</code>) with the session id it chose, and saves the name, the session id and the machine. The probe asks herdr whether that name still exists: gone means dead; herdr unreachable means unknown, so the step waits for its time limit. A retry starts a new session under the same name that resumes the saved session id.</div>
+    <ul><li>herdr keeps a name with its session when the pane moves; a moved pane gets a new id</li><li>herdr works across machines, where a local PID means nothing; background Claude keeps Q10's process check</li><li>risk: detaching herdr from the session by hand clears the name while Claude may still run</li></ul>
+    <div class="wh">Shown in: map interactive box · interactive settings note · interactive lane step 4 · kill lane step 3</div>
+  </div>
+  <div class="kn u" data-q="q12 q16 q17 q19 q22">
+    <div class="t">Changes these answers make outside C07</div>
+    <ul>
+      <li data-q="q17 q19">The map's locked "the person's own session does the step" and CONTEXT.md's <i>In-session step</i> give way to <b>interactive step (herdr)</b>; <i>Headless step</i> becomes <b>background step</b>. <span class="q">Q17</span> <span class="q">Q19</span></li>
+      <li data-q="q12">C03 used <code>implement</code> as its <code>unsafe</code> example; Claude steps are <code>idempotent</code> now. C03's rule (the declaration decides) stands. <span class="q">Q12</span></li>
+      <li data-q="q16 q22">Runspore's core: a failed step with no <code>failed</code> path pauses instead of ending the run. A core version bump, and the recorded test runs for that case are redone. <span class="q">Q16</span> <span class="q">Q22</span> <span class="q cc">core change</span></li>
+    </ul>
+  </div>
+</div>
+<div class="done">
+  <div><span class="q">Q1</span><span>profile kinds are words only; files hold plain actions</span></div>
+  <div><span class="q">Q2</span><span>decision = <code>await-signal</code>; manual work = external step</span></div>
+  <div><span class="q">Q3</span><span><code>skill:</code> in the frontmatter, run as a slash command</span></div>
+  <div><span class="q">Q4</span><span><code>"output": "result"</code>, an opt-in command mode</span></div>
+  <div><span class="q">Q5</span><span>probe on the action, tagged <code>command</code> or <code>component</code></span></div>
+  <div><span class="q">Q6</span><span>the started session's main conversation does the work, not a subagent</span></div>
+  <div><span class="q">Q7</span><span><code>skill</code>, <code>model</code>, <code>tools</code> in the frontmatter, both forms</span></div>
+  <div><span class="q">Q8</span><span>commands never get outcome names; the host rejects an undeclared one</span></div>
+  <div><span class="q">Q9</span><span>probe by folder path bundled and pinned; bare name looked up</span></div>
+  <div><span class="q">Q10</span><span>detached background step: <code>{pid, started, session}</code></span></div>
+  <div><span class="q">Q11</span><span><code>claude-spore check</code> before the run; the step start as a backstop</span></div>
+  <div><span class="q">Q12</span><span>Claude steps rerun on their own (<code>idempotent</code>), resuming the conversation</span></div>
+  <div><span class="q">Q13</span><span>time limit: interactive 4 h, background 1 h, manual task 7 days</span></div>
+  <div><span class="q">Q14</span><span>3 tries</span></div>
+  <div><span class="q">Q15</span><span><code>--session-id</code> from the effect key; a retry <code>--resume</code>s it</span></div>
+  <div><span class="q">Q16</span><span>a step that can't recover pauses for the person</span></div>
+  <div><span class="q">Q17</span><span>the person's own session only runs the menu</span></div>
+  <div><span class="q">Q18</span><span>only that step waits; independent steps continue</span></div>
+  <div><span class="q">Q19</span><span>two Claude forms, both started by the integration: background, herdr</span></div>
+  <div><span class="q">Q21</span><span>watch: herdr quiet <b>and</b> the result file exists</span></div>
+  <div><span class="q">Q22</span><span>the pause is the default; a drawn <code>failed</code> path wins</span></div>
+</div>
+</section>
+
+</div>
+<script>
+(function(){
+  var map=document.getElementById('map');
+  var svg=document.getElementById('mapsvg');
+  var lab=document.getElementById('maplab');
+  var sel=null;
+  var E=[
+    {f:'p-cmd',t:'t-cmd',l:'any program',c:'n',q:'q1'},
+    {f:'p-head',t:'t-head',l:'wrapper around <code>claude -p</code>',c:'n',q:'q19'},
+    {f:'p-skill',t:'t-int',l:'+ frontmatter <code>skill:</code>',c:'n',q:'q3',ty:.3},
+    {f:'p-int',t:'t-int',l:'a herdr pane',c:'n',q:'q19',ty:.72},
+    {f:'p-skill',t:'t-head',c:'g',q:'q7',fy:.25,ty:.82},
+    {f:'p-man',t:'t-person',l:'a person’s actor label',c:'n',q:'q2'},
+    {f:'p-dec',t:'t-sig',l:'a signal',c:'n',q:'q2'},
+    {f:'t-head',t:'ch',l:'wrapper reads it at start',c:'c',q:'q7',ty:.3},
+    {f:'t-int',t:'ch',l:'start command reads it',c:'c',q:'q7',fy:.22,ty:.72},
+    {f:'t-int',t:'sid',l:'<code>--session-id</code>',c:'c',q:'q15',fy:.62,ty:.35}
+  ];
+  function pt(id,side,fy){
+    var r=document.getElementById(id).getBoundingClientRect(), m=map.getBoundingClientRect();
+    return {x:(side==='r'?r.right:r.left)-m.left, y:r.top-m.top+r.height*fy};
+  }
+  function draw(){
+    if(getComputedStyle(svg).display==='none'){lab.innerHTML='';return;}
+    var m=map.getBoundingClientRect();
+    svg.setAttribute('width',m.width); svg.setAttribute('height',m.height);
+    svg.setAttribute('viewBox','0 0 '+m.width+' '+m.height);
+    var s='<defs>'+['n','c','g'].map(function(k){
+      return '<marker id="ah-'+k+'" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="mk-'+k+'"/></marker>';
+    }).join('')+'</defs>';
+    var h='';
+    E.forEach(function(e){
+      var a=pt(e.f,'r',e.fy==null?.5:e.fy), b=pt(e.t,'l',e.ty==null?.5:e.ty);
+      a.x+=2; b.x-=3;
+      var dx=Math.max(30,(b.x-a.x)*.5);
+      s+='<path class="edge e-'+e.c+'" data-q="'+e.q+'" d="M'+a.x+','+a.y+' C'+(a.x+dx)+','+a.y+' '+(b.x-dx)+','+b.y+' '+b.x+','+b.y+'" marker-end="url(#ah-'+e.c+')"/>';
+      if(e.l){h+='<div class="elab u e-'+e.c+'" data-q="'+e.q+'" style="left:'+((a.x+b.x)/2)+'px;top:'+((a.y+b.y)/2)+'px">'+e.l+'</div>';}
+    });
+    svg.innerHTML=s; lab.innerHTML=h; apply();
+  }
+  function apply(){
+    document.body.classList.toggle('qsel',!!sel);
+    document.querySelectorAll('[data-q]').forEach(function(el){
+      var hit=!!sel && el.getAttribute('data-q').split(' ').indexOf(sel)>=0;
+      el.classList.toggle('hit',hit);
+    });
+    document.querySelectorAll('.u').forEach(function(u){
+      var on=!sel || u.classList.contains('hit') || !!u.querySelector('.hit');
+      u.classList.toggle('dim',!on);
+    });
+    document.querySelectorAll('#qbar .chip').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-k')===sel);});
+  }
+  document.querySelectorAll('#qbar .chip').forEach(function(c){
+    c.addEventListener('click',function(){var k=c.getAttribute('data-k'); sel=(sel===k)?null:k; apply();});
+  });
+  document.querySelectorAll('.tgl button').forEach(function(b){
+    b.addEventListener('click',function(){
+      document.body.setAttribute('data-form',b.getAttribute('data-form'));
+      document.querySelectorAll('.tgl button').forEach(function(x){x.classList.toggle('on',x===b);});
+      var f=document.getElementById('fc-set'); f.classList.remove('flash'); void f.offsetWidth; f.classList.add('flash');
+      draw();
+    });
+  });
+  if(window.ResizeObserver){new ResizeObserver(draw).observe(map);} else {window.addEventListener('resize',draw);}
+  draw();
+})();
+</script>
+</body>
+</html>
