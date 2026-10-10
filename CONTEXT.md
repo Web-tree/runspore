@@ -26,6 +26,14 @@ _Avoid_: idempotency token, request ID
 The process that moves runs forward: it asks the kernel for each next step, records the decision, and carries out the actions it can perform itself.
 _Avoid_: engine (the library inside it), runner (that performs one kind of action), daemon
 
+**Loop-back**:
+The run going back to an earlier step along an arrow, such as failing tests sending it back to implement. Each loop-back is a new visit of that step.
+_Avoid_: retry (that repeats one visit after it was lost)
+
+**Loop limit**:
+How many times in a row a step may send the run along one arrow before the run takes that step's exhausted arrow instead. Any other result from the step starts the count again.
+_Avoid_: retry limit, max attempts, visit limit (the workflow-wide safety net)
+
 ### Steps and their actors
 
 **External step**:
@@ -71,7 +79,7 @@ The Claude Code extension through which a person starts, watches and resumes run
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
 
 **Agent step**:
-A step of a workflow whose work is done by a Claude agent, not by a command or a person. It always runs in a Claude session the integration starts for that step, never in the person's own session.
+A step of a workflow whose work is done by a Claude agent, not by a command or a person. It always runs in a Claude session the integration starts for that step, never in the person's own session. Every time a run comes back to the same agent step, the step continues that conversation.
 
 **Profile kind**:
 One of `cmd`, `skill`, `agent`, `human`: the integration's words for a step. Workflow files never contain them; they hold plain actions and node kinds.
