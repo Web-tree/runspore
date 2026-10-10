@@ -34,6 +34,22 @@ _Avoid_: retry (that repeats one visit after it was lost)
 How many times in a row a step may send the run along one arrow before the run takes that step's exhausted arrow instead. Any other result from the step starts the count again.
 _Avoid_: retry limit, max attempts, visit limit (the workflow-wide safety net)
 
+**Unfinished run**:
+A run that has not completed, failed or been cancelled. A repository may have several at once.
+_Avoid_: open run, active run, pending run
+
+**Cancel**:
+Ending an unfinished run on purpose. The run's history is kept, and a step in progress is told to stop.
+_Avoid_: abort (a crash), terminate, drop
+
+**Input schema**:
+The shape of the input a workflow accepts, declared with the workflow and checked when a run starts.
+_Avoid_: parameters (node parameters belong to one node), arguments
+
+**Project folder**:
+The `.spore/` folder at a repository's root. It holds the repository's workflows, which are committed, and its run database, which is not.
+_Avoid_: workspace, config dir
+
 ### Steps and their actors
 
 **Step**:
@@ -97,6 +113,10 @@ _Avoid_: frontmatter, flags, options
 **Mod**:
 The Claude Code extension through which a person starts, watches and resumes runs from inside a session.
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
+
+**Entry menu**:
+What a person sees after typing the integration's command in their own Claude session: the unfinished runs and what each needs, the workflows to start, and writing a new one.
+_Avoid_: dashboard, launcher
 
 **Agent step**:
 A step of a workflow whose work is done by a Claude agent, not by a command or a person. It always runs in a Claude session the integration starts for that step, never in the person's own session. Every time a run comes back to the same agent step, the step continues that conversation.
