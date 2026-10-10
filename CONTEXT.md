@@ -36,6 +36,10 @@ _Avoid_: retry limit, max attempts, visit limit (the workflow-wide safety net)
 
 ### Steps and their actors
 
+**Step**:
+A node of a workflow that does something (runs an action, or waits for a signal), seen while a run is at it.
+_Avoid_: task, stage, job
+
 **External step**:
 A step whose work is done by an actor outside the worker, such as a person, a script or a Claude session, and reported back to the run.
 _Avoid_: manual step, agent step (that is one use of it)
@@ -75,6 +79,18 @@ _Avoid_: await, poll
 **Output schema**:
 The shape a step's data must have when the step ends a given way, such as "needs changes" carrying the list of changes. Runspore checks each step's data against it the moment the data arrives; a step with no output schema is not checked.
 _Avoid_: contract, type
+
+**Step files**:
+The read-only copy of the files a step declares (its instructions and its action's files), made from the run's stored workflow, never from the author's folder.
+_Avoid_: asset dir, bundle, workspace
+
+**Work folder**:
+A writable folder Runspore gives each visit of a step, shared by all its tries and kept with the run.
+_Avoid_: runtime dir, temp dir, scratch
+
+**Node parameters**:
+The values a workflow sets on a node for the program its action runs, delivered with the node's input. Runspore passes them on without reading them.
+_Avoid_: frontmatter, flags, options
 
 ### Claude Code integration
 
