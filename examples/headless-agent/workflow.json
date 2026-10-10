@@ -1,0 +1,26 @@
+{
+  "format": "runspore.workflow/0.1",
+  "name": "headless-agent",
+  "start": "test",
+  "limits": {"maxVisitsPerNode": 3},
+  "actions": {
+    "test": {"kind": "command", "argv": ["./test.sh"], "cwd": "project",
+             "effect": "read-only", "outcomes": ["ok", "red"], "exitOutcomes": {"1": "red"}},
+    "implement": {"kind": "command", "cwd": "project", "output": "json",
+                  "argv": ["python3", "../claude-step", "../instructions/implement.md",
+                           "--schema", "../instructions/implement.schema.json"],
+                  "effect": "idempotent", "retry": {"maxAttempts": 3}, "timeoutMs": "3600000"}
+  },
+  "nodes": {
+    "test": {"kind": "activity", "action": "test",
+             "outcomes": {"ok": "approve", "red": "implement"}},
+    "implement": {"kind": "activity", "action": "implement",
+                  "input": {"failures": {"$get": ["nodes", "test", "output", "stdout"]}},
+                  "outcomes": {"ok": "test"}},
+    "approve": {"kind": "await-signal", "signal": "approval",
+                "outcomes": {"approved": "done", "rejected": "implement"}},
+    "done": {"kind": "complete",
+             "output": {"change": {"$get": ["nodes", "implement", "output", "result", "summary"]},
+                        "tests": {"$get": ["nodes", "test", "output", "stdout"]}}}
+  }
+}
