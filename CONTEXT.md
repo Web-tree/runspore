@@ -63,12 +63,20 @@ The Claude Code extension through which a person starts, watches and resumes run
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
 
 **Agent step**:
-A step of a workflow whose work is done by a Claude agent, not by a command or a person.
+A step of a workflow whose work is done by a Claude agent, not by a command or a person. It always runs in a Claude session the integration starts for that step, never in the person's own session.
 
-**Headless step**:
-An agent step performed by a separate Claude process that the worker starts.
-_Avoid_: subprocess step
+**Profile kind**:
+One of `cmd`, `skill`, `agent`, `human`: the integration's words for a step. Workflow files never contain them; they hold plain actions and node kinds.
+_Avoid_: action kind, node kind, step type
 
-**In-session step**:
-An external step performed by the Claude session the person is working in, which reports the outcome back to the run.
-_Avoid_: controlled mode, agent-driven step
+**Background step**:
+An agent step performed by `claude -p`, which the worker starts and waits on, with nobody watching live.
+_Avoid_: headless step, subprocess step
+
+**Interactive step**:
+An agent step performed in an interactive Claude session that the integration starts for it in a herdr pane, so a person can watch and type into it; the session reports back when it is done.
+_Avoid_: in-session step, controlled mode, agent-driven step
+
+**Stuck step**:
+A step that cannot recover (its tries ran out, or it failed with nothing left to try) and has no failure path; the run waits at it for a person's decision.
+_Avoid_: failed step, blocked step
