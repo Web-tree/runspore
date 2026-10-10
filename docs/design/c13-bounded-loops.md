@@ -9,7 +9,7 @@ Two rules held throughout. Runspore stays generic: loop limits and `exhausted` a
 - **Loop-back** — The run going back to an earlier step along an arrow, e.g. `test` returns `red` and the run goes back to `implement`. Each loop-back is a new visit of that step: a new activation, invocation and effect key (kernel §1, K4). *Avoid:* retry.
 - **Retry** — The same visit of a step run again after its try was lost or failed retryably, on the same invocation and effect key, bounded by the action's `retry.maxAttempts` (kernel §7.3). Claude steps get 3 tries and continue their conversation (C07 R13, R14). *Avoid:* loop, loop-back.
 - **Loop limit** — How many times in a row a step may send the run along one arrow before the run takes that step's `exhausted` arrow instead. Any other result from the step starts the count again. Written as `loopLimits` on the node in `settings.json`. *Avoid:* retry limit, `maxAttempts` (that is retry), visit limit.
-- **Exhausted arrow** — The edge `<node> -> <target> [on="exhausted"]`: where the run goes when one of the node's loop limits is used up. `exhausted` is a reserved outcome, like `failed`: no action may declare it and no signal can take it. *Avoid:* give-up edge, escape edge.
+- **Exhausted arrow** — The edge `<node> -> <target> [on="exhausted"]`: where the run goes when one of the node's loop limits is used up. In a 0.2 package `exhausted` is a reserved outcome, like `failed`: no action may declare it and no signal can take it. 0.1 packages keep 0.1's rules (R2). *Avoid:* give-up edge, escape edge.
 - **Streak** — The kernel's running count for one node: which limited outcome the node took last and how many times in a row. Stored in the run state, reset by any other outcome and by the exhausted arrow. *Avoid:* counter variable, loop variable.
 - **Safety net** — The workflow-wide `limits` already in 0.1: `maxVisitsPerNode` (default 16) and `maxActivations` (default 256). Hitting one ends the run as `failed` with `limit.visits-exceeded` or `limit.activations-exceeded`; no edge can route it, and C07 keeps it terminal. *Avoid:* loop limit.
 
@@ -66,12 +66,13 @@ Rejected:
 ## Routine choices
 
 - **R1. Spelling in `settings.json`, not DOT.** `loopLimits` is a field of the node in `settings.json`, next to `action` and `input`, because C02 put limits in the settings file ("One settings file per workflow carries action bindings, mappings and limits"). The DOT gains no attribute; the exhausted arrow is an ordinary edge with `on="exhausted"`. A renderer may show the number on the arrow from the settings (for example `red ×3`); that is display only.
-- **R2. Format and dialect move to 0.2.** A package with `loopLimits` has `format: "runspore.workflow/0.2"`, so a 0.1 kernel rejects it at W01 instead of silently ignoring the field. C02 R5 requires the DOT `dialect` and the settings `format` to agree, so such a workflow says `dialect="runspore/0.2"`. A 0.2 kernel still accepts 0.1 packages; `loopLimits` and the `exhausted` route are 0.2-only.
+- **R2. Format and dialect move to 0.2.** A package with `loopLimits` has `format: "runspore.workflow/0.2"`, so a 0.1 kernel rejects it at W01 instead of silently ignoring the field. C02 R5 requires the DOT `dialect` and the settings `format` to agree, so such a workflow says `dialect="runspore/0.2"`. A 0.2 kernel still accepts 0.1 packages and runs them as 0.1 does: `loopLimits`, the `exhausted` route and the reservation of the name `exhausted` apply only to 0.2 packages, so a 0.1 action or signal outcome that happens to be called `exhausted` keeps working.
 - **R3. Which node kinds.** `activity` and `await-signal` nodes may carry `loopLimits`. On an `await-signal` node it bounds a person's or a system's repeated answers, e.g. "rejected twice in a row → escalate". `failed` may be limited like any routed outcome; `exhausted` may not.
 - **R4. The recorded result is the real one.** When the limit is used up, `nodes[test]` still records `{visit, outcome: "red", output}`, so the step behind the exhausted arrow can map the last failure (`$get ["nodes", "test", "output"]`). The diagnostic `loop.exhausted` marks that the route was the exhausted arrow.
-- **R5. The limit must be reachable.** Using up a limit of N needs N + 1 visits of the node, so W12 requires N + 1 ≤ `maxVisitsPerNode`. A limit the safety net would always beat is rejected at validation instead of surprising someone at run time.
-- **R6. Range.** A loop limit is an integer in 1..=1000, the same range as `maxVisitsPerNode` (W06).
+- **R5. The limit must be reachable.** Using up a limit of N needs N + 1 visits of the node, so W12 requires N + 1 ≤ `maxVisitsPerNode`. A limit that `maxVisitsPerNode` would always beat is rejected at validation instead of surprising someone at run time. W12 checks only the visit ceiling. `maxActivations` is a budget for the whole run, and what a loop costs in activations depends on the path through it, so it is not checked statically. A workflow whose `maxActivations` is too small for its loop limits ends with `limit.activations-exceeded` before the exhausted arrow, as in 0.1. The default 256 covers the reference loop many times over: one trip costs two activations.
+- **R6. Range.** A loop limit is an integer in 1..=999. W12 needs limit + 1 ≤ `maxVisitsPerNode`, whose ceiling is 1000 (W06).
 - **R7. Every resume message carries the current input.** The plugin's wrapper resumes the step's conversation with the step's current input on every try. A retry that follows a lost first try of a new visit therefore still delivers the new failure (Spec, "Plugin side").
+- **R8. Commands learn their visit number.** Host 0.2 gives every command `RUNSPORE_VISIT`, the visit number from its activation (`<node>/<visit>`, kernel §1). This is generic: any command can tell a first visit from a return. The wrapper needs it to tell a lost conversation from a first visit, since both look the same from the machine (Spec, "Plugin side").
 
 ## Spec
 
@@ -99,6 +100,8 @@ digraph coding_loop {
 }
 ```
 
+The settings are an excerpt. They show what C13 adds and leave out what a buildable folder also needs (C02): the `actions` table with `test`'s action, the `implement` binding, and the `stopped` node's error. C11 writes the full workflow.
+
 ```json
 {
   "format": "runspore.workflow/0.2",
@@ -116,10 +119,10 @@ digraph coding_loop {
 An `activity` or `await-signal` node may carry `loopLimits`: an object whose keys are outcomes the node routes and whose values are integers.
 
 - **W01.** `format` is `runspore.workflow/0.1` or `runspore.workflow/0.2`. `loopLimits` and the `exhausted` route are allowed only in 0.2.
-- **W07 (amended).** No action outcome is `failed` or `exhausted`.
+- **W07 (amended).** No action outcome is `failed`. In a 0.2 package, none is `exhausted` either.
 - **W08 (amended).** An activity node's `outcomes` has a key for every action outcome; the other keys allowed are `failed`, and `exhausted` when the node has `loopLimits`.
-- **W09 (amended).** An await-signal node may route `exhausted` only when it has `loopLimits`.
-- **W12 (new).** `loopLimits` appears only on `activity` and `await-signal` nodes and is non-empty. Each key is a key of the node's `outcomes` other than `exhausted`. Each value is an integer in 1..=1000 with value + 1 ≤ `maxVisitsPerNode`. A node with `loopLimits` routes `exhausted`.
+- **W09 (amended).** In a 0.2 package, an await-signal node may route `exhausted` only when it has `loopLimits`.
+- **W12 (new).** `loopLimits` appears only on `activity` and `await-signal` nodes and is non-empty. Each key is a key of the node's `outcomes` other than `exhausted`. Each value is an integer with value + 1 ≤ `maxVisitsPerNode` (so at most 999, W06). A node with `loopLimits` routes `exhausted`.
 
 ### State (kernel 0.2)
 
@@ -135,7 +138,7 @@ Every place in 0.1 that records a node's result and enters `node.outcomes[outcom
    - Otherwise delete `streaks[node]`.
 3. *Enter* `node.outcomes[outcome]`.
 
-*Consume* treats a signal whose outcome is `exhausted` as unrouted (`signal.outcome-unrouted`), so no signal can take the exhausted arrow.
+In a 0.2 package, *consume* treats a signal whose outcome is `exhausted` as unrouted (`signal.outcome-unrouted`), so no signal can take the exhausted arrow.
 
 `loop.exhausted` carries `nodeId` = the node that used up its limit. The safety net (*enter*, step 2) and mapping failures are unchanged and stay terminal (C07).
 
@@ -146,7 +149,13 @@ New property: **K10** — a limited outcome is never routed more than its limit 
 This amends C07 R14 and the background and interactive step procedures.
 
 - **Session id.** The integration computes the Claude session UUID as a name-based UUID over `RUNSPORE_RUN_ID` and `RUNSPORE_NODE_ID` (both given to every command, host.md §3), under a namespace fixed by the plugin. Every visit and every try of one node in one run compute the same UUID.
-- **Which message to send.** No session with that UUID exists: this is the first visit; start Claude with `--session-id <uuid>`, the instructions and the input (C07). The session exists and `RUNSPORE_ATTEMPT` is `1`: the run came back to this step; resume with `--resume <uuid>` and say so, with the new input (e.g. the latest failing test output or the reviewer's note). The session exists and `RUNSPORE_ATTEMPT` is above `1`: this is a retry of a lost try; resume and tell Claude to finish the step, again with the current input (R7).
+- **Which message to send.** The wrapper decides from whether a session with that UUID exists, `RUNSPORE_VISIT` (R8) and `RUNSPORE_ATTEMPT`:
+  - No session, visit 1: the first visit, or a retry whose first try died before Claude created the session (C04). Start Claude with `--session-id <uuid>`, the instructions and the input (C07).
+  - No session, visit above 1: the conversation is lost, because its history was removed or this worker is on another machine. The wrapper reports a non-retryable failure (C07 R13), so the step waits for the person (C07 L3). It never silently starts a fresh conversation in the middle of a run.
+  - Session exists, attempt 1, visit above 1: the run came back to this step. Resume with `--resume <uuid>` and say so, with the new input (e.g. the latest failing test output or the reviewer's note).
+  - Session exists, attempt above 1: a retry of a lost try. Resume and tell Claude to finish the step, again with the current input (R7).
+  - Session exists, visit 1, attempt 1: the UUID belongs to some other run's conversation (C16, the start-key collision). The wrapper reports a non-retryable failure rather than resume a stranger's conversation.
+- **One result file per visit.** C07 R15 named an interactive step's result file after its session id. With one session per node per run, that file would outlive its visit, and the next visit's watch could return the old result at once. The file is named after the invocation instead: `<runtime dir>/<RUNSPORE_INVOCATION_ID>.result.json`. That name is the same for every try of one visit, so a crash between write and read stays safe (R15), and new for every visit. The wrapper gives Claude the path in each start or resume message.
 - Interactive steps do the same through the herdr pane the start command opens (C07, "Plugin side: interactive step").
 
 ### The reference loop, step by step (limit 3)
@@ -173,9 +182,10 @@ This amends C07 R14 and the background and interactive step procedures.
 
 ## Changes outside C13
 
-- **C07 R14 (docs/design/c07-four-kinds.md).** The session UUID derives from the run ID and node ID, not the effect key, so every visit of a Claude step continues one conversation (L3). The wrapper's choice of message (first visit, new visit, retry) replaces "first try versus rerun". The risk "A loop back is a new conversation" no longer holds. C07's kill-and-resume walkthrough is unaffected: it covers one visit.
+- **C07 R14 (docs/design/c07-four-kinds.md).** The session UUID derives from the run ID and node ID, not the effect key, so every visit of a Claude step continues one conversation (L3). The wrapper's choice of message (first visit, new visit, retry) replaces "first try versus rerun". The risk "A loop back is a new conversation" no longer holds. C07's kill-and-resume walkthrough is unaffected: it covers one visit. C07 R15 and the watch step of its interactive procedure: the result file is named after the invocation, not the session (Spec, "Plugin side").
+- **Host 0.2 (spec/host.md §3).** Commands also get `RUNSPORE_VISIT` (R8).
 - **C02 (docs/design/c02-dot-format.md).** `settings.json` node fields gain `loopLimits`; `exhausted` joins `failed` as a reserved outcome in `on`; workflows that use them say `dialect="runspore/0.2"` and `format: "runspore.workflow/0.2"`. No new DOT attribute.
-- **Kernel semantics 0.2.** Adds `loopLimits`, `streaks`, *Route*, `loop.exhausted`, W12 and K10 to C07's stuck-step change.
+- **Kernel semantics 0.2.** Adds `loopLimits`, `streaks`, *Route*, `loop.exhausted`, W12 and K10 to C07's stuck-step change. The reservation of `exhausted` (W07, W09, *consume*) applies to 0.2 packages only.
 - **CONTEXT.md.** New terms Loop-back and Loop limit; Agent step gains "Every time a run comes back to the same agent step, the step continues that conversation."
 - **C11.** Writes the reference loop with `loopLimits` on `test` and an exhausted arrow, picks the number and the exhausted target, and walks the kill at each step with streaks in the state.
 
@@ -184,7 +194,7 @@ This amends C07 R14 and the background and interactive step procedures.
 - **A conversation that went wrong stays wrong.** With one conversation per step (L3), a wrong idea Claude formed on trip 1 rides along on every later trip. The person's way out is the exhausted step or a rejection note; a per-step option to start fresh is not designed (Open threads).
 - **The conversation grows each trip.** Several rounds of "keep going" add up; Claude Code's own compaction then summarises and loses detail. At the reference limit this is small.
 - **"Keep going" still meets the safety net.** Each round of the reference loop takes up to four visits of `implement` and `test`. With the default `maxVisitsPerNode` of 16, the fourth round of "keep going" ends the run as terminal `failed` (`limit.visits-exceeded`), which nothing can catch. Authors who expect long rounds raise `maxVisitsPerNode`; the mod should show how close a run is.
-- **Session UUID collisions.** The run ID is `ids::run_from_start_key(tenant, start_key)` (host.md §2), so the same start key used in two stores gives the same run ID. Two such runs in the same project directory would compute the same session UUID and one would resume the other's conversation. C16 (Effect keys repeat across databases, #26) owns the fix; C04 already hit it with the effect-key derivation.
+- **Session UUID collisions.** The run ID is `ids::run_from_start_key(tenant, start_key)` (host.md §2), so the same start key used in two stores gives the same run ID. Two such runs in the same project directory would compute the same session UUID and one would resume the other's conversation. C16 (Effect keys repeat across databases, #26) fixes it with a random run ID per run (#28). Until then the wrapper refuses a first visit whose session already exists (Spec, "Plugin side").
 - **Unmeasured Claude behaviour.** How `claude --session-id` treats an existing id, and whether `-p --resume` keeps the full history across many resumes, is still unmeasured (C07 risks; C04, C05).
 
 ## Deferred
