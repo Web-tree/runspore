@@ -118,6 +118,10 @@ _Avoid_: module, plugin (a plugin is the package a mod ships in)
 What a person sees after typing the integration's command in their own Claude session: the unfinished runs and what each needs, the workflows to start, and writing a new one.
 _Avoid_: dashboard, launcher
 
+**Authoring interview**:
+The conversation in the person's own Claude session in which Claude drafts a workflow from their description, corrects it with them, and writes and checks its folder. It also changes an existing workflow.
+_Avoid_: generator, wizard, scaffold
+
 **Agent step**:
 A step of a workflow whose work is done by a Claude agent, not by a command or a person. It always runs in a Claude session the integration starts for that step, never in the person's own session. Every time a run comes back to the same agent step, the step continues that conversation.
 
