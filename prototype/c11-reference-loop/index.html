@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE — C11 reference coding loop: what a kill does at each step</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --ink:#1d2329; --muted:#66707a; --line:#dde2e7; --bg:#f7f8fa; --card:#fff; --accent:#2f6fde; --accent-soft:#e8f0fd; --warn:#b4541b; --warn-soft:#fbeee5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  header { padding:28px 36px 8px; max-width:1280px; margin:auto; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  .tag { display:inline-block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--warn); background:var(--warn-soft); border-radius:4px; padding:2px 6px; margin-bottom:8px; }
+  .intro { color:var(--muted); max-width:900px; margin:0; }
+  main { max-width:1280px; margin:auto; padding:12px 36px 48px; display:grid; grid-template-columns: 1.05fr 1fr; gap:20px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  h2 { font-size:13px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:0 0 10px; font-weight:600; }
+  .graph { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:12px; }
+  .node { border:1px solid var(--line); border-radius:6px; padding:3px 9px; font-size:13px; color:var(--muted); }
+  .node.here { border-color:var(--accent); background:var(--accent-soft); color:var(--ink); font-weight:600; }
+  .arrows { font-size:12px; color:var(--muted); margin:0 0 4px; }
+  dl { display:grid; grid-template-columns: 170px 1fr; gap:4px 12px; margin:0; font-size:14px; }
+  dt { color:var(--muted); }
+  dd { margin:0; }
+  .changed { background:#fff7d6; border-radius:3px; padding:0 3px; }
+  .line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:13px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin:6px 0 10px; white-space:pre-wrap; }
+  .menu-row { border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin:6px 0; }
+  .menu-row .acts { color:var(--accent); font-size:13px; margin-top:4px; }
+  .muted { color:var(--muted); }
+  .log { max-height:300px; overflow:auto; font-size:13px; }
+  .log div { padding:5px 0; border-bottom:1px dashed var(--line); }
+  .log div.new { background:#fff7d6; }
+  .log b { font-weight:600; }
+  button { font:inherit; font-size:13px; border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 10px; margin:0 6px 6px 0; cursor:pointer; color:var(--ink); }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.38; cursor:default; }
+  button.kill { border-color:#e8c9b6; }
+  .group { margin-bottom:8px; }
+  .group span { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px; }
+  .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .scenario p { margin:0 0 10px; }
+  .steps button { display:block; width:100%; text-align:left; }
+  .steps button.done { color:var(--muted); text-decoration:line-through; }
+  .steps button.next { border-color:var(--accent); background:var(--accent-soft); }
+  .wide { grid-column: 1 / -1; }
+  .src { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; line-height:1.45; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px 0; margin:0; max-height:460px; overflow:auto; white-space:pre-wrap; }
+  .src span { display:block; padding:0 12px; }
+  .src span.here { background:var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+  .wf { display:grid; grid-template-columns: minmax(300px, 400px) 1fr; gap:18px; align-items:start; }
+  #diagram svg { width:100%; height:auto; }
+  #diagram g.node.here path, #diagram g.node.here polygon, #diagram g.node.here ellipse { fill:var(--accent-soft); stroke:var(--accent); stroke-width:2.2; }
+  #diagram g.node.here text { font-weight:bold; }
+  #diagram g.edge.taken path { stroke:#d9a400; stroke-width:2.6; }
+  #diagram g.edge.taken polygon { fill:#d9a400; stroke:#d9a400; }
+  #diagram g.edge.taken text { fill:#8a6700; font-weight:bold; }
+  .src span.edge { background:#fff3c4; box-shadow: inset 3px 0 #d9a400; }
+  .form { display:flex; gap:6px; align-items:center; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="tag">Prototype · throwaway · C11 (Web-tree/runspore#16)</div>
+  <h1>The reference coding loop: what a kill does at each step</h1>
+  <p class="intro">The question: when your Claude session (or the whole machine) dies at any point of the reference loop, what do you find when you come back, whether you start a new Claude session or resume the old one? Here that means the run's state, what the menu offers, and what work is done again. Claude implements, a command runs the tests, red tests go back to Claude at most 3 times in a row before you are asked, and you approve. Everything here follows the decisions C02–C16. Rows marked <b>(C11)</b> are this ticket's own proposals. Click freely, or follow a walkthrough on the right.</p>
+</header>
+
+<main>
+  <section class="wide">
+    <h2>The workflow: <code style="text-transform:none">.spore/workflows/coding-loop/</code> <span class="muted" style="text-transform:none;letter-spacing:0">(blue: where the run is now · yellow: the arrow it just took)</span></h2>
+    <div class="wf">
+      <div id="diagram"><p class="muted">Drawing the DOT with Graphviz (WebAssembly, loaded from jsDelivr)…</p></div>
+      <div><div class="tabs" id="ftabs"></div><pre class="src" id="src"></pre></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The run, as spore's database holds it</h2>
+    <dl id="store"></dl>
+  </section>
+
+  <section>
+    <h2>Walkthroughs</h2>
+    <div class="tabs" id="tabs"></div>
+    <div class="scenario" id="scenario"></div>
+  </section>
+
+  <section>
+    <h2>Your Claude session</h2>
+    <dl id="session"></dl>
+    <h2 style="margin-top:14px">What a new session shows</h2>
+    <div id="menu"></div>
+  </section>
+
+  <section>
+    <h2>Free play</h2>
+    <div class="group"><span>Set up (before starting)</span>
+      <div class="form">implement runs as
+        <button id="f-bg">background (claude -p)</button>
+        <button id="f-int">interactive (herdr pane)</button>
+      </div>
+    </div>
+    <div class="group"><span>Start and follow</span>
+      <button data-a="START">Start a run from the menu</button>
+      <button data-a="CONTINUE">Continue (from the menu)</button>
+      <button data-a="NEW_SESSION">Start a new Claude session</button>
+      <button data-a="RESUME_SESSION">Resume the old session (claude --resume)</button>
+    </div>
+    <div class="group"><span>The work</span>
+      <button data-a="CLAUDE_DONE">Claude finishes implement</button>
+      <button data-a="PANE_ASK">Claude in the pane asks you something</button>
+      <button data-a="PANE_ANSWER">You answer in the pane</button>
+      <button data-a="PANE_REPORT">Claude in the pane hands in its answer</button>
+      <button data-a="TESTS_PASS">Tests pass</button>
+      <button data-a="TESTS_FAIL">Tests fail</button>
+    </div>
+    <div class="group"><span>You decide</span>
+      <button data-a="APPROVE">Approve</button>
+      <button data-a="REJECT">Reject: "handle the empty case"</button>
+      <button data-a="REJECT_DIE">Reject, then the machine dies before the run moves</button>
+      <button data-a="KEEP_GOING">Keep going</button>
+      <button data-a="STOP">Stop</button>
+      <button data-a="RETRY">Retry the stuck step</button>
+      <button data-a="MARK_DONE">Mark it done</button>
+      <button data-a="FAIL">Fail it</button>
+      <button data-a="CANCEL">Cancel the run</button>
+    </div>
+    <div class="group"><span>Kill</span>
+      <button class="kill" data-a="CLOSE">Your Claude session dies</button>
+      <button class="kill" data-a="CRASH">The whole machine goes down</button>
+      <button data-a="RESET">Reset</button>
+    </div>
+  </section>
+
+  <section class="wide">
+    <h2>What happened <span class="muted" style="text-transform:none;letter-spacing:0">(newest first; the last action is highlighted)</span></h2>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<!-- The model: pure, no DOM. It lifts out as the reference behaviour the spec is checked against. -->
+<script id="model">
+const LOOP_LIMIT = 3, MAX_VISITS = 16, MAX_TRIES = 3;
+const SIGNAL = { approve: 'approval', tests_stuck: 'tests-stuck' };
+
+function initial(form) {
+  return { form: form || 'background', run: null, session: 'alive', sessionKind: 'new', follower: false, followerNote: 'Not following a run.',
+           pane: 'none', conversation: { exists: false, resumes: 0 }, files: 0, log: [] };
+}
+
+function clone(s) { return JSON.parse(JSON.stringify(s)); }
+function say(s, text) { s.log.push(text); }
+
+// Entering a node: kernel *enter*, with the safety net.
+function enter(s, node) {
+  const r = s.run;
+  r.visits[node] = (r.visits[node] || 0) + 1;
+  r.node = node;
+  r.step = null;
+  if (r.visits[node] > MAX_VISITS) {
+    r.status = 'failed'; r.error = 'limit.visits-exceeded';
+    say(s, `<b>${node}</b> would be visit ${r.visits[node]} of ${MAX_VISITS}: the safety net ends the run as <b>failed</b>. Nothing can catch this.`);
+    return;
+  }
+  if (node === 'approve' || node === 'tests_stuck') { r.status = 'waiting'; say(s, `The run waits at <b>${node}</b> for your decision (signal <code>${SIGNAL[node]}</code>).`); return; }
+  if (node === 'done') { r.status = 'completed'; say(s, 'The run is <b>completed</b>.'); return; }
+  if (node === 'stopped') { r.status = 'failed'; r.error = 'tests.given-up'; say(s, 'The run ends as <b>failed</b> at <code>stopped</code>.'); return; }
+  r.status = 'running';
+  r.step = { node, visit: r.visits[node], attempt: 1, state: 'queued' };
+}
+
+// Kernel *Route*: record the result, apply the loop limit, enter the next node.
+function route(s, node, outcome, data) {
+  const r = s.run;
+  r.results[node] = { visit: r.visits[node], outcome, data };
+  r.from = { node, outcome, data };
+  r.edge = { from: node, on: outcome };
+  if (node === 'test') {
+    if (outcome === 'red') {
+      const n = r.streak + 1;
+      if (n > LOOP_LIMIT) {
+        r.streak = 0;
+        say(s, `Red for the ${n}th time in a row: the loop limit (3) is used up. The run takes the <b>exhausted</b> arrow and the count resets.`);
+        r.edge = { from: node, on: 'exhausted' };
+        return enter(s, 'tests_stuck');
+      }
+      r.streak = n;
+      say(s, `Tests red: red ${n} of 3 in a row, back to implement.`);
+      return enter(s, 'implement');
+    }
+    r.streak = 0;
+    say(s, 'Tests pass: the red count resets.');
+    return enter(s, 'approve');
+  }
+  const next = { implement: { ok: 'test' }, approve: { approved: 'done', rejected: 'implement' },
+                 tests_stuck: { 'keep-going': 'implement', stop: 'stopped' } }[node][outcome];
+  enter(s, next);
+}
+
+// Starting a try of the current step.
+function dispatch(s) {
+  const st = s.run.step;
+  if (st.node === 'test') {
+    st.state = 'running';
+    say(s, `Try ${st.attempt} of <b>test</b> (visit ${st.visit}) runs <code>npm test</code>${st.attempt > 1 ? ' from the start again' : ''}.`);
+    return;
+  }
+  const c = s.conversation;
+  let how;
+  if (!c.exists) { how = 'starts conversation U (<code>--session-id U</code>) with the task'; c.exists = true; }
+  else if (st.attempt > 1) { how = 'resumes conversation U (<code>--resume U</code>): "you were cut off, finish the step"'; c.resumes++; }
+  else { how = `resumes conversation U: "you are back; <code>cameFrom</code> says why"`; c.resumes++; }
+  if (s.form === 'background') {
+    st.state = 'running';
+    say(s, `Try ${st.attempt} of <b>implement</b> (visit ${st.visit}): <code>claude-spore run</code> ${how}.`);
+  } else {
+    st.state = 'held'; s.pane = 'working';
+    say(s, `Try ${st.attempt} of <b>implement</b> (visit ${st.visit}): <code>claude-spore start</code> opens a herdr pane and ${how}. The start command exits; the pane holds the step, and the follower runs the watch.`);
+  }
+}
+
+// What a follower (spore continue --wait) does until the run needs a person or waits on work.
+function drive(s) {
+  for (let guard = 0; guard < 50 && s.follower; guard++) {
+    const r = s.run;
+    if (!r) { s.follower = false; return; }
+    if (['completed', 'failed', 'cancelled'].includes(r.status)) {
+      s.follower = false; s.followerNote = `continue --wait returned: the run is ${r.status} (exit ${{ completed: 0, failed: 1, cancelled: 7 }[r.status]}).`;
+      return;
+    }
+    if (r.status === 'waiting') {
+      const p = r.pendingSignal;
+      if (p && p.node === r.node) {
+        r.pendingSignal = null;
+        say(s, `The run takes your decision <b>${p.outcome}</b> at ${p.node}.`);
+        route(s, p.node, p.outcome, p.data);
+        continue;
+      }
+      s.follower = false; s.followerNote = `continue --wait returned exit 3: <b>${r.node}</b> needs your decision. Claude offers it here.`;
+      return;
+    }
+    if (r.status === 'stuck') {
+      s.follower = false; s.followerNote = `continue --wait returned exit 4: <b>${r.node}</b> is stuck. Claude shows the error and Retry / Mark done / Fail.`;
+      return;
+    }
+    const st = r.step;
+    if (st.state === 'cut-off') {
+      if (st.attempt < MAX_TRIES) {
+        say(s, `Try ${st.attempt} of <b>${st.node}</b> was cut off. ${st.node === 'test' ? 'test' : 'implement'} is safe to repeat (idempotent, ${MAX_TRIES} tries), so try ${st.attempt + 1} starts on its own.`);
+        st.attempt++; st.state = 'queued';
+      } else {
+        r.status = 'stuck'; st.state = 'stuck'; st.error = 'activity.attempts-exhausted';
+        say(s, `Try ${st.attempt} of <b>${st.node}</b> was cut off too: all ${MAX_TRIES} tries are used, so the step is <b>stuck</b> and waits for you (C07 L3).`);
+      }
+      continue;
+    }
+    if (st.state === 'queued') { dispatch(s); continue; }
+    if (st.state === 'held') {
+      if (s.pane === 'gone') {
+        say(s, 'The probe checks the holder handle: that Claude process no longer exists (another boot) → <b>dead</b>. The try ends as expired. <b>(C11: the handle records the process and boot)</b>');
+        st.state = 'cut-off'; s.pane = 'none';
+        continue;
+      }
+      if (s.pane === 'reported') {
+        s.pane = 'none';
+        say(s, 'The watch finds the pane quiet with a result file and returns <b>ok</b>.');
+        s.files++;
+        route(s, 'implement', 'ok', { summary: `change ${s.files}` });
+        continue;
+      }
+      if (s.pane === 'asking') {
+        s.follower = false; s.followerNote = 'continue --wait returned exit 6: the watch says <b>implement waits for you in its pane</b>.';
+        return;
+      }
+      s.followerNote = 'Following: the watch is waiting for Claude in the pane.';
+      return;
+    }
+    s.followerNote = `Following: <code>spore continue --wait</code> is running ${st.node} in the background.`;
+    return;
+  }
+}
+
+const ACTIONS = {
+  SET_FORM(s, form) { if (s.run) return 'The form is fixed once the run has started.'; s.form = form; say(s, `implement will run as a <b>${form}</b> step. Only its action changes in settings.json.`); },
+  START(s) {
+    if (s.session !== 'alive') return 'Your session is closed. Open a new one first.';
+    if (s.run && !['completed', 'failed', 'cancelled'].includes(s.run.status)) return 'This prototype follows one run at a time.';
+    const keep = { form: s.form, log: s.log };
+    Object.assign(s, initial(keep.form), { log: keep.log });
+    s.run = { status: 'running', node: null, visits: {}, streak: 0, results: {}, from: null, step: null, pendingSignal: null, sentIds: [] };
+    say(s, '<b>Start</b>: the menu runs <code>claude-spore check</code>, Claude drafts the <code>task</code>, you confirm, <code>spore start</code> creates the run. Your session follows it with <code>spore continue --wait</code>.');
+    enter(s, 'implement');
+    s.follower = true; drive(s);
+  },
+  CONTINUE(s) {
+    if (s.session !== 'alive') return 'Your session is closed. Open a new one first.';
+    if (!s.run || ['completed', 'failed', 'cancelled'].includes(s.run.status)) return 'No unfinished run.';
+    if (s.run.status === 'waiting' && !s.run.pendingSignal) return 'The run waits for your decision; Continue has nothing to do.';
+    if (s.run.status === 'stuck') return 'The step is stuck; choose Retry, Mark done or Fail.';
+    say(s, '<b>Continue</b>: your session follows the run again (<code>spore continue --wait</code>). It sweeps, probes and picks up where the store says.');
+    s.follower = true; drive(s);
+  },
+  NEW_SESSION(s) {
+    if (s.session === 'alive') return 'Your session is still open.';
+    s.session = 'alive'; s.sessionKind = 'new'; s.followerNote = 'Not following a run.';
+    say(s, '<b>You start a new Claude session</b> (from scratch). Its session-start hook runs <code>spore list --unfinished</code> and prints one line. Everything it knows about the run comes from spore.');
+  },
+  RESUME_SESSION(s) {
+    if (s.session === 'alive') return 'Your session is still open.';
+    s.session = 'alive'; s.sessionKind = 'resumed'; s.followerNote = 'Not following a run (the old <code>continue --wait</code> died with the session).';
+    say(s, '<b>You resume the old Claude session</b> (<code>claude --resume</code>). The conversation remembers the run, but the background <code>continue --wait</code> it started is gone. The same session-start line says so, and the run is in the same state as for a new session.');
+  },
+  CLAUDE_DONE(s) {
+    const st = s.run && s.run.step;
+    if (!st || st.node !== 'implement' || st.state !== 'running') return 'No background implement try is running.';
+    s.files++;
+    say(s, `Claude answers <b>ok</b> with a summary that fits the schema. <code>claude-spore run</code> prints it, and spore records it.`);
+    route(s, 'implement', 'ok', { summary: `change ${s.files}` }); drive(s);
+  },
+  PANE_ASK(s) { if (s.pane !== 'working') return 'No pane is working.'; s.pane = 'asking'; say(s, 'Claude in the pane asks you something and goes quiet, with no result file.'); drive(s); },
+  PANE_ANSWER(s) { if (s.pane !== 'asking') return 'The pane is not waiting for you.'; s.pane = 'working'; say(s, 'You answer in the pane. Claude goes on working. Continue so your session watches it again.'); },
+  PANE_REPORT(s) {
+    if (s.pane !== 'working' && s.pane !== 'asking') return 'No pane is working.';
+    s.pane = 'reported';
+    say(s, `Claude runs <code>claude-spore report --outcome ok</code>: the answer fits, so the result file is written in the step's work folder. ${s.follower ? '' : '<b>Nobody is following</b>, so the run does not move yet.'}`);
+    drive(s);
+  },
+  TESTS_PASS(s) { const st = s.run && s.run.step; if (!st || st.node !== 'test' || st.state !== 'running') return 'No test try is running.'; route(s, 'test', 'ok', { exitCode: 0 }); drive(s); },
+  TESTS_FAIL(s) { const st = s.run && s.run.step; if (!st || st.node !== 'test' || st.state !== 'running') return 'No test try is running.'; route(s, 'test', 'red', { exitCode: 1, stdout: '…end of the test output…' }); drive(s); },
+  APPROVE(s) { return decide(s, 'approve', 'approved', null); },
+  REJECT(s) { return decide(s, 'approve', 'rejected', { reason: 'handle the empty case' }); },
+  REJECT_DIE(s) { const e = decide(s, 'approve', 'rejected', { reason: 'handle the empty case' }, true); if (e) return e; },
+  KEEP_GOING(s) { return decide(s, 'tests_stuck', 'keep-going', {}); },
+  STOP(s) { return decide(s, 'tests_stuck', 'stop', null); },
+  RETRY(s) { return resolve(s, 'retry'); },
+  MARK_DONE(s) { return resolve(s, 'complete'); },
+  FAIL(s) { return resolve(s, 'fail'); },
+  CANCEL(s) {
+    if (s.session !== 'alive') return 'Your session is closed.';
+    if (!s.run || ['completed', 'failed', 'cancelled'].includes(s.run.status)) return 'No unfinished run.';
+    s.run.status = 'cancelled'; s.follower = false; s.followerNote = 'Not following a run.';
+    say(s, `<b>Cancel</b>: the run is <b>cancelled</b> in one store operation.${s.pane !== 'none' && s.pane !== 'gone' ? ' <code>claude-spore stop</code> closes the pane.' : ''}`);
+    s.pane = 'none';
+  },
+  CLOSE(s) {
+    if (s.session !== 'alive') return 'Your session is already closed.';
+    s.session = 'gone'; s.follower = false; s.followerNote = '—';
+    const st = s.run && s.run.step;
+    let what = 'Its background <code>continue --wait</code> stops with it.';
+    if (st && st.state === 'running') {
+      st.state = 'cut-off';
+      what += ` The ${st.node === 'test' ? 'test command' : '<code>claude -p</code>'} it was running is stopped (SIGTERM, 5 s, SIGKILL), and try ${st.attempt} is recorded as cut off.`;
+    }
+    if (s.pane === 'working' || s.pane === 'asking' || s.pane === 'reported') what += ' <b>The herdr pane is not part of your session and keeps going.</b>';
+    say(s, `<b>Your Claude session dies</b> (closed, crashed or killed). ${what}`);
+  },
+  CRASH(s) {
+    s.session = 'gone'; s.follower = false; s.followerNote = '—';
+    const st = s.run && s.run.step;
+    let what = 'Everything on the machine stops: your session, its follower, every step process, every herdr pane.';
+    if (st && st.state === 'running') { st.state = 'cut-off'; what += ` Try ${st.attempt} of ${st.node} is lost. Its lease (10 s) runs out with nobody renewing it.`; }
+    if (s.pane === 'working' || s.pane === 'asking') { s.pane = 'gone'; what += ' The pane is gone, but conversation U is kept on disk, and so are the edits.'; }
+    if (s.pane === 'reported') { s.pane = 'reported'; what += ' The result file was already written to the work folder, so it survives.'; }
+    say(s, `<b>The whole machine goes down.</b> ${what}`);
+  },
+  RESET(s) { const f = s.form; Object.assign(s, initial(f)); },
+};
+
+function decide(s, node, outcome, data, die) {
+  const r = s.run;
+  if (s.session !== 'alive') return 'Your session is closed. Open a new one first.';
+  if (!r || r.status !== 'waiting' || r.node !== node) return `The run is not waiting at ${node}.`;
+  const id = `${node}/${r.visits[node]}`;
+  if (r.sentIds.includes(id)) {
+    say(s, `You decide again at ${node}. The menu sends signal ID <code>${id}</code> again, so spore treats it as a <b>no-op</b>. No second decision is buffered for a later visit. <b>(C11)</b>`);
+    return;
+  }
+  r.sentIds.push(id);
+  r.pendingSignal = { node, outcome, data };
+  say(s, `You decide <b>${outcome}</b>${data && data.reason ? ` ("${data.reason}")` : ''}: <code>spore signal ${SIGNAL[node]} --outcome ${outcome} --id ${id}</code>.`);
+  if (die) { s.session = 'gone'; s.follower = false; s.followerNote = '—'; say(s, '<b>The machine dies before the run moves.</b> The decision is stored in the database, but nothing has acted on it yet.'); return; }
+  s.follower = true; drive(s);
+}
+
+function resolve(s, how) {
+  const r = s.run;
+  if (s.session !== 'alive') return 'Your session is closed. Open a new one first.';
+  if (!r || r.status !== 'stuck') return 'No step is stuck.';
+  const st = r.step;
+  if (how === 'retry') {
+    r.status = 'running'; st.attempt++; st.state = 'queued'; delete st.error;
+    say(s, `<b>Retry</b>: <code>spore resolve --retry</code> gives try ${st.attempt}, beyond the ${MAX_TRIES}-try limit, of the same visit.`);
+  } else if (how === 'complete') {
+    say(s, `<b>Mark done</b>: <code>spore resolve --complete ok</code>${st.node === 'implement' ? ' with a summary you write; it is checked against the schema' : ''}.`);
+    r.status = 'running'; s.files += st.node === 'implement' ? 1 : 0;
+    route(s, st.node, 'ok', st.node === 'implement' ? { summary: 'done by hand' } : { exitCode: 0 });
+  } else {
+    r.status = 'failed'; r.error = st.error; r.step = null;
+    say(s, '<b>Fail</b>: <code>spore resolve --fail</code>. The run ends as <b>failed</b>, for good.');
+  }
+  s.follower = true; drive(s);
+}
+
+function act(state, name, arg) {
+  const s = clone(state); const before = s.log.length;
+  const refusal = ACTIONS[name](s, arg);
+  if (refusal) s.log.push(`<span class="muted">Not possible now: ${refusal}</span>`);
+  return { state: s, fresh: s.log.length - before };
+}
+
+// What spore list --unfinished says, and so what the session-start line and the menu show.
+function view(s) {
+  const r = s.run;
+  if (!r || ['completed', 'failed', 'cancelled'].includes(r.status)) {
+    return { line: null, needs: null, rows: [], start: 'coding-loop (Start)' };
+  }
+  const st = r.step;
+  let needs, acts, note = '';
+  if (r.status === 'waiting' && r.pendingSignal) { needs = 'working'; acts = ['Continue', 'Cancel']; note = `Your decision (${r.pendingSignal.outcome}) is stored; Continue acts on it. Deciding again is a no-op. (C11: a buffered decision counts as "working")`; }
+  else if (r.status === 'waiting') { needs = 'signal'; acts = r.node === 'approve' ? ['Decide: Approve / Reject (with a reason)', 'Cancel'] : ['Decide: Keep going / Stop', 'Cancel']; note = 'Decide shows the step\'s instructions and the implement summary.'; }
+  else if (r.status === 'stuck') { needs = 'stuck'; acts = ['Retry', 'Mark done', 'Fail', 'Cancel']; note = `Kept error: ${st.error}.`; }
+  else if (st && st.state === 'held') { needs = 'held'; acts = [s.pane !== 'gone' ? 'Open its pane' : 'Open its pane (gone)', 'Continue (C11: follow it)', 'Abandon', 'Cancel']; note = 'Held by an interactive Claude session in a herdr pane.'; }
+  else { needs = 'working'; acts = ['Continue', 'Cancel']; note = st && st.state === 'cut-off' ? `Try ${st.attempt} was cut off. Spore does not know it yet: nobody has looked since.` : ''; }
+  const label = { working: 'working', signal: 'decision', stuck: 'stuck', held: 'held' }[needs];
+  return {
+    line: `1 run waiting: coding-loop at ${r.node} (${label}). /ml-workflow:menu to open`,
+    needs, note,
+    rows: [{ title: `coding-loop · ${r.node} · ${label}`, acts }],
+    start: 'coding-loop (Start another)',
+  };
+}
+
+const SCENARIOS = [
+  { title: 'Happy path', form: 'background',
+    text: 'No kill. Claude implements, the tests fail once, Claude fixes them in the same conversation, the tests pass, and you approve. Watch the red count and the conversation being continued.',
+    steps: [['Start a run', 'START'], ['Claude finishes implement', 'CLAUDE_DONE'], ['Tests fail', 'TESTS_FAIL'], ['Claude finishes implement', 'CLAUDE_DONE'], ['Tests pass', 'TESTS_PASS'], ['Approve', 'APPROVE']] },
+  { title: 'Session dies mid-implement', form: 'background',
+    text: 'Your Claude session dies while Claude implements in the background. You come back by resuming the old session; a new one would see exactly the same, because the run lives in spore, not in the session. Continue resumes the step\'s own conversation as try 2. The edits on disk stay. Only the turn that was cut off is done again.',
+    steps: [['Start a run', 'START'], ['Your Claude session dies', 'CLOSE'], ['Resume the old session', 'RESUME_SESSION'], ['Continue from the menu', 'CONTINUE'], ['Claude finishes implement', 'CLAUDE_DONE'], ['Tests pass', 'TESTS_PASS']] },
+  { title: 'Crash during the tests', form: 'background',
+    text: 'The machine dies while the tests run. Implement is not redone: its result is stored. The test command runs again from the start as try 2. The red count is unchanged, because a lost try is not a red.',
+    steps: [['Start a run', 'START'], ['Claude finishes implement', 'CLAUDE_DONE'], ['Tests fail', 'TESTS_FAIL'], ['Claude finishes implement', 'CLAUDE_DONE'], ['The whole machine goes down', 'CRASH'], ['Start a new Claude session', 'NEW_SESSION'], ['Continue from the menu', 'CONTINUE'], ['Tests pass', 'TESTS_PASS']] },
+  { title: 'Killed three times in one step', form: 'background',
+    text: 'Every kill costs one of the step\'s 3 tries. After the third, the step is stuck and the menu offers Retry, Mark done or Fail. Retry goes past the limit and still resumes the same conversation.',
+    steps: [['Start a run', 'START'], ['Session dies', 'CLOSE'], ['New session', 'NEW_SESSION'], ['Continue', 'CONTINUE'], ['Session dies', 'CLOSE'], ['New session', 'NEW_SESSION'], ['Continue', 'CONTINUE'], ['Session dies', 'CLOSE'], ['New session', 'NEW_SESSION'], ['Continue', 'CONTINUE'], ['Retry the stuck step', 'RETRY'], ['Claude finishes implement', 'CLAUDE_DONE']] },
+  { title: 'Tests keep failing, kill while you decide', form: 'background',
+    text: 'Four reds in a row use up the loop limit, and the run asks you at tests_stuck. A kill while it waits loses nothing. Keep going starts the red count again, but the visit count keeps rising toward the safety net of 16.',
+    steps: [['Start a run', 'START'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests fail (1)', 'TESTS_FAIL'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests fail (2)', 'TESTS_FAIL'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests fail (3)', 'TESTS_FAIL'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests fail (4th: exhausted)', 'TESTS_FAIL'], ['Your Claude session dies', 'CLOSE'], ['Start a new Claude session', 'NEW_SESSION'], ['Keep going', 'KEEP_GOING'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests fail (count starts again)', 'TESTS_FAIL']] },
+  { title: 'Decision sent, then a crash', form: 'background',
+    text: 'You reject at approve and the machine dies before the run moves. The new session sees the decision already stored. Deciding again sends the same signal ID, so it is a no-op, and no second rejection is buffered to fire at the next approve.',
+    steps: [['Start a run', 'START'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests pass', 'TESTS_PASS'], ['Reject, then the machine dies', 'REJECT_DIE'], ['Start a new Claude session', 'NEW_SESSION'], ['Reject again (no-op)', 'REJECT'], ['Continue from the menu', 'CONTINUE'], ['Claude finishes', 'CLAUDE_DONE'], ['Tests pass', 'TESTS_PASS'], ['Approve', 'APPROVE']] },
+  { title: 'Interactive: your session dies', form: 'interactive',
+    text: 'Implement runs in a herdr pane. Your own session dying does not touch the pane. Claude hands in its answer while nobody follows. The new session shows the step as held. Continue runs the watch, which finds the answer at once. Nothing is done again.',
+    steps: [['Start a run', 'START'], ['Your Claude session dies', 'CLOSE'], ['Claude in the pane hands in its answer', 'PANE_REPORT'], ['Start a new Claude session', 'NEW_SESSION'], ['Continue (follow it)', 'CONTINUE'], ['Tests pass', 'TESTS_PASS']] },
+  { title: 'Interactive: machine crash', form: 'interactive',
+    text: 'The pane dies with the machine. The probe sees that the recorded Claude process is from a previous boot and answers dead at once, so nobody waits for the 4-hour deadline. Try 2 opens a new pane and resumes the same conversation.',
+    steps: [['Start a run', 'START'], ['Claude in the pane asks you something', 'PANE_ASK'], ['You answer in the pane', 'PANE_ANSWER'], ['The whole machine goes down', 'CRASH'], ['Start a new Claude session', 'NEW_SESSION'], ['Continue from the menu', 'CONTINUE'], ['Claude in the pane hands in its answer', 'PANE_REPORT'], ['Tests pass', 'TESTS_PASS']] },
+];
+
+if (typeof module !== 'undefined') module.exports = { initial, act, view, SCENARIOS };
+</script>
+
+<!-- The page: a thin shell over the model. -->
+<script>
+// Copied verbatim from docs/design/c11-reference-loop/coding-loop/ on the docs branch.
+const FILES = {
+ "workflow.dot": "// The reference coding loop (C11, Web-tree/runspore#16).\n// Claude implements, a command runs the tests, red tests go back to implement\n// at most 3 times in a row, then a person decides; a person approves the result.\n// Settings, schemas and loop limits are in settings.json (C02, C12, C13).\ndigraph \"coding-loop\" {\n  dialect = \"runspore/0.2\";\n  start   = \"implement\";\n\n  implement   [label=\"Implement (Claude)\"];\n  test        [label=\"Run the tests\"];\n  approve     [kind=\"await-signal\", label=\"Approve (you)\"];\n  tests_stuck [kind=\"await-signal\", label=\"Tests keep failing (you)\"];\n  done        [kind=\"complete\"];\n  stopped     [kind=\"fail\"];\n\n  implement   -> test;\n  test        -> approve     [on=\"ok\"];\n  test        -> implement   [on=\"red\", label=\"red ×3\"];\n  test        -> tests_stuck [on=\"exhausted\"];\n  tests_stuck -> implement   [on=\"keep-going\"];\n  tests_stuck -> stopped     [on=\"stop\"];\n  approve     -> done        [on=\"approved\"];\n  approve     -> implement   [on=\"rejected\"];\n}\n",
+ "settings.json": "{\n  \"format\": \"runspore.workflow/0.2\",\n  \"limits\": { \"maxVisitsPerNode\": 16, \"maxActivations\": 256 },\n  \"inputSchema\": {\n    \"type\": \"object\",\n    \"required\": [\"task\"],\n    \"additionalProperties\": false,\n    \"properties\": {\n      \"task\": { \"type\": \"string\", \"minLength\": 1, \"description\": \"What should this run build or fix?\" }\n    }\n  },\n  \"actions\": {\n    \"implement\": {\n      \"kind\": \"command\", \"argv\": [\"claude-spore\", \"run\"], \"output\": \"result\",\n      \"effect\": \"idempotent\", \"outcomes\": [\"ok\"],\n      \"retry\": { \"maxAttempts\": 3 }, \"timeoutMs\": \"3600000\"\n    },\n    \"test\": {\n      \"kind\": \"command\", \"argv\": [\"npm\", \"test\"],\n      \"effect\": \"idempotent\", \"outcomes\": [\"ok\", \"red\"], \"exitOutcomes\": { \"1\": \"red\" },\n      \"retry\": { \"maxAttempts\": 3 }, \"timeoutMs\": \"1800000\"\n    }\n  },\n  \"nodes\": {\n    \"implement\": {\n      \"action\": \"implement\",\n      \"instructions\": \"steps/implement.md\",\n      \"outputSchemas\": {\n        \"ok\": {\n          \"type\": \"object\",\n          \"additionalProperties\": false,\n          \"required\": [\"summary\"],\n          \"properties\": {\n            \"summary\": { \"type\": \"string\", \"minLength\": 1, \"description\": \"What you changed and why, in a few sentences.\" }\n          }\n        }\n      },\n      \"input\": {\n        \"format\": { \"$literal\": \"json\" },\n        \"schema\": { \"$outputSchemas\": {} },\n        \"tools\": { \"$literal\": [\"Read\", \"Glob\", \"Grep\", \"Edit\", \"Write\", \"Bash\"] },\n        \"context\": {\n          \"task\": { \"$get\": [\"input\", \"task\"] },\n          \"cameFrom\": { \"$get\": [\"from\"] }\n        }\n      }\n    },\n    \"test\": { \"action\": \"test\", \"loopLimits\": { \"red\": 3 } },\n    \"approve\": {\n      \"signal\": \"approval\",\n      \"instructions\": \"steps/approve.md\",\n      \"outputSchemas\": {\n        \"rejected\": {\n          \"type\": \"object\",\n          \"additionalProperties\": false,\n          \"required\": [\"reason\"],\n          \"properties\": { \"reason\": { \"type\": \"string\", \"minLength\": 1 } }\n        }\n      }\n    },\n    \"tests_stuck\": { \"signal\": \"tests-stuck\", \"instructions\": \"steps/tests_stuck.md\" },\n    \"done\": {\n      \"output\": {\n        \"task\": { \"$get\": [\"input\", \"task\"] },\n        \"summary\": { \"$get\": [\"nodes\", \"implement\", \"output\", \"summary\"] }\n      }\n    },\n    \"stopped\": {\n      \"error\": { \"code\": \"tests.given-up\", \"message\": \"The tests kept failing and the run was stopped.\" }\n    }\n  }\n}\n",
+ "steps/implement.md": "You are the implement step of a coding loop. Make the change the task asks for in this repository, then hand in a short summary. A command runs the tests after you, and a person approves the result.\n\nYour input has two parts:\n\n- `task`: what this run should build or fix.\n- `cameFrom`: why you are here. It is `null` on your first visit. Otherwise it names the step that sent the run back to you and what that step said:\n  - `test` with outcome `red`: the tests failed. `output.stdout` and `output.stderr` hold the end of their output. Fix the code. Change a test only when it is plainly wrong, and say so in your summary.\n  - `approve` with outcome `rejected`: the person rejected your change. `output.reason` says why.\n  - `tests_stuck` with outcome `keep-going`: the tests failed several times in a row and the person asked you to carry on. `output.hint`, when present, is their advice.\n\nThis conversation continues every time the run comes back to this step, so you can see what you tried before. Do not repeat a fix that already failed.\n\nIf you were interrupted and are asked to finish the step, check the working tree first: your earlier edits are still there.\n\nWhen you are done, answer with outcome `ok` and a `summary` of what you changed and why, in a few sentences. There is no other outcome. If you could not make progress, say so in the summary; the tests and the person decide what happens next.\n",
+ "steps/approve.md": "The tests pass. Decide whether the change is done.\n\nLook at the change in the working tree (`git diff`) and at the implement step's summary. In Claude Code, Decide in the workflow menu shows the summary. In a terminal, it is the last `implement` result in `spore events <run>`.\n\nAnswer one of:\n\n- `approved`: the change is done and the run completes.\n  `spore signal <run> approval --outcome approved`\n- `rejected`: the change goes back to Claude. Say why; Claude reads your reason.\n  `spore signal <run> approval --outcome rejected --data '{\"reason\": \"…\"}'`\n\nA rejection without a reason is refused.\n",
+ "steps/tests_stuck.md": "The tests failed four times in a row: Claude went back to fix them three times and the next run was still red. Decide what happens next.\n\nThe last test output is in the `test` result of `spore events <run>`, and Decide in the workflow menu shows it.\n\nAnswer one of:\n\n- `keep-going`: Claude tries again in the same conversation, and the count of red runs starts again from zero. You may add advice for Claude.\n  `spore signal <run> tests-stuck --outcome keep-going --data '{\"hint\": \"…\"}'`\n- `stop`: the run ends as failed. The edits stay in the working tree.\n  `spore signal <run> tests-stuck --outcome stop`\n\nEach round of \"keep going\" can take up to four more visits of `implement`. A run may visit a step at most 16 times. The fourth round ends the run as failed, and nothing can catch that.\n"
+};
+let ftab = 'workflow.dot';
+function esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function marks(file, line, s) {
+  const r = s.run; if (!r) return '';
+  const id = '[A-Za-z0-9_]+';
+  if (file === 'workflow.dot') {
+    const decl = line.match(new RegExp(`^\\s*(${id})\\s+\\[`));
+    if (decl && decl[1] === r.node) return 'here';
+    const e = line.match(new RegExp(`^\\s*(${id})\\s*->\\s*(${id})(.*)$`));
+    if (e && r.edge && e[1] === r.edge.from && e[2] === r.node) {
+      const on = (e[3].match(/on="([^"]+)"/) || [, 'ok'])[1];
+      if (on === r.edge.on) return 'edge';
+    }
+    return '';
+  }
+  if (file === 'settings.json') {
+    const key = line.match(/^ {4}"([A-Za-z0-9_]+)": \{/);
+    return key && key[1] === r.node ? 'here' : '';
+  }
+  return file === `steps/${r.node}.md` ? 'here' : '';
+}
+function renderSource(s) {
+  $('ftabs').innerHTML = Object.keys(FILES).map(n => `<button class="${n === ftab ? 'on' : ''}" data-file="${n}">${n}</button>`).join('');
+  let inBlock = false;
+  $('src').innerHTML = FILES[ftab].replace(/\n$/, '').split('\n').map(l => {
+    let m = marks(ftab, l, s);
+    if (ftab === 'settings.json') {
+      if (m) inBlock = !/\},?$/.test(l); else if (inBlock) { m = 'here'; if (/^ {4}\},?$/.test(l)) inBlock = false; }
+    }
+    return `<span class="${m}">${esc(l) || ' '}</span>`;
+  }).join('');
+}
+let state = initial('background'), prev = state, fresh = 0, tab = 0, done = 0;
+const $ = id => document.getElementById(id);
+
+function apply(name, arg) { prev = state; const out = act(state, name, arg); state = out.state; fresh = out.fresh; render(); }
+
+function row(k, v, changed) { return `<dt>${k}</dt><dd>${changed ? `<span class="changed">${v}</span>` : v}</dd>`; }
+
+function storeFacts(s) {
+  const r = s.run;
+  if (!r) return [['Run', 'none yet']];
+  const st = r.step;
+  const visits = Object.entries(r.visits).map(([n, v]) => `${n} ${v}`).join(', ') || '—';
+  const results = Object.entries(r.results).map(([n, x]) => `${n}: ${x.outcome} (visit ${x.visit})`).join('<br>') || '—';
+  return [
+    ['Status', r.status + (r.error ? ` (${r.error})` : '')],
+    ['At', r.node || '—'],
+    ['Step try', st ? `try ${st.attempt} of ${MAX_TRIES} · ${st.state}` : '—'],
+    ['Visits (max 16)', visits],
+    ['Red in a row', `${r.streak} of 3`],
+    ['Latest results', results],
+    ['Arrived from (from)', r.from ? `${r.from.node} → ${r.from.outcome}` : 'the start (null)'],
+    ['Stored decision', r.pendingSignal ? `${r.pendingSignal.outcome} at ${r.pendingSignal.node}, not yet acted on` : '—'],
+    ['Claude conversation U', s.conversation.exists ? `exists · continued ${s.conversation.resumes}×` : 'not started'],
+    ['herdr pane', s.form === 'interactive' ? s.pane : 'not used (background)'],
+  ];
+}
+
+function render() {
+  const s = state, r = s.run;
+  renderSource(s);
+  if (window.paintGraph) window.paintGraph(s);
+  const now = storeFacts(s), then = storeFacts(prev);
+  $('store').innerHTML = now.map(([k, v], i) => row(k, v, fresh && then[i] && then[i][1] !== v)).join('');
+  $('session').innerHTML = row('Session', s.session === 'alive' ? (s.sessionKind === 'resumed' ? 'open (resumed old conversation)' : 'open') : 'dead') + row('Following', s.session === 'alive' ? s.followerNote : '—') + row('implement form', s.form);
+  const v = view(s);
+  $('menu').innerHTML = s.session !== 'alive'
+    ? '<p class="muted">No session is open. Open a new one to see its start line and menu.</p>'
+    : (v.line ? `<div class="line">${v.line}</div>` : '<div class="line muted">(no line: no unfinished run)</div>') +
+      v.rows.map(x => `<div class="menu-row"><b>${x.title}</b> <span class="muted">needs: ${v.needs}</span><div class="acts">${x.acts.join(' · ')}</div>${v.note ? `<div class="muted" style="font-size:13px">${v.note}</div>` : ''}</div>`).join('') +
+      `<div class="menu-row muted">Workflows: ${v.start} · Write a new workflow · Change a workflow</div>`;
+  $('log').innerHTML = s.log.map((l, i) => `<div class="${i >= s.log.length - fresh ? 'new' : ''}">${l}</div>`).reverse().join('');
+  $('f-bg').disabled = !!r; $('f-int').disabled = !!r;
+  $('f-bg').style.fontWeight = s.form === 'background' ? 600 : 400; $('f-int').style.fontWeight = s.form === 'interactive' ? 600 : 400;
+  renderScenario();
+}
+
+function renderScenario() {
+  $('tabs').innerHTML = SCENARIOS.map((x, i) => `<button class="${i === tab ? 'on' : ''}" data-tab="${i}">${x.title}</button>`).join('');
+  const sc = SCENARIOS[tab];
+  $('scenario').innerHTML = `<p>${sc.text}</p><p class="muted" style="font-size:13px">implement runs as <b>${sc.form}</b>. Pressing the first button resets the prototype.</p><div class="steps">` +
+    sc.steps.map(([label], i) => `<button data-step="${i}" class="${i < done ? 'done' : i === done ? 'next' : ''}" ${i === done ? '' : 'disabled'}>${i + 1}. ${label}</button>`).join('') + '</div>';
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  if (b.dataset.a) { apply(b.dataset.a); return; }
+  if (b.id === 'f-bg') { apply('SET_FORM', 'background'); return; }
+  if (b.id === 'f-int') { apply('SET_FORM', 'interactive'); return; }
+  if (b.dataset.file) { ftab = b.dataset.file; renderSource(state); return; }
+  if (b.dataset.tab) { tab = +b.dataset.tab; done = 0; renderScenario(); return; }
+  if (b.dataset.step) {
+    const i = +b.dataset.step, sc = SCENARIOS[tab];
+    if (i === 0) { state = initial(sc.form); prev = state; }
+    done = i + 1; apply(sc.steps[i][1]);
+  }
+});
+render();
+</script>
+<!-- The diagram: Graphviz itself, compiled to WebAssembly, lays out workflow.dot in the browser. -->
+<script type="module">
+import { Graphviz } from 'https://cdn.jsdelivr.net/npm/@hpcc-js/wasm-graphviz@1.29.2/dist/index.js';
+// Display only: each edge shows its `on` value (default ok, an explicit label wins), end nodes get a double outline.
+function forDisplay(dot) {
+  return dot
+    .replace(/(->\s*\w+\s*)\[([^\]]*)\];/g, (m, head, attrs) => {
+      const on = (attrs.match(/on="([^"]+)"/) || [])[1];
+      const label = (attrs.match(/label="([^"]+)"/) || [])[1];
+      return `${head}[label="${label || on}"];`;
+    })
+    .replace(/(\w+)(\s+)\[kind="(complete|fail)"\]/g, '$1$2[shape=doublecircle, label="$1"]')
+    .replace('digraph "coding-loop" {', 'digraph "coding-loop" {\n  node [shape=box, style=rounded, fontname="Helvetica", fontsize=12];\n  edge [fontname="Helvetica", fontsize=10];\n  nodesep=0.4; ranksep=0.45;');
+}
+try {
+  const graphviz = await Graphviz.load();
+  const box = document.getElementById('diagram');
+  box.innerHTML = graphviz.dot(forDisplay(FILES['workflow.dot']));
+  window.paintGraph = s => {
+    const r = s.run;
+    for (const g of box.querySelectorAll('g.node, g.edge')) {
+      const t = g.querySelector('title').textContent;
+      g.classList.toggle('here', !!r && g.classList.contains('node') && t === r.node);
+      g.classList.toggle('taken', !!(r && r.edge) && g.classList.contains('edge') && t === `${r.edge.from}->${r.node}`);
+    }
+  };
+  window.paintGraph(state);
+} catch (e) {
+  document.getElementById('diagram').innerHTML = `<p class="muted">Could not load Graphviz (offline?): ${e}</p>`;
+}
+</script>
+</body>
+</html>
