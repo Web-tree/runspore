@@ -41,7 +41,8 @@
         "tools": { "$literal": ["Read", "Glob", "Grep", "Edit", "Write", "Bash"] },
         "context": {
           "task": { "$get": ["input", "task"] },
-          "cameFrom": { "$get": ["from"] }
+          "cameFrom": { "$get": ["from"] },
+          "lastTest": { "$get": ["nodes", "test"], "default": null }
         }
       }
     },
@@ -58,7 +59,17 @@
         }
       }
     },
-    "tests_stuck": { "signal": "tests-stuck", "instructions": "steps/tests_stuck.md" },
+    "tests_stuck": {
+      "signal": "tests-stuck",
+      "instructions": "steps/tests_stuck.md",
+      "outputSchemas": {
+        "keep-going": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "hint": { "type": "string", "description": "Advice for Claude, if any." } }
+        }
+      }
+    },
     "done": {
       "output": {
         "task": { "$get": ["input", "task"] },
