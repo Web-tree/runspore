@@ -1,4 +1,4 @@
-export type ViewState = { frame: number; variant: 'text' | 'picture' | 'browser' | 'band'; playing: boolean }
+export type ViewState = { frame: number; variant: 'text' | 'picture' | 'browser' | 'band' | 'fine'; playing: boolean }
 
 declare module 'claude-code' {
   interface PluginState {

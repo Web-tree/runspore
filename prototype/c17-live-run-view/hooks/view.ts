@@ -256,3 +256,70 @@ export function onOfFactory(dot: string) {
     return 'ok'
   }
 }
+
+// ---------- finer text drawing: Braille dots for the lines, real text for boxes and labels ----------
+// Each cell holds a 2×4 grid of dots, so Graphviz's curves come out smooth at character size.
+const DOT_BIT = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]]
+
+export function drawBraille(plain: string, cols: number, here: string | null, taken: { from: string; to: string; on: string } | null, onOf: (from: string, to: string, label?: string) => string): Cell[][] {
+  const { W, H, nodes, edges } = parsePlain(plain)
+  let sx = (cols - 2) / W
+  for (const a of nodes) for (const b of nodes) {
+    if (a === b || Math.abs(a.y - b.y) > 0.05 || b.x <= a.x) continue
+    sx = Math.max(sx, ((a.label.length + 4) / 2 + (b.label.length + 4) / 2 + 2) / (b.x - a.x))
+  }
+  cols = Math.ceil(W * sx) + 4
+  const sy = sx / 2.5
+  const rows = Math.ceil(H * sy) + 3
+  const bits = Array.from({ length: rows }, () => new Array(cols).fill(0))
+  const hot = Array.from({ length: rows }, () => new Array(cols).fill(false))
+  const grid: Cell[][] = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({ ch: ' ', st: 'blank' as Style })))
+  const px = (x: number) => (x * sx + 2) * 2
+  const py = (y: number) => ((H - y) * sy + 1.5) * 4
+  const isTaken = (e: PEdge) => !!taken && taken.from === e.from && taken.to === e.to && taken.on === onOf(e.from, e.to, e.label)
+  const ends: { r: number; c: number; ch: string; hot: boolean }[] = []
+  for (const e of edges) {
+    const t = isTaken(e)
+    let lastP: [number, number] | null = null, prevP: [number, number] | null = null
+    for (let s = 0; s + 3 < e.pts.length; s += 3) {
+      const seg = e.pts.slice(s, s + 4)
+      for (let i = 0; i <= 200; i++) {
+        const [x, y] = bez(seg, i / 200)
+        const X = Math.floor(px(x)), Y = Math.floor(py(y))
+        const r = Math.floor(Y / 4), c = Math.floor(X / 2)
+        if (r < 0 || r >= rows || c < 0 || c >= cols) continue
+        bits[r][c] |= DOT_BIT[X % 2][Y % 4]
+        if (t) hot[r][c] = true
+        prevP = lastP; lastP = [X, Y]
+      }
+    }
+    if (lastP && prevP) {
+      // Graphviz ends the spline where the arrowhead starts; point it the way the line was going.
+      const p0 = e.pts[Math.max(0, e.pts.length - 4)], p1 = e.pts[e.pts.length - 1]
+      const dx = px(p1[0]) - px(p0[0]), dy = py(p1[1]) - py(p0[1])
+      const ch = Math.abs(dy) >= Math.abs(dx) / 2 ? (dy > 0 ? '▼' : '▲') : dx > 0 ? '▶' : '◀'
+      ends.push({ r: Math.floor(lastP[1] / 4), c: Math.floor(lastP[0] / 2), ch, hot: t })
+    }
+  }
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (bits[r][c]) grid[r][c] = { ch: String.fromCharCode(0x2800 + bits[r][c]), st: hot[r][c] ? 'taken' : 'edge' }
+  }
+  for (const a of ends) if (grid[a.r]?.[a.c]) grid[a.r][a.c] = { ch: a.ch, st: a.hot ? 'taken' : 'edge' }
+  for (const e of edges) {
+    if (!e.label || e.lx === undefined || e.ly === undefined) continue
+    const r = Math.floor(py(e.ly) / 4), c0 = Math.floor(px(e.lx) / 2) - Math.floor(e.label.length / 2)
+    for (let i = 0; i < e.label.length; i++) if (grid[r]?.[c0 + i]) grid[r][c0 + i] = { ch: e.label[i], st: isTaken(e) ? 'takenLabel' : 'label' }
+  }
+  for (const n of nodes) {
+    const r = Math.floor(py(n.y) / 4), w = n.label.length + 4
+    const c0 = Math.max(0, Math.min(cols - w, Math.round(px(n.x) / 2 - w / 2)))
+    const st: Style = n.id === here ? 'here' : 'node'
+    const lines = ['╭' + '─'.repeat(w - 2) + '╮', '│ ' + n.label + ' │', '╰' + '─'.repeat(w - 2) + '╯']
+    lines.forEach((line, k) => {
+      for (let i = 0; i < w; i++) if (grid[r - 1 + k]?.[c0 + i]) grid[r - 1 + k][c0 + i] = { ch: line[i], st: k === 1 || n.id === here ? st : 'node' }
+    })
+  }
+  while (grid.length && grid[0].every(x => x.ch === ' ')) grid.shift()
+  while (grid.length && grid[grid.length - 1].every(x => x.ch === ' ')) grid.pop()
+  return grid
+}

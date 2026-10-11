@@ -16,11 +16,12 @@ Run it: `claude --plugin-dir prototype/c17-live-run-view`, then `/c17`.
 | `/c17` | opens the view |
 | `/c17 1` | text drawing in the pane: Graphviz layout drawn in characters, files beside or below |
 | `/c17 2` | Graphviz picture in the pane (kitty/Ghostty only; elsewhere its fallback line) |
-| `/c17 3` | a local browser page (`/private/tmp/c17-live-run-view/view.html`, reloads every second); the pane keeps one line |
+| `/c17 3` | a local browser page (`http://127.0.0.1:47917/view.html`, served by `python3 -m http.server`; it polls `state.json` and updates in place); the pane keeps one line |
 | `/c17 4` | one line above the prompt with a `view` button; no pane |
+| `/c17 5` | finer text drawing: Graphviz's curves in Braille dots, boxes and labels as real text |
 | `/c17 next`, `prev`, `play`, `pause` | step through the moments (it plays every 3.5 s by default) |
 
 Inside the pane (after ctrl+x tab or a click): `h`/`l` step, `p` play/pause, `1`–`4` switch.
-`bun hooks/try-text.ts [cols] [moment]` prints the text drawing in any terminal.
+`bun hooks/try-text.ts [cols] [moment]` prints the text drawing (`B=1` for the Braille one) in any terminal.
 
 Measured on Claude Code 2.1.296 in herdr inside kitty: variant 2 shows its fallback line, not the picture.

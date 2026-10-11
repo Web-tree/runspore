@@ -5,15 +5,17 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { ViewState } from '../types'
-import { FRAMES, forDisplay, drawText, runs, onOfFactory, dotExcerpt, settingsExcerpt, instructionsFile, type Style, type Excerpt } from './view.ts'
+import { FRAMES, forDisplay, drawText, drawBraille, runs, onOfFactory, dotExcerpt, settingsExcerpt, instructionsFile, type Style, type Excerpt } from './view.ts'
 
 const PANE = 'c17-run'
 const OUT = '/private/tmp/c17-live-run-view'
+const PORT = 47917
 const VARIANTS = [
   { key: 'text', name: 'Text drawing in the pane' },
   { key: 'picture', name: 'Graphviz picture in the pane' },
   { key: 'browser', name: 'Local browser page, pane keeps a summary' },
   { key: 'band', name: 'One line above the prompt, view on demand' },
+  { key: 'fine', name: 'Finer text drawing: Braille-dot lines, real text boxes' },
 ] as const
 
 const view = atom({ plugin: 'c17-live-run-view', key: 'view' } as const, { frame: 0, variant: 'text', playing: true } as ViewState)
@@ -86,23 +88,46 @@ async function writePage($: any, i: number) {
   const svg = await $.fs.read(`${OUT}/frame-${i}.svg`)
   const ex = (e: Excerpt) => `<h3>${e.file}</h3><pre>` + e.lines.map(l => `<span class="${l.mark ?? ''}">${l.n ? String(l.n).padStart(3) : '   '}  ${esc(l.text)}</span>`).join('\n') + '</pre>'
   const instr = instructionsFile(settings, s.nodeId)
-  const html = `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="1"><title>${esc(s.nodeId)} · coding-loop</title>
+  // The page never reloads: it polls state.json and swaps the body only when the moment changes.
+  const body = `<p class="facts">${esc(factsLine(i))}</p><p class="cap">${esc(FRAMES[i].caption)}</p>
+<div class="grid"><div>${svg.replace(/^[\s\S]*?<svg/, '<svg')}</div><div>${ex(dotExcerpt(dot, s.nodeId, taken))}${ex(settingsExcerpt(settings, s.nodeId))}${instr && instructions.has(s.nodeId) ? `<h3>${instr}</h3><pre>${esc(instructions.get(s.nodeId)!)}</pre>` : ''}</div></div>
+<pre>${esc(statusJson(i))}</pre>`
+  await $.fs.write(`${OUT}/state.json`, JSON.stringify({ rev: i, title: `${s.nodeId} · coding-loop`, body }))
+  await $.fs.write(`${OUT}/view.html`, PAGE)
+}
+
+const PAGE = `<!doctype html><meta charset="utf-8"><title>coding-loop</title>
 <style>body{font:14px system-ui;margin:16px;background:#fafafa}pre{font:12px ui-monospace,Menlo;background:#fff;border:1px solid #ddd;padding:8px;overflow:auto}
 .here{background:#ffd43b;font-weight:bold}.taken{color:#e8590c;font-weight:bold}.grid{display:grid;grid-template-columns:minmax(300px,1fr) 1.2fr;gap:16px}
 .facts{font-weight:600}.cap{color:#555;font-style:italic}.proto{background:#222;color:#fff;padding:4px 8px;border-radius:4px;font-size:12px}</style>
-<p><span class="proto">C17 PROTOTYPE · variant 3 · refreshes every second</span></p>
-<p class="facts">${esc(factsLine(i))}</p><p class="cap">${esc(FRAMES[i].caption)}</p>
-<div class="grid"><div>${svg.replace(/^[\s\S]*?<svg/, '<svg')}</div><div>${ex(dotExcerpt(dot, s.nodeId, taken))}${ex(settingsExcerpt(settings, s.nodeId))}${instr && instructions.has(s.nodeId) ? `<h3>${instr}</h3><pre>${esc(instructions.get(s.nodeId)!)}</pre>` : ''}</div></div>
-<pre>${esc(statusJson(i))}</pre>`
-  await $.fs.write(`${OUT}/view.html`, html)
+<p><span class="proto">C17 PROTOTYPE · variant 3 · live, no reload</span> <span id="conn" style="color:#999;font-size:12px"></span></p>
+<div id="view"></div>
+<script>
+let rev = null
+async function poll() {
+  try {
+    const r = await fetch('state.json', { cache: 'no-store' })
+    const s = await r.json()
+    if (s.rev !== rev) { rev = s.rev; document.getElementById('view').innerHTML = s.body; document.title = s.title }
+    document.getElementById('conn').textContent = ''
+  } catch { document.getElementById('conn').textContent = '(waiting for the session)' }
+  setTimeout(poll, 700)
 }
+poll()
+</script>`
 
 async function go($: any, fn: (v: ViewState) => ViewState) {
   await update($, view, fn)
   const v = await read($, view)
   if (v.variant === 'browser') {
     await writePage($, v.frame)
-    if (!browserOpened) { browserOpened = true; await $.process.run(['open', `${OUT}/view.html`]) }
+    if (!browserOpened) {
+      browserOpened = true
+      // A local server for the session's life, so the page can poll without reloading (file:// can't fetch).
+      void (async () => { for await (const _ of $.process.spawn({ argv: ['python3', '-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '-d', OUT] })) {} })()
+      await $.clock.sleep(400)
+      await $.process.run(['open', `http://127.0.0.1:${PORT}/view.html`])
+    }
   }
   if (v.variant === 'band') await $.ui.close({ id: PANE })
   else await $.ui.open({ id: PANE, title: 'Run · coding-loop', rows: 40, columns: 96 })
@@ -110,7 +135,7 @@ async function go($: any, fn: (v: ViewState) => ViewState) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'c17', description: 'C17 prototype: live view of a run', argumentHint: '[1-4 | next | prev | play | pause]' })
+    await $.command.register({ name: 'c17', description: 'C17 prototype: live view of a run', argumentHint: '[1-5 | next | prev | play | pause]' })
     $.clock.after(0, () => { void prepare($) })
     $.clock.every(3500, async () => {
       const v = await read($, view)
@@ -123,7 +148,7 @@ export const register: Register = on => {
   on('command.run', { command: 'c17' }, async ($, e) => {
     await prepare($)
     const a = e.args.trim()
-    if (/^[1-4]$/.test(a)) await go($, v => ({ ...v, variant: VARIANTS[+a - 1].key }))
+    if (/^[1-5]$/.test(a)) await go($, v => ({ ...v, variant: VARIANTS[+a - 1].key }))
     else if (a === 'next') await go($, v => ({ ...v, playing: false, frame: Math.min(FRAMES.length - 1, v.frame + 1) }))
     else if (a === 'prev') await go($, v => ({ ...v, playing: false, frame: Math.max(0, v.frame - 1) }))
     else if (a === 'play' || a === 'pause') await go($, v => ({ ...v, playing: a === 'play' }))
@@ -200,9 +225,9 @@ export const register: Register = on => {
     const state = <Text dimColor wrap="wrap">status --json: {statusJson(i)}</Text>
 
     let graph
-    if (v.variant === 'text') {
+    if (v.variant === 'text' || v.variant === 'fine') {
       const gcols = Math.max(40, Math.min(64, wide ? Math.floor(cols / 2) - 4 : cols - 4))
-      const grid = drawText(plain, gcols, s.nodeId, taken, onOfFactory(dot))
+      const grid = (v.variant === 'fine' ? drawBraille : drawText)(plain, gcols, s.nodeId, taken, onOfFactory(dot))
       while (grid.length && grid[0].every(c => c.ch === ' ')) grid.shift()
       while (grid.length && grid[grid.length - 1].every(c => c.ch === ' ')) grid.pop()
       graph = (
@@ -219,8 +244,8 @@ export const register: Register = on => {
     } else {
       graph = (
         <Box flexDirection="column" marginTop={1}>
-          <Text>The drawing and the files are in your browser: <Text color="cyan" underline>file://{OUT}/view.html</Text></Text>
-          <Text dimColor>The page reloads every second. This pane keeps only the line above.</Text>
+          <Text>The drawing and the files are in your browser: <Text color="cyan" underline>http://127.0.0.1:{PORT}/view.html</Text></Text>
+          <Text dimColor>The page updates in place when the run moves. This pane keeps only the line above.</Text>
         </Box>
       )
     }
