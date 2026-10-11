@@ -46,13 +46,13 @@ Any mix of these on one run is safe: claims, leases and fences (kernel 0.1, C03)
 
 ### L2. Nothing has to run between `spore` calls; a daemon is optional and later (settled block, Max)
 
-**Decision.** Every `spore` command picks up where the last one stopped: it sweeps due leases, probes held steps on demand (C03) and coordinates pending events. So a run needs no process alive while it waits. A spore daemon that keeps all of a repository's runs moving is a possible later addition. Nothing in this map depends on it, so it is out of this map (map Out of scope).
+**Decision.** Every driving command (`continue`, `run`, `worker`) picks up where the last one stopped: it sweeps due leases, probes held steps (C03) and coordinates pending events. Read-only commands (`list`, `events`, `step show`) never change a run (C08); `status` and `step claim` keep only C03's on-demand probe. So a run needs no process alive while it waits. A spore daemon that keeps all of a repository's runs moving is a possible later addition. Nothing in this map depends on it, so it is out of this map (map Out of scope).
 
 **Rejected.** *A detached `spore worker --until-idle` that the plugin starts on demand, one per database, stopping itself when every run waits on a person.* This was first proposed as standard practice, following how Bazel and Gradle run their background servers. Max: "we don't HAVE TO run it constantly … it should not be required." Plugin-side polling of `spore list` every 15 s went with it: the session that follows a run learns that the run stopped when `continue --wait` returns.
 
 ### L3. The menu's runs are followed by your Claude session (Q4 → A, Max)
 
-**Decision.** When the person starts or continues a run from the plugin, their current Claude session follows it. Claude runs `spore continue <runId> --wait` as a background shell command and is woken when it returns. Claude then prints one line: the run needs you (and what for), it failed, or it is done. For a decision, Claude offers it right there. Closing Claude stops the background command and pauses the run. The run resumes when someone drives it again, for example with Continue in the menu or `spore continue` in a terminal.
+**Decision.** When the person starts or continues a run from the plugin, their current Claude session follows it. Claude runs `spore continue <runId> --wait` as a background shell command and ends its turn; Claude Code starts a new turn when the command exits (§Verified facts). Claude then prints one line: the run needs you (and what for), it failed, or it is done. For a decision, Claude offers it right there. Closing Claude stops the background command and pauses the run. The run resumes when someone drives it again, for example with Continue in the menu or `spore continue` in a terminal.
 
 **Rejected.**
 - *B, a detached `continue --wait` per run that goes on after Claude closes.* It leaves a process nobody watches, spending money while the person is away.
@@ -90,7 +90,9 @@ This replaces the bare `/spore` command. That name was a placeholder carried ove
 
 `spore continue [<runId>] --wait` behaves as C08's `continue`, except at held async steps:
 
-1. **A held async step whose action declares a watch.** It runs the watch (C03 §Probe and watch contracts) instead of exiting 6. On a result, it finishes the attempt and goes on.
+1. **A held async step whose action declares a watch.** It runs the watch (C03 §Probe and watch contracts) instead of exiting 6, and while the watch runs it keeps doing what step 2 does: it reloads the run, sweeps and probes. When the watch prints a result, it finishes the attempt and goes on. When the attempt stops being held first (a `step complete` won, the deadline passed, the run was cancelled), it stops the watch with its process group and goes on from the run's new state.
+   - **The holder waits for a person (host 0.2, watch contract).** Besides its final result, a watch may print one line `{"needs": "person", "message": "<text>"}` while the job is still alive, for example C07 R15's quiet session with no result file. `continue --wait` then stops the watch, leaves the attempt held, and returns exit 6 with `needs: "held"`, `waiting: "person"` and the message. The next `continue --wait` starts the watch again.
+   - **A pinned capability is missing (C03 L4).** When the host can no longer run the attempt's pinned watch or probe, it leaves the attempt untouched and returns exit 6 with the step state `capability-missing` and what to restore, as `status --json` reports it.
 2. **A held async step with no watch.** It waits. While it waits it does three things:
    - It reloads the run every `poll_ms` (default 200 ms), so a `spore step complete` from the actor is seen.
    - It sweeps and probes the attempt at most every 30 s, as the worker's sweep does (C03).
@@ -104,7 +106,7 @@ This replaces the bare `/spore` command. That name was a placeholder carried ove
 | 3 | Waiting for a signal |
 | 4 | Needs intervention: a stuck step |
 | 5 | Quarantined |
-| 6 | Only for an external step that is ready and unclaimed, since a person must claim it |
+| 6 | An external step is ready and unclaimed, a watch reported that its holder waits for a person, or a pinned capability is missing; the JSON says which |
 | 7 | Cancelled |
 
 4. **SIGINT or SIGTERM** stops it as the worker stops (cli.md §Signals): it stops claiming, gives in-flight work a short grace period, and exits. A running watch is stopped with its process group, and the held attempt stays held for the next driver.
@@ -119,7 +121,7 @@ This replaces the bare `/spore` command. That name was a placeholder carried ove
 2. When it returns, Claude reads the exit code and the JSON:
    - 3, a signal: Claude shows the step (`spore step show`) and offers the outcomes.
    - 4, stuck: Claude shows the kept error and the three `resolve` forms.
-   - 6, an external step: Claude names the actor label and `spore step claim`.
+   - 6, an external step: Claude names the actor label and `spore step claim <runId> --actor <label>` (without `--actor`, a claim takes only unlabelled steps, C03 R1). A holder waiting for a person: Claude says so with the watch's message, for example "implement waits for you in its pane", and continues when the person says. A missing capability: Claude shows what to restore.
    - 0, 1 or 7: one line with the end state.
    - 5, quarantined: the reason and `spore release`.
 3. After the person acts, for example a decision sent with `spore signal`, the skill runs `continue --wait` again.
@@ -144,6 +146,7 @@ Established by reading the repo, the C05 findings and the Claude Code 2.1.296 ty
   - `$.ui.open` opens a pane from a command, and a `Select` in it returns the pick.
   - `$.tool.register` tools reach a `tool.call` hook.
   - A mod-started process is stopped on a clean session exit and survives a SIGKILL.
+- **Background shell commands (Claude Code's Bash tool).** A command run with `run_in_background` keeps running across turns, and Claude Code starts a new turn when it exits, carrying its exit code and output (the tool's own contract). So the following session needs no mod help to wake up.
 - **Type file (Claude Code 2.1.296).** `skill.prompt` fires when a skill's prompt is expanded, whether it was typed as `/name`, called through the Skill tool or preloaded. A hook may return `{text}` to replace what the model reads.
 
 ## Risks
@@ -170,5 +173,5 @@ None.
   - The "Continue" row runs the `continue` sub-skill, which follows the run in the background (L3).
   - Starting a workflow ends by following the new run.
 - **C10** (`docs/design/c10-plugin-home.md`). R7's `/spore` row: the menu is the skill `menu` (`/ml-workflow:menu`), not a mod command. Its risk "the menu's typed name is not known yet" is closed.
-- **C03 and C07.** "A watch runs only while a worker runs" now also covers `continue --wait`, which runs watches for its one run.
-- **Map.** Out of scope gains the daemon and the orchestrator. The spec split gains `cli.md` 0.2 `continue --wait`. The C05 line's "bare `/spore`" is superseded.
+- **C03 and C07.** "A watch runs only while a worker runs" now also covers `continue --wait`, which runs watches for its one run. The watch contract gains the optional non-final `{"needs": "person"}` line, and C07's `claude-spore watch` prints it when the session is quiet with no result file.
+- **Map.** Out of scope gains the daemon and the orchestrator. The spec split gains `cli.md` 0.2 `continue --wait` and `host.md` 0.2 the watch's `needs` line. The C05 line's "bare `/spore`" is superseded.
