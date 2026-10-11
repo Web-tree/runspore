@@ -26,6 +26,10 @@ _Avoid_: idempotency token, request ID
 The process that moves runs forward: it asks the kernel for each next step, records the decision, and carries out the actions it can perform itself.
 _Avoid_: engine (the library inside it), runner (that performs one kind of action), daemon
 
+**Driver**:
+Whoever keeps a run moving between steps by running `spore`: a session following the run, a separate process, or an outside agent that visits it. Several may act on one run at once; nothing has to run between their calls.
+_Avoid_: owner, controller, scheduler
+
 **Loop-back**:
 The run going back to an earlier step along an arrow, such as failing tests sending it back to implement. Each loop-back is a new visit of that step.
 _Avoid_: retry (that repeats one visit after it was lost)
@@ -123,7 +127,7 @@ The plugin's own program, `claude-spore`, which runs Claude steps, checks workfl
 _Avoid_: wrapper, shim
 
 **Entry menu**:
-What a person sees after typing the integration's command in their own Claude session: the unfinished runs and what each needs, the workflows to start, and writing a new one.
+What a person sees after typing `/ml-workflow:menu` in their own Claude session: the unfinished runs and what each needs, the workflows to start, and writing a new one.
 _Avoid_: dashboard, launcher
 
 **Authoring interview**:
