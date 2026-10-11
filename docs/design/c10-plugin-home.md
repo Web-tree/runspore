@@ -54,7 +54,7 @@ Max's answer: "plugin say runspore is missed and suggest to install."
 
 ### L3. The helper is a Bun script in the plugin (Q4 → A)
 
-**Decision.** `claude-spore` is a `#!/usr/bin/env bun` script in the plugin's top-level `bin/`, with its code in the plugin's `src/`. This is the same pattern as `ml-agent-config`'s `bin/agent-config`. Bun is a second prerequisite, checked like `spore`: when it is missing or too old, the plugin shows a message with the install line and runs it only on a yes.
+**Decision.** `claude-spore` is a `#!/usr/bin/env bun` script in the plugin's top-level `bin/`, with its code in the plugin's `src/`. This is the same pattern as `ml-agent-config`'s `bin/agent-config`. Bun is a second prerequisite, checked like `spore`. The plugin states its oldest supported Bun, `1.2.0` at the start, and checks `bun --version` at the same two points as the spore check (R3). When Bun is missing or older, the plugin shows a message with the install line and runs it only on a yes. The helper also checks `Bun.version` when it starts. If Bun is too old, it exits with exit code 2 and a message that names the version it needs, before it does any other work.
 
 **Rejected.**
 - *B — a Rust program built in the runspore repository and released with `spore`.* It would need no Bun, but it would split the plugin across two repositories again, which undoes L1.
@@ -65,22 +65,40 @@ Max's answer: "plugin say runspore is missed and suggest to install."
 
 - **R1. Which `spore` the plugin uses (Q3 → B, Max).** The plugin uses the person's own `spore`, the first one on the path, whenever it is at least the oldest supported spore. There is no second copy. *My recommendation was A, the plugin's own copy, which L2 has since made moot.*
 - **R2. Install channels (settled as standard practice).**
-  - Each runspore release on GitHub publishes `spore` for macOS (arm64, x86_64) and Linux (x86_64, arm64) as archives, with a `SHA256SUMS` file.
-  - A one-line installer (`install.sh`) downloads the right archive, checks it against `SHA256SUMS`, and puts `spore` in `~/.local/bin`.
+  - Each runspore release on GitHub publishes `spore` for macOS (arm64, x86_64) and Linux (x86_64, arm64) as archives. Alongside them it publishes `SHA256SUMS`, `SHA256SUMS.sig` and GitHub build-provenance attestations.
+    - `SHA256SUMS.sig` is an Ed25519 signature made with runspore's release key. Its public key is printed in the README and pinned in the installer and in the plugin.
+    - The attestations come from `actions/attest-build-provenance`.
+    - Together these meet the release-signature requirement in `docs/03-components.md` and `docs/11-security.md`.
+  - Nothing runs a downloaded binary before both checks pass: the signature on `SHA256SUMS` is valid for the pinned key, and the archive matches `SHA256SUMS`. Matching only the checksum is not enough, because one compromised release could replace both files.
+  - A one-line installer (`install.sh`) does the download and both checks. When `gh` is present it also runs `gh attestation verify --repo Web-tree/runspore`. It puts `spore` in `~/.local/bin`.
+  - The plugin does not pipe `install.sh` into a shell. Its Bun helper does the same download and checks itself, using `node:crypto` Ed25519 verification against the key pinned in the plugin.
   - `cargo install --git https://github.com/Web-tree/runspore runspore-cli` also works.
   - A Homebrew tap is deferred.
-  - The plugin's message shows the `install.sh` line.
+  - The plugin's message shows the install line.
+  - **Updating the copy the path selects.** An update targets the `spore` that `command -v spore` resolves, not a fixed folder.
+    - When that file is writable, the update replaces it in place.
+    - When it is not (for example a system package or a Homebrew copy), the plugin names that path, says it comes before `~/.local/bin`, and gives the command for its package manager.
+    - After any update the plugin runs the version check again, and reports success only when the check passes.
 - **R3. The version check (settled as standard practice).**
   - The plugin states its oldest supported spore, for example `0.2.0`.
   - At session start, and before every `spore start` the menu runs, the plugin runs `spore capabilities --json` (C03). That output gains `version` (the semver of the binary) and `contracts` (the spec versions it speaks, e.g. `{"cli": "0.2", "host": "0.2", "kernel": "0.2"}`).
-  - Older than the oldest supported spore, or a major contract version the plugin doesn't know, means the L2 message with the update line. Nothing starts.
-  - Newer minor versions are accepted.
+  - The plugin states a supported range for every contract it uses (`cli`, `host`, `kernel`, `store`). Each range follows semver: below 1.0 a minor bump can break, so a `0.x` range is one minor version (`cli` `0.2` accepts `0.2` only), and from 1.0 a range is `>=1.m, <2`.
+  - Each of these means the L2 message with the update line, and nothing starts:
+    - a missing `version` or `contracts` field;
+    - a contract the plugin uses that is missing from `contracts`;
+    - any contract outside its range;
+    - a `version` older than the oldest supported spore.
+  - Newer patch versions are always accepted. Newer minor versions are accepted only once a contract has reached 1.0.
   - The session-start check is silent when everything fits.
   - Two different `spore` versions on one database are spore's own concern. A `spore` refuses a database whose store schema is newer than it understands (`store.md` 0.2, R6).
 - **R4. Where the Claude part of the spec lives (Q5 → A).** The profile spec lives next to the plugin, as `plugins/ml-workflow/docs/spec.md` in `max-skills` (name routine). Runspore's `spec/` holds only generic contracts and names no Claude. This replaces the map's planned `spec/claude-code.md` in this repository.
 - **R5. The helper outside a Claude session (settled).**
   - Claude Code puts a plugin's `bin/` on the Bash tool's path only. A worker started from the menu, through the Bash tool, inherits that path and finds `claude-spore`.
-  - For a worker started in a plain terminal, the plugin offers once to install a launcher at `~/.local/bin/claude-spore`. The launcher finds the newest installed `ml-workflow` under `~/.claude/plugins/cache/max-skills/ml-workflow/` and runs its `bin/claude-spore`.
+  - For a worker started in a plain terminal, the plugin offers once to install a launcher at `~/.local/bin/claude-spore`. The launcher runs the active installation, never simply the newest folder in the cache:
+    - It reads the `ml-workflow@max-skills` entry in `~/.claude/plugins/installed_plugins.json`. A project-scope entry whose project contains the current folder wins over the user-scope one.
+    - It runs `bin/claude-spore` under that entry's `installPath`.
+    - With no entry it exits 2 and says the plugin is not installed.
+  - A session that loaded an older version before an update keeps its mod but gets the newly installed helper. The helper prints its version with `--version`, and the mod compares it with its own at session start and before every start. On a mismatch it asks the person to run `/reload-plugins`, and starts nothing until they do.
   - A mod calls the helper by absolute path (`$.plugin.root + "/bin/claude-spore"`), because `$.process.run` does not see the plugin's `bin/`.
 - **R6. Store schema guard (settled, generic).** `store.md` 0.2 records the store schema version in the database. A `spore` that finds a newer one refuses with exit 10 (store error) and says which version wrote it. This is plain Runspore and needs no Claude.
 - **R7. Names (settled, replacing every "provisional, C10" mark).**
@@ -88,7 +106,7 @@ Max's answer: "plugin say runspore is missed and suggest to install."
   | Was provisional | Settled |
   |---|---|
   | plugin name | `ml-workflow` (Max's call after the grill, with the collection's `ml-` prefix; it takes over from the skills-repo `workflow` plugin) |
-  | `/spore` (menu) | `/spore`, registered by the mod with `$.command.register`; `/spore new`, `/spore change <name>` hand off to the interview |
+  | `/spore` (menu) | the mod registers a command named `spore` with `$.command.register`. Its name is whatever Claude Code shows for that registration: `/spore` if unprefixed, `/ml-workflow:spore` if Claude Code adds the plugin prefix. Docs and messages print the name the mod reads back from the host, never a literal. `new` and `change <name>` are arguments to that command. The plugin's first build records which form 2.1.290 shows |
   | `spore-author` (C09) | skill `author`, shown as `/ml-workflow:author`; its guide ships as `skills/author/references/authoring.md` |
   | `claude-spore run\|start\|check\|probe\|watch\|stop\|report` | kept as is |
   | `spore init`, `spore step show`, exit code 7 (cancelled) | kept as is (generic, `cli.md` 0.2) |
@@ -104,6 +122,10 @@ Max's answer: "plugin say runspore is missed and suggest to install."
 
   A workflow may list any other tools by hand. `claude-spore check` accepts any Claude Code tool name.
 - **R10. Surface (settled).** Terminal Claude Code only. claude.ai and Cowork refuse a plugin with a top-level `bin/`, which matches the map's out-of-scope line for the Desktop app.
+- **R12. Minimum Claude Code (settled).** The oldest supported version is **2.1.290**: mods need 2.1.287, and 2.1.290 fixed lost plugin `bin/` path entries. No manifest field can enforce this, so:
+  - The `max-skills` README entry and the marketplace description print it next to the install command.
+  - Every plugin skill (`author` and the menu's) starts by running `claude --version`. On an older host it prints the minimum and the update command (`claude update`), and stops. A skill loads even where mods do not, so this explains a missing menu.
+  - The mod's `session.start` hook checks the same version where the host exposes it.
 - **R11. Permissions (settled).** A plugin cannot ship standing allow rules: its `settings.json` drops `permissions`.
   - The `author` skill and the menu's skill pre-approve `Bash(spore *)` and `Bash(claude-spore *)` with `allowed-tools` for the turn they run in.
   - The plugin's README shows the two rules to add to a project's `.claude/settings.json` for standing approval.
@@ -119,6 +141,8 @@ Checked on 2026-10-11 against Claude Code 2.1.296, code.claude.com and the Claud
 - **Permissions from a plugin.** A plugin's `settings.json` applies only `agent` and `subagentStatusLine`. Skill `allowed-tools` pre-approves only for the invoking turn.
 - **claude.ai and Cowork** refuse plugins with a top-level `bin/`.
 - **`max-skills`.** All six plugins use relative `./plugins/<name>` sources, and `ml-agent-config` ships `bin/agent-config` as a Bun script.
+- **Installed plugins.** `~/.claude/plugins/installed_plugins.json` (`version: 2`) lists each `<plugin>@<marketplace>` with `scope`, `installPath`, `version` and `gitCommitSha`. This was seen locally, and is not in the docs.
+- **Bun.** Bun 1.4.0 is on Max's machine. `node:crypto` Ed25519 verification is available in Bun.
 - **Mod commands.** Mods register slash commands with `$.command.register({ name, … })`. Built-in names are refused (docs/research/claude-code-mods.md). The docs don't say whether a mod command's name gets the plugin prefix.
 
 ## Changes outside C10
@@ -135,8 +159,9 @@ Checked on 2026-10-11 against Claude Code 2.1.296, code.claude.com and the Claud
 
 - **Two installs before the first run.** A new person needs `spore`, Bun and the plugin. The plugin's offered install lines keep this to two yes answers, but a person without network access or `~/.local/bin` on their path gets stuck at the first one.
 - **Drift between two repositories.** A runspore change that breaks the plugin shows up only when the plugin's tests run against the new `spore`. The plugin's CI should test against the newest runspore release and against its oldest supported spore.
-- **`/spore` may be prefixed.** If a mod command's name gets the plugin prefix, the menu becomes `/ml-workflow:spore`. The first build must check this, and fall back to a short skill name if it is.
-- **The launcher reads Claude Code's cache layout** (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`), which is not a documented contract.
+- **The menu's typed name is not known yet.** R7 makes either form correct, but C08's examples say `/spore`, and they will read wrong if Claude Code adds the prefix.
+- **The launcher reads `installed_plugins.json`**, which is not a documented contract. If its shape changes, the launcher exits 2 with a message, and workers started outside Claude cannot run Claude steps until the plugin is updated.
+- **The release signing key** becomes a secret runspore must guard and rotate. Rotating it needs a plugin release that pins the new key.
 
 ## Deferred
 
