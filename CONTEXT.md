@@ -30,6 +30,10 @@ _Avoid_: engine (the library inside it), runner (that performs one kind of actio
 Whoever keeps a run moving between steps by running `spore`: a session following the run, a separate process, or an outside agent that visits it. Several may act on one run at once; nothing has to run between their calls.
 _Avoid_: owner, controller, scheduler
 
+**Leftover command**:
+A command still running after the worker that started it has died, so nobody will record its result. Runspore stops it at once, and before the step is tried again.
+_Avoid_: orphan, zombie, stray process
+
 **Loop-back**:
 The run going back to an earlier step along an arrow, such as failing tests sending it back to implement. Each loop-back is a new visit of that step.
 _Avoid_: retry (that repeats one visit after it was lost)
