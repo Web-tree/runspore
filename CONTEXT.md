@@ -114,6 +114,14 @@ _Avoid_: frontmatter, flags, options
 The Claude Code extension through which a person starts, watches and resumes runs from inside a session.
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
 
+**Plugin**:
+The Claude Code package, `ml-workflow` in the `max-skills` marketplace, that ships the mod, the authoring interview and the helper. It lives outside this repository.
+_Avoid_: extension, addon
+
+**Helper**:
+The plugin's own program, `claude-spore`, which runs Claude steps, checks workflows and hands in answers; `spore` never knows about it.
+_Avoid_: wrapper, shim
+
 **Entry menu**:
 What a person sees after typing the integration's command in their own Claude session: the unfinished runs and what each needs, the workflows to start, and writing a new one.
 _Avoid_: dashboard, launcher
