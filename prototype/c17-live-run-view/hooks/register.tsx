@@ -16,6 +16,7 @@ const VARIANTS = [
   { key: 'browser', name: 'Local browser page, pane keeps a summary' },
   { key: 'band', name: 'One line above the prompt, view on demand' },
   { key: 'fine', name: 'Finer text drawing: Braille-dot lines, real text boxes' },
+  { key: 'auto', name: 'Picture where Claude Code draws one, Braille dots elsewhere' },
 ] as const
 
 const view = atom({ plugin: 'c17-live-run-view', key: 'view' } as const, { frame: 0, variant: 'text', playing: true } as ViewState)
@@ -131,11 +132,22 @@ async function go($: any, fn: (v: ViewState) => ViewState) {
   }
   if (v.variant === 'band') await $.ui.close({ id: PANE })
   else await $.ui.open({ id: PANE, title: 'Run · coding-loop', rows: 40, columns: 96 })
+  if (v.variant === 'auto' && picturesOk === null) {
+    // Ask the drawn picture to take its own source again: Claude Code refuses, with a reason,
+    // when the Image is showing its fallback text. That is the signal to switch to the dots.
+    $.clock.after(500, async () => {
+      const r = await $.ui.blit({ requestId: PANE, key: 'graph', source: { file: `${OUT}/frame-${v.frame}.png`, format: 'png', generation: 1000 + v.frame } })
+      picturesOk = !r.deny
+      await $.fs.write(`${OUT}/probe.txt`, JSON.stringify(r) + '\n')
+      await update($, view, x => ({ ...x, probe: r.deny ? `pictures: no (${r.deny})` : 'pictures: yes' }))
+    })
+  }
 }
+let picturesOk: boolean | null = null
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'c17', description: 'C17 prototype: live view of a run', argumentHint: '[1-5 | next | prev | play | pause]' })
+    await $.command.register({ name: 'c17', description: 'C17 prototype: live view of a run', argumentHint: '[1-6 | next | prev | play | pause]' })
     $.clock.after(0, () => { void prepare($) })
     $.clock.every(3500, async () => {
       const v = await read($, view)
@@ -148,7 +160,7 @@ export const register: Register = on => {
   on('command.run', { command: 'c17' }, async ($, e) => {
     await prepare($)
     const a = e.args.trim()
-    if (/^[1-5]$/.test(a)) await go($, v => ({ ...v, variant: VARIANTS[+a - 1].key }))
+    if (/^[1-6]$/.test(a)) await go($, v => ({ ...v, variant: VARIANTS[+a - 1].key }))
     else if (a === 'next') await go($, v => ({ ...v, playing: false, frame: Math.min(FRAMES.length - 1, v.frame + 1) }))
     else if (a === 'prev') await go($, v => ({ ...v, playing: false, frame: Math.max(0, v.frame - 1) }))
     else if (a === 'play' || a === 'pause') await go($, v => ({ ...v, playing: a === 'play' }))
@@ -222,12 +234,12 @@ export const register: Register = on => {
         )}
       </Box>
     )
-    const state = <Text dimColor wrap="wrap">status --json: {statusJson(i)}</Text>
+    const state = <Text dimColor wrap="wrap">status --json: {statusJson(i)}{v.probe ? `  ·  ${v.probe}` : ''}</Text>
 
     let graph
-    if (v.variant === 'text' || v.variant === 'fine') {
+    if (v.variant === 'text' || v.variant === 'fine' || (v.variant === 'auto' && picturesOk === false)) {
       const gcols = Math.max(40, Math.min(64, wide ? Math.floor(cols / 2) - 4 : cols - 4))
-      const grid = (v.variant === 'fine' ? drawBraille : drawText)(plain, gcols, s.nodeId, taken, onOfFactory(dot))
+      const grid = (v.variant === 'text' ? drawText : drawBraille)(plain, gcols, s.nodeId, taken, onOfFactory(dot))
       while (grid.length && grid[0].every(c => c.ch === ' ')) grid.shift()
       while (grid.length && grid[grid.length - 1].every(c => c.ch === ' ')) grid.pop()
       graph = (
@@ -235,7 +247,7 @@ export const register: Register = on => {
           {grid.map(row => <Text>{runs(row).map(r => <Text {...COLOR[r.st]}>{r.text}</Text>)}</Text>)}
         </Box>
       )
-    } else if (v.variant === 'picture') {
+    } else if (v.variant === 'picture' || v.variant === 'auto') {
       graph = (
         <Box marginTop={1}>
           <Image key="graph" source={{ file: `${OUT}/frame-${i}.png`, format: 'png', generation: i }} columns={wide ? 60 : Math.min(70, cols - 4)} rows={22} alt={`[picture of the workflow: at ${s.nodeId}; this terminal cannot draw pictures]`} />
