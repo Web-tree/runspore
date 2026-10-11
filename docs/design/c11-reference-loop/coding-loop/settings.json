@@ -1,0 +1,72 @@
+{
+  "format": "runspore.workflow/0.2",
+  "limits": { "maxVisitsPerNode": 16, "maxActivations": 256 },
+  "inputSchema": {
+    "type": "object",
+    "required": ["task"],
+    "additionalProperties": false,
+    "properties": {
+      "task": { "type": "string", "minLength": 1, "description": "What should this run build or fix?" }
+    }
+  },
+  "actions": {
+    "implement": {
+      "kind": "command", "argv": ["claude-spore", "run"], "output": "result",
+      "effect": "idempotent", "outcomes": ["ok"],
+      "retry": { "maxAttempts": 3 }, "timeoutMs": "3600000"
+    },
+    "test": {
+      "kind": "command", "argv": ["npm", "test"],
+      "effect": "idempotent", "outcomes": ["ok", "red"], "exitOutcomes": { "1": "red" },
+      "retry": { "maxAttempts": 3 }, "timeoutMs": "1800000"
+    }
+  },
+  "nodes": {
+    "implement": {
+      "action": "implement",
+      "instructions": "steps/implement.md",
+      "outputSchemas": {
+        "ok": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["summary"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "description": "What you changed and why, in a few sentences." }
+          }
+        }
+      },
+      "input": {
+        "format": { "$literal": "json" },
+        "schema": { "$outputSchemas": {} },
+        "tools": { "$literal": ["Read", "Glob", "Grep", "Edit", "Write", "Bash"] },
+        "context": {
+          "task": { "$get": ["input", "task"] },
+          "cameFrom": { "$get": ["from"] }
+        }
+      }
+    },
+    "test": { "action": "test", "loopLimits": { "red": 3 } },
+    "approve": {
+      "signal": "approval",
+      "instructions": "steps/approve.md",
+      "outputSchemas": {
+        "rejected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": { "reason": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "tests_stuck": { "signal": "tests-stuck", "instructions": "steps/tests_stuck.md" },
+    "done": {
+      "output": {
+        "task": { "$get": ["input", "task"] },
+        "summary": { "$get": ["nodes", "implement", "output", "summary"] }
+      }
+    },
+    "stopped": {
+      "error": { "code": "tests.given-up", "message": "The tests kept failing and the run was stopped." }
+    }
+  }
+}
