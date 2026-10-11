@@ -1,0 +1,1 @@
+{ "name": "c17-live-run-view", "version": "0.0.1", "description": "C17 throwaway prototype: a live view of a run in the mod", "author": { "name": "Max Levitskiy" }, "types": "./types/index.d.ts" }

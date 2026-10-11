@@ -1,0 +1,24 @@
+// The reference coding loop (C11, Web-tree/runspore#16).
+// Claude implements, a command runs the tests, red tests go back to implement
+// at most 3 times in a row, then a person decides; a person approves the result.
+// Settings, schemas and loop limits are in settings.json (C02, C12, C13).
+digraph "coding-loop" {
+  dialect = "runspore/0.2";
+  start   = "implement";
+
+  implement   [label="Implement (Claude)"];
+  test        [label="Run the tests"];
+  approve     [kind="await-signal", label="Approve (you)"];
+  tests_stuck [kind="await-signal", label="Tests keep failing (you)"];
+  done        [kind="complete"];
+  stopped     [kind="fail"];
+
+  implement   -> test;
+  test        -> approve     [on="ok"];
+  test        -> implement   [on="red", label="red ×3"];
+  test        -> tests_stuck [on="exhausted"];
+  tests_stuck -> implement   [on="keep-going"];
+  tests_stuck -> stopped     [on="stop"];
+  approve     -> done        [on="approved"];
+  approve     -> implement   [on="rejected"];
+}
