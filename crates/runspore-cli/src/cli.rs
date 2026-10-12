@@ -73,7 +73,8 @@ pub enum Command {
         #[arg(long, requires = "run")]
         until_parked: bool,
     },
-    /// Status, position, result, quarantine reason, outstanding invocation.
+    /// Status, position and the arrow into it, result and the end node, quarantine
+    /// reason, outstanding invocation.
     Status { run_id: String },
     /// All runs with status.
     List,
@@ -218,7 +219,11 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         }
         Command::Status { run_id } => {
             let view = existing(&engine, run_id).await?;
-            done(view::status_json(&view), view::status_text(&view))
+            let arrival = engine.arrival(&view).await?;
+            done(
+                view::status_json(&view, &arrival),
+                view::status_text(&view, &arrival),
+            )
         }
         Command::List => list(&engine).await,
         Command::Events { run_id } => events(&engine, run_id).await,
@@ -393,12 +398,13 @@ async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
             (existing(engine, &key.run).await?, EXIT_INTERRUPTED)
         }
     };
-    let mut json = view::status_json(&view);
+    let arrival = engine.arrival(&view).await?;
+    let mut json = view::status_json(&view, &arrival);
     if exit == EXIT_INTERRUPTED {
         json["interrupted"] = json!(true);
     }
     Ok(Output {
-        text: view::status_text(&view),
+        text: view::status_text(&view, &arrival),
         json,
         exit,
     })

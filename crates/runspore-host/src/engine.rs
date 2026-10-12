@@ -11,7 +11,7 @@ use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
 use runspore_types::model::{
     event_kind, ActivityResult, AttemptStatus, InvocationResolved, Resolution, RunStarted,
-    RunStatus, SignalReceived, WorkflowLimits,
+    RunStatus, SignalReceived, State, Workflow, WorkflowLimits,
 };
 use runspore_types::reducer::{Envelope, Identity, Limits, Reducer, TransitionRequest};
 use runspore_types::store::*;
@@ -20,6 +20,7 @@ use tokio::sync::{watch, Notify};
 use tokio::task::JoinSet;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
+use crate::arrival::{Arrival, Trail};
 use crate::error::HostError;
 use crate::guard;
 
@@ -549,6 +550,62 @@ impl Engine {
 
     pub async fn list_invocations(&self, key: &RunKey) -> Result<Vec<InvocationView>, HostError> {
         Ok(self.inner.store.list_invocations(key).await?)
+    }
+
+    /// The arrow into the run's position and, once it is `completed` or `failed`, the
+    /// node it ended at. Replays the run's consumed events through the reducer, so it
+    /// costs one transition per event; the kernel's state holds no arrow.
+    pub async fn arrival(&self, view: &RunView) -> Result<Arrival, HostError> {
+        let Some(current) = view.snapshot.as_deref() else {
+            return Ok(Arrival::default());
+        };
+        let undecodable = |e: canonical::CanonError| HostError::invalid(e.code(), e.to_string());
+        let state: State = canonical::decode(current).map_err(undecodable)?;
+        let package = self.inner.package(&view.package_digest).await?;
+        let workflow: Workflow = canonical::decode(&package.bytes).map_err(undecodable)?;
+        let identity = Identity {
+            semantics_version: state.semantics,
+            ..identity(&*self.inner.reducer, &view.package_digest)
+        };
+        // Every replayed decision was committed once, so no budget can refuse it.
+        let limits = Limits {
+            microsteps: u32::MAX,
+            expression_operations: u32::MAX,
+            max_state_bytes: u32::MAX,
+            max_command_count: u32::MAX,
+        };
+        let mut trail = Trail::new(&workflow);
+        let mut snapshot = None;
+        let mut after = 0;
+        while after < view.applied_sequence {
+            let page = self.list_events(&view.key, after, 100).await?;
+            if page.items.is_empty() {
+                break;
+            }
+            for record in page.items {
+                let event = record.event;
+                after = event.sequence;
+                if after > view.applied_sequence {
+                    break;
+                }
+                let decision = self.inner.reducer.transition(&TransitionRequest {
+                    identity: identity.clone(),
+                    graph: package.bytes.clone(),
+                    snapshot: snapshot.take(),
+                    input_event: Envelope {
+                        event_id: event.id,
+                        sequence: event.sequence,
+                        accepted_at_ms: event.accepted_at_ms,
+                        kind: event.kind,
+                        payload: event.body,
+                    },
+                    frozen_limits: limits,
+                })?;
+                trail.push(canonical::decode(&decision.snapshot).map_err(undecodable)?);
+                snapshot = Some(decision.snapshot);
+            }
+        }
+        Ok(trail.finish())
     }
 
     /// Number of attempts this engine is running.
