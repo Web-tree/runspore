@@ -1,0 +1,117 @@
+<title>Runspore Build Order</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column. The workflow drawing first (where the build is), then waves with live ticket states, then the workflow's own files. */
+:root {
+  --bg: #f4f6f1; --surface: #ffffff; --fg: #1c2119; --muted: #5b6455; --line: #d6dccf;
+  --spore: #4d6b3c; --spore-bg: #e2ecda; --plug: #5a4e96; --plug-bg: #e6e3f4;
+  --check: #a8670f; --check-bg: #f7e3bd; --done: #cfe5c3; --current: #ffe37a; --arrow: #d9640b;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141811; --surface: #1c2218; --fg: #e4e9df; --muted: #9aa592; --line: #333c2d;
+  --spore: #a9cc93; --spore-bg: #26341f; --plug: #b8aef0; --plug-bg: #2a2547;
+  --check: #f0b765; --check-bg: #3a2a10; --done: #2f4a24; --current: #6b5a12; --arrow: #ff9a4d; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141811; --surface: #1c2218; --fg: #e4e9df; --muted: #9aa592; --line: #333c2d;
+  --spore: #a9cc93; --spore-bg: #26341f; --plug: #b8aef0; --plug-bg: #2a2547;
+  --check: #f0b765; --check-bg: #3a2a10; --done: #2f4a24; --current: #6b5a12; --arrow: #ff9a4d; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 34px; }
+h1 { font-size: 30px; line-height: 1.15; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: 19px; margin: 0 0 10px; text-wrap: balance; }
+p { margin: 0; max-width: 70ch; }
+a { color: inherit; }
+code { font: 0.88em var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.lede { display: grid; gap: 10px; }
+.lede p { color: var(--muted); font-size: 16px; }
+.now { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; padding: 8px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); width: fit-content; max-width: 100%; }
+.now i { width: 12px; height: 12px; border-radius: 3px; background: var(--current); border: 1.5px solid var(--fg); flex: none; }
+.key { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
+.key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; border: 1px solid var(--line); }
+.graph { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 12px; }
+.graph svg { display: block; height: auto; min-width: 1100px; max-width: none; }
+.graph svg text { fill: var(--fg); }
+.graph svg [stroke="black"] { stroke: var(--fg); }
+.graph svg [fill="black"] { fill: var(--fg); }
+.graph svg polygon[fill="white"] { fill: var(--surface); }
+.graph svg [fill="#010101"] { fill: var(--done); }
+.graph svg [fill="#020202"] { fill: var(--current); }
+.graph svg [stroke="#030303"] { stroke: var(--arrow); }
+.graph svg [fill="#030303"] { fill: var(--arrow); }
+.graph svg text[fill="#030303"] { fill: var(--arrow); font-weight: 700; }
+.strip { display: grid; gap: 6px; }
+.wave { display: grid; grid-template-columns: 82px 1fr; gap: 10px; align-items: start; padding: 4px; border-radius: 8px; }
+.wave.here { background: color-mix(in srgb, var(--current) 35%, transparent); }
+.wl { font: 600 12px var(--mono); color: var(--muted); padding-top: 7px; text-transform: uppercase; letter-spacing: 0.04em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.chip { display: inline-flex; align-items: baseline; gap: 7px; text-decoration: none; padding: 5px 9px; border-radius: 6px; border: 1px solid; font-size: 13.5px; max-width: 100%; }
+.chip.r { background: var(--spore-bg); border-color: var(--spore); }
+.chip.p { background: var(--plug-bg); border-color: var(--plug); }
+.chip.f { background: var(--check-bg); border-color: var(--check); }
+.chip.done { opacity: 0.6; }
+.chip.done .nm { text-decoration: line-through; }
+.chip:hover, .chip:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
+.chip .id { font: 600 12px var(--mono); }
+.chip .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42ch; }
+.chip .st { font: 11px var(--mono); color: var(--muted); }
+.chip.in-progress .st { color: var(--arrow); font-weight: 600; }
+.cp { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0 6px 92px; padding: 7px 12px; border-radius: 6px; background: var(--check-bg); border-left: 3px solid var(--check); font-weight: 600; font-size: 14px; }
+.cp.here { outline: 2px solid var(--fg); }
+.cp .ans { margin-left: auto; font: 12px var(--mono); color: var(--muted); }
+.cpk { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--check); color: var(--bg); font: 700 12px var(--mono); flex: none; }
+details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-top: 8px; }
+summary { cursor: pointer; padding: 9px 12px; font: 600 13px var(--mono); }
+details pre { margin: 0; padding: 12px; border-top: 1px solid var(--line); overflow-x: auto; font: 12.5px/1.5 var(--mono); }
+.how { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.how div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.how b { display: block; margin-bottom: 4px; }
+.how p { font-size: 14px; color: var(--muted); }
+@media (max-width: 560px) { .wave { grid-template-columns: 1fr; gap: 4px; } .cp { margin-left: 0; } .wl { padding-top: 0; } }
+</style>
+
+<div class="wrap">
+  <header class="lede">
+    <h1>Runspore build order</h1>
+    <p>The build plan is itself a Runspore workflow, <code>build-0-2</code>, in the format it builds: a <code>workflow.dot</code> and a <code>settings.json</code>. Each wave is an external step that finishes when all its tickets are merged. Each checkpoint is a decision you answer with <code>go</code> or <code>changes</code>; <code>changes</code> sends the run back into the wave before it.</p>
+    <div class="now"><i></i><span>Now: {{NOW}}</span></div>
+    <div class="key">
+      <span><i style="background:var(--done)"></i>done</span>
+      <span><i style="background:var(--current)"></i>where the build is</span>
+      <span><i style="background:var(--arrow)"></i>arrow just taken</span>
+      <span><i style="background:var(--spore-bg);border-color:var(--spore)"></i>Web-tree/runspore</span>
+      <span><i style="background:var(--plug-bg);border-color:var(--plug)"></i>Max-Levitskiy/skills</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>The workflow</h2>
+    <div class="graph">{{SVG}}</div>
+  </section>
+
+  <section>
+    <h2>Waves and tickets</h2>
+    <div class="strip">
+{{WAVES}}
+    </div>
+  </section>
+
+  <section>
+    <h2>How it is tracked</h2>
+    <div class="how">
+      <div><b>Now</b><p><code>work/build-0-2/track.py</code> reads the workflow folder, the GitHub state of each ticket (merged, PR open, open) and <code>checkpoints.json</code>, your answers. It prints the position in the shape of <code>spore status --json</code> and redraws this page.</p></div>
+      <div><b>From wave 6</b><p>Once spore has external steps (R19), <code>continue</code> (R22) and the project folder (R8), the build becomes a real run: <code>spore start build-0-2</code>. Waves are claimed and completed with <code>spore step</code>, checkpoints are answered with <code>spore signal</code>, and the script retires.</p></div>
+      <div><b>From checkpoint F</b><p>The plugin's run line and live view (P7) draw this same workflow inside Claude Code.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The workflow's files</h2>
+    <details open><summary>workflow.dot</summary><pre>{{DOT}}</pre></details>
+    <details><summary>settings.json</summary><pre>{{SETTINGS}}</pre></details>
+    {{STEPS}}
+    <details><summary>track.py status (position)</summary><pre>{{STATUS}}</pre></details>
+  </section>
+</div>

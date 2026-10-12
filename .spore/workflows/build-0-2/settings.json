@@ -1,0 +1,562 @@
+{
+  "format": "runspore.workflow/0.2",
+  "limits": {
+    "maxVisitsPerNode": 16,
+    "maxActivations": 256
+  },
+  "actions": {
+    "build-wave": {
+      "kind": "external",
+      "actor": "orchestrator",
+      "effect": "unsafe",
+      "outcomes": [
+        "ok"
+      ],
+      "async": {
+        "timeoutMs": "1209600000"
+      }
+    }
+  },
+  "nodes": {
+    "wave_1": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 1
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R1",
+              "issue": "Web-tree/runspore#51",
+              "title": "Package format 0.2 accepted beside 0.1 (expand)"
+            },
+            {
+              "id": "R9",
+              "issue": "Web-tree/runspore#59",
+              "title": "Random run IDs; a start key names a run within one database"
+            },
+            {
+              "id": "R15",
+              "issue": "Web-tree/runspore#65",
+              "title": "Command results: result mode, undeclared outcomes, log tails, visit number"
+            },
+            {
+              "id": "R16",
+              "issue": "Web-tree/runspore#66",
+              "title": "Guard and graceful stop: a dead worker's command stops at once"
+            },
+            {
+              "id": "R26",
+              "issue": "Web-tree/runspore#76",
+              "title": "Signed releases and install.sh"
+            },
+            {
+              "id": "P1",
+              "issue": "Max-Levitskiy/skills#60",
+              "title": "ml-workflow plugin skeleton"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_2": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 2
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R2",
+              "issue": "Web-tree/runspore#52",
+              "title": "Move fixtures, golden traces and examples to format 0.2 (migrate)"
+            },
+            {
+              "id": "R3",
+              "issue": "Web-tree/runspore#53",
+              "title": "Workflow folders: spore reads workflow.dot + settings.json"
+            },
+            {
+              "id": "R10",
+              "issue": "Web-tree/runspore#60",
+              "title": "Stuck step: a step that can't recover waits for a person"
+            },
+            {
+              "id": "R12",
+              "issue": "Web-tree/runspore#62",
+              "title": "A step reads why it was entered: from and $get default"
+            },
+            {
+              "id": "R17",
+              "issue": "Web-tree/runspore#67",
+              "title": "Process record: never two tries of a step at once on one machine"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_3": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 3
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R4",
+              "issue": "Web-tree/runspore#54",
+              "title": "Workflow artifacts: spore build, load, pin and inspect"
+            },
+            {
+              "id": "R6",
+              "issue": "Web-tree/runspore#56",
+              "title": "Switch the CLI test suites to workflow folders (migrate)"
+            },
+            {
+              "id": "R8",
+              "issue": "Web-tree/runspore#58",
+              "title": "Project folder: .spore/, walk-up, spore init, base folder"
+            },
+            {
+              "id": "R11",
+              "issue": "Web-tree/runspore#61",
+              "title": "Loop limits with an exhausted arrow, and reachability checks"
+            },
+            {
+              "id": "R13",
+              "issue": "Web-tree/runspore#63",
+              "title": "Output schemas: every step result checked against its outcome's schema"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_4": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 4
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R5",
+              "issue": "Web-tree/runspore#55",
+              "title": "Composed artifact: spore build --composed"
+            },
+            {
+              "id": "R7",
+              "issue": "Web-tree/runspore#57",
+              "title": "Cut-over: spore 0.2 refuses 0.1 workflows, JSON input and old databases (contract)"
+            },
+            {
+              "id": "R14",
+              "issue": "Web-tree/runspore#64",
+              "title": "Input schema: spore start checks a run's input"
+            },
+            {
+              "id": "R18",
+              "issue": "Web-tree/runspore#68",
+              "title": "Step files and work folders"
+            },
+            {
+              "id": "R25",
+              "issue": "Web-tree/runspore#75",
+              "title": "An action's working folder can come from the step's input"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_5": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 5
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R19",
+              "issue": "Web-tree/runspore#69",
+              "title": "External steps: spore step claim, renew, complete, fail, abandon"
+            },
+            {
+              "id": "P3",
+              "issue": "Max-Levitskiy/skills#62",
+              "title": "Background Claude step: claude-spore run and check"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_6": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 6
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R20",
+              "issue": "Web-tree/runspore#70",
+              "title": "Handshake: spore capabilities and capability-missing"
+            },
+            {
+              "id": "R21",
+              "issue": "Web-tree/runspore#71",
+              "title": "Async commands: start, holder handle, probe and watch"
+            },
+            {
+              "id": "R22",
+              "issue": "Web-tree/runspore#72",
+              "title": "spore continue, list --unfinished and step show"
+            },
+            {
+              "id": "P8",
+              "issue": "Max-Levitskiy/skills#67",
+              "title": "Authoring interview: /ml-workflow:author"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_7": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 7
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R23",
+              "issue": "Web-tree/runspore#73",
+              "title": "spore continue --wait follows a run until it needs a person"
+            },
+            {
+              "id": "R24",
+              "issue": "Web-tree/runspore#74",
+              "title": "spore cancel"
+            },
+            {
+              "id": "P2",
+              "issue": "Max-Levitskiy/skills#61",
+              "title": "spore install and version checks"
+            },
+            {
+              "id": "P4",
+              "issue": "Max-Levitskiy/skills#63",
+              "title": "Interactive Claude step in a herdr pane"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_8": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 8
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R27",
+              "issue": "Web-tree/runspore#77",
+              "title": "Reference coding loop end to end, spore side"
+            },
+            {
+              "id": "P5",
+              "issue": "Max-Levitskiy/skills#64",
+              "title": "Sub-skills and following a run"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_9": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 9
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R28",
+              "issue": "Web-tree/runspore#78",
+              "title": "Reconcile docs and glossary with 0.2"
+            },
+            {
+              "id": "P6",
+              "issue": "Max-Levitskiy/skills#65",
+              "title": "Session-start line and the entry menu"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_10": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 10
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "P7",
+              "issue": "Max-Levitskiy/skills#66",
+              "title": "Run line and live view"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "wave_11": {
+      "action": "build-wave",
+      "input": {
+        "wave": {
+          "$literal": 11
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "P9",
+              "issue": "Max-Levitskiy/skills#68",
+              "title": "Reference coding loop end to end in Claude Code"
+            }
+          ]
+        },
+        "cameFrom": {
+          "$get": [
+            "from"
+          ]
+        }
+      }
+    },
+    "checkpoint_a": {
+      "signal": "checkpoint-a",
+      "instructions": "steps/checkpoint-a.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "checkpoint_b": {
+      "signal": "checkpoint-b",
+      "instructions": "steps/checkpoint-b.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "checkpoint_c": {
+      "signal": "checkpoint-c",
+      "instructions": "steps/checkpoint-c.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "checkpoint_d": {
+      "signal": "checkpoint-d",
+      "instructions": "steps/checkpoint-d.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "checkpoint_e": {
+      "signal": "checkpoint-e",
+      "instructions": "steps/checkpoint-e.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "checkpoint_f": {
+      "signal": "checkpoint-f",
+      "instructions": "steps/checkpoint-f.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "checkpoint_g": {
+      "signal": "checkpoint-g",
+      "instructions": "steps/checkpoint-g.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    }
+  }
+}
