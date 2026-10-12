@@ -388,6 +388,7 @@ fn w10_accepts_every_documented_form() {
 #[test]
 fn w10_a_0_2_document_admits_from_and_default() {
     let as_0_2 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT_0_2));
+    let as_0_1 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT));
     for mapping in [
         json!({"$get": ["from"]}),
         json!({"$get": ["from", "output", "log", 0]}),
@@ -398,7 +399,7 @@ fn w10_a_0_2_document_admits_from_and_default() {
         assert_valid(&as_0_2(with_input(mapping.clone())));
         assert_valid(&as_0_2(edited("/nodes/done/output", mapping.clone())));
         if mapping.get("default") != Some(&json!(1)) {
-            assert_invalid(&with_input(mapping));
+            assert_invalid(&as_0_1(with_input(mapping)));
         }
     }
     for mapping in [
