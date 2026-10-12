@@ -61,6 +61,7 @@ package signing. Each is additive under a later semantics version.
 - [host.md](host.md): engine loop, dispatch, activities, failpoints, wasm packaging.
 - [cli.md](cli.md): the `spore` command surface and exit codes.
 - [dot.md](dot.md): workflow folders, the DOT dialect, settings and the build.
+- [release.md](release.md): release assets, the release key and signature, `install.sh`.
 
 The wire types are code: `crates/runspore-types`. Where prose and that crate disagree,
 the crate wins and the prose is a bug.
@@ -79,4 +80,6 @@ crates/runspore-cli           the spore binary and crash-recovery tests
 conformance/traces            golden kernel traces
 conformance/js                Node and Bun trace runners
 examples                      sample workflows
+install.sh                    installer that checks a release's signature and checksums
+scripts                       release key setup
 ```

@@ -10,6 +10,26 @@ event + state → deterministic kernel → new state + commands
 
 Hosts atomically persist the transition and dispatch commands as activities. Non-deterministic outcomes are recorded; ambiguous external effects require idempotency or reconciliation.
 
+## Install
+
+On macOS or Linux (arm64 or x86_64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh | sh
+```
+
+`install.sh` downloads the newest release, checks that `SHA256SUMS` is signed by the release key below and that the archive matches it, checks the build-provenance attestation when `gh` is signed in, and puts `spore` in `~/.local/bin`. The release key:
+
+```text
+ssh-ed25519 PENDING runspore-release
+```
+
+When the line reads `PENDING`, no key has been made yet: there is no signed release and `install.sh` refuses to run, so build from source. Assets, formats and how to check them by hand: [spec/release.md](spec/release.md). To build from source:
+
+```sh
+cargo install --git https://github.com/Web-tree/runspore --locked runspore-cli
+```
+
 ## Quickstart
 
 From the repository root, build the binary and work in a scratch directory with copies of the [examples](examples/README.md):

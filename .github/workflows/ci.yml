@@ -20,3 +20,12 @@ jobs:
       # rust-toolchain.toml pins the version, components and targets; rustup installs them on first cargo call.
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
+      - run: shellcheck install.sh scripts/*.sh
+
+  # install.sh against signed archives on macOS too (spec/release.md section 9).
+  install-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p runspore-cli --test install --locked
