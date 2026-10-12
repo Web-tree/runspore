@@ -31,7 +31,7 @@ jobs:
       CC_aarch64_unknown_linux_musl: musl-gcc
       CC_x86_64_unknown_linux_musl: musl-gcc
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - if: endsWith(matrix.target, '-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       # The first cargo call installs the toolchain rust-toolchain.toml pins.
@@ -57,7 +57,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           pattern: spore-*
