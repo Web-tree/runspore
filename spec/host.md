@@ -251,6 +251,10 @@ the shapes an async `watch` prints.
 `validate` checks the shape of every field above, that every `exitOutcomes` value is a
 declared outcome, and, in result mode, that `exitOutcomes` does not map 0.
 
+0.1 had no `result` mode, no `RUNSPORE_VISIT`, and no undeclared-outcome row. Its
+`text` mode gave `{"exitCode": n, "stdout": "<utf-8, lossy>"}` and failed with
+`command.output-too-large` when stdout passed 64 KiB, like the other modes.
+
 ### The guard (0.2)
 
 Every process the host starts for an attempt runs under a guard. In 0.2 that is a
