@@ -17,7 +17,7 @@ engine. It never listens on a network.
 | Command | Does |
 | --- | --- |
 | `validate <workflow>` | Builds the workflow and checks it and its actions without touching the database |
-| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>]` | Creates a run and returns. A missing key is generated; the same key always names the same run |
+| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database |
 | `run <workflow> [--input …] [--key …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId>` | Status, position, result, quarantine reason, outstanding invocation |
@@ -33,6 +33,8 @@ accepted until the cut-over to 0.2. A build error exits 2 and names the file and
 (dot.md §6).
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
+Run IDs are random (host §2): `start` and `run` print the run ID the engine returned,
+and the same key in another database names another run.
 `worker --run` and `--until-parked` are only valid together. `release` on a run that is
 not quarantined succeeds and changes nothing.
 

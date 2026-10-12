@@ -19,7 +19,7 @@ use crate::digest::{self, Digest};
 use crate::model::u64_str;
 use crate::reducer::{Command, Diagnostic};
 
-pub const STORE_PROTOCOL: &str = "0.1";
+pub const STORE_PROTOCOL: &str = "0.2";
 pub const DEFAULT_TENANT: &str = "default";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -185,7 +185,7 @@ pub struct Page<T> {
 pub struct CreateRun {
     pub mutation: Mutation,
     pub key: RunKey,
-    /// Unique per tenant. The same start key always names the same run.
+    /// Unique per tenant. The same start key always names the same run in one store.
     pub start_key: String,
     pub package_digest: Digest,
     /// Canonical workflow document; stored content-addressed.
@@ -493,6 +493,8 @@ pub trait Store: Send + Sync {
     async fn scan_due(&self, cursor: Option<String>, limit: u32) -> StoreResult<Page<DueItem>>;
 
     async fn get_run(&self, key: &RunKey) -> StoreResult<Option<RunView>>;
+    /// The run created with `start_key` in `tenant`, if any.
+    async fn find_run(&self, tenant: &str, start_key: &str) -> StoreResult<Option<RunKey>>;
     async fn list_runs(
         &self,
         tenant: &str,

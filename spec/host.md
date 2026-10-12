@@ -1,8 +1,11 @@
-# Host 0.1
+# Host 0.1 and 0.2
 
 The host is everything around the kernel: it packages the kernel as a component, runs
 it, commits its decisions, and executes activities. It contains no graph logic. It
 never decides a branch, a retry, or an outcome route.
+
+Host 0.2 replaces 0.1 one rule at a time. A rule that changed says what 0.1 did; every
+other rule is the same in both.
 
 ## 1. Kernel packaging
 
@@ -52,13 +55,28 @@ process on its own.
 | `turns_per_run` | 32 | Transitions per run per tick |
 | `limits` | `Limits::default()` | Frozen kernel budget |
 | `base_dir` | current directory | Base for relative `cwd` of command actions |
+| `run_ids` | the operating system's random source | Where the ID of each new run comes from; tests give a fixed sequence |
 
 ### Client operations
 
-- `start(workflow_json, input, start_key)`: canonicalize the workflow; reject it if
-  any action's `kind` has no registered runner or the runner's `validate` fails; run a
-  dry `run.started` transition and reject on failure; then `create_run`. The run ID is
-  `ids::run_from_start_key(tenant, start_key)`. Returns the key and whether it was new.
+- `start(workflow_json, input, start_key)`: a start key names a run only within one
+  store. Starting twice with one key gives one run; the same key in another store gives
+  another run, which shares no run ID, invocation ID or effect key with the first.
+  1. `find_run(tenant, start_key)`. The run ID is the ID of the run found, else a new
+     random `run_<32 lowercase hex>`: 128 bits from `run_ids`.
+  2. Build the `run.started` evidence with that run ID; canonicalize the workflow;
+     reject it if any action's `kind` has no registered runner or the runner's
+     `validate` fails; run a dry `run.started` transition and reject on failure.
+  3. `create_run` with request ID `start/<start_key>`. `applied` is a new run;
+     `duplicate` is the run found, not new; `run.exists` (the key names a run with
+     another workflow or input) is returned as the error. `run.start-key-mismatch`
+     means another start with this key created its run after step 1: go back to
+     step 1 once, which finds that run.
+  4. Return the run key and whether it was new.
+
+  0.1 derived the run ID from the key, `ids::run_from_start_key(tenant, start_key)`, so
+  the same key in two stores gave the same run ID and the same effect keys. Runs
+  created that way keep their IDs; step 1 finds them by key like any other run.
 - `signal(key, message_id, name, outcome, data)`: `append_event` with event ID
   `ids::event_for_signal(message_id)`.
 - `resolve(key, request_id, invocation_id, resolution)`: `append_event` with event ID

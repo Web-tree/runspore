@@ -219,6 +219,9 @@ impl<H: Hook> Store for Hooked<H> {
     async fn scan_due(&self, c: Option<String>, l: u32) -> StoreResult<Page<DueItem>> {
         self.inner.scan_due(c, l).await
     }
+    async fn find_run(&self, t: &str, k: &str) -> StoreResult<Option<RunKey>> {
+        self.inner.find_run(t, k).await
+    }
     async fn list_runs(&self, t: &str, c: Option<String>, l: u32) -> StoreResult<Page<RunView>> {
         self.inner.list_runs(t, c, l).await
     }

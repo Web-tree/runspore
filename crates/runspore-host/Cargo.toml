@@ -17,6 +17,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 nix = { version = "0.31.3", features = ["signal", "process"] }
+getrandom = "0.4.3"
 
 [dev-dependencies]
 runspore-store-sqlite = { path = "../runspore-store-sqlite" }

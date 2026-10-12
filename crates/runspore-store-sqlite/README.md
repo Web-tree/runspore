@@ -59,6 +59,6 @@ may share a file; SQLite's file locks serialize their writers.
 
 ## Tests
 
-`tests/conformance.rs` runs S01–S14 from `runspore-store-conformance`. S01 and S03
+`tests/conformance.rs` runs S01–S15 from `runspore-store-conformance`. S01, S03 and S15
 race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01, Q03
 and Q04. Q03 runs `examples/crash.rs` as a child process at every failpoint.

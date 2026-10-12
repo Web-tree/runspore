@@ -8,6 +8,7 @@ use std::sync::Arc;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_host::{
     validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner,
+    StartOutcome,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
@@ -181,23 +182,22 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     match &cli.command {
         Command::Validate { .. } => unreachable!("handled above"),
         Command::Start(args) => {
-            let (key, created) = start(&engine, args).await?;
+            let (start_key, outcome) = start(&engine, args).await?;
+            let run = &outcome.key.run;
             let text = format!(
-                "{} run {} (start key {key})",
-                started(created),
-                key_run(&engine, &key)
+                "{} run {run} (start key {start_key})",
+                started(outcome.created)
             );
             done(
-                json!({"runId": key_run(&engine, &key), "startKey": key, "created": created}),
+                json!({"runId": run, "startKey": start_key, "created": outcome.created}),
                 text,
             )
         }
         Command::Run(args) => {
-            let (start_key, created) = start(&engine, args).await?;
-            let key = engine_key(&engine, &key_run(&engine, &start_key));
-            let mut out = until_parked(&engine, &key).await?;
+            let (_, outcome) = start(&engine, args).await?;
+            let mut out = until_parked(&engine, &outcome.key).await?;
             if let Value::Object(map) = &mut out.json {
-                map.insert("created".into(), json!(created));
+                map.insert("created".into(), json!(outcome.created));
             }
             Ok(out)
         }
@@ -345,10 +345,6 @@ fn engine_key(engine: &Engine, run: &str) -> RunKey {
     RunKey::new(&engine.config().tenant, run)
 }
 
-fn key_run(engine: &Engine, start_key: &str) -> String {
-    runspore_types::digest::ids::run_from_start_key(&engine.config().tenant, start_key)
-}
-
 fn started(created: bool) -> &'static str {
     if created {
         "created"
@@ -357,7 +353,7 @@ fn started(created: bool) -> &'static str {
     }
 }
 
-async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, bool), Fail> {
+async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, StartOutcome), Fail> {
     let source = Source::read(&args.workflow)?;
     let input = match (&args.input, &args.input_file) {
         (Some(text), _) => parse_json("--input", text)?,
@@ -373,7 +369,7 @@ async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, bool), Fail
         .start(&source.bytes, input, &start_key)
         .await
         .map_err(|e| source.fail(e))?;
-    Ok((start_key, outcome.created))
+    Ok((start_key, outcome))
 }
 
 /// `run_until_parked`, or on SIGINT/SIGTERM `Engine::shutdown`, which applies the

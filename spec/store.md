@@ -1,4 +1,4 @@
-# Store protocol 0.1
+# Store protocol 0.1 and 0.2
 
 The store is authoritative for event order, revisions, and attempt ownership. The
 interface is `runspore_types::store::Store`. This file specifies what each operation
@@ -27,6 +27,8 @@ a scan cursor the store did not issue.
 
 Failure codes are part of the contract. `kind` is in parentheses.
 
+Protocol 0.2 adds `find_run` and scenario S15; everything else is as in 0.1.
+
 ## 2. Operations
 
 ### create_run
@@ -41,6 +43,14 @@ disposition `duplicate`.
 Writes: the package, content-addressed, if absent; the run at revision 0, applied
 sequence 0, status `created`; event sequence 1 with ID `start`, kind `run.started`,
 body `started.body`, accepted at now. Returns `{key, startedSequence: 1}`.
+
+Run IDs are chosen by the caller and random (host §2), so `run.start-key-mismatch` is
+how a store answers the second of two starts that raced with one start key.
+
+### find_run (0.2)
+
+`find_run(tenant, startKey)`: the key of the run created with that start key in that
+tenant, or `None`. A read, like `get_run`: no request ID and no receipt.
 
 ### append_event
 
@@ -173,7 +183,7 @@ and are idempotent on an already matching state.
   `unavailable` / `store.busy`.
 - The schema carries a version. Opening a newer version fails with `incompatible` /
   `schema.too-new`. An empty file is initialized.
-- `capabilities()`: protocol `0.1`, `multiworkerClaims = true` (same host),
+- `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
 - The schema is internal to the adapter and documented in its README. Unique
@@ -207,6 +217,7 @@ Written once, generic over a store factory and a manual clock, in
 | S12 | Finish and expire race from two tasks | Exactly one wins; exactly one result event |
 | S13 | `create_run` repeated with the same start key, and with a changed package | `duplicate` with the original value; `run.exists` |
 | S14 | Reserved kinds and oversize bodies in `append_event` | `event.reserved-kind`; `event.too-large` |
+| S15 | Two `create_run` calls carry one start key and two run IDs, from two instances at once (0.2) | One is `applied`, the other `run.start-key-mismatch`; `find_run` returns the winner; `find_run` of an unknown key, or of the key in another tenant, is `None` |
 
 SQLite-specific, in the adapter crate:
 

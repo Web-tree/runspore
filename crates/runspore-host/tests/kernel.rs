@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use common::*;
 use runspore_host::{
     validate_workflow, ActivityContext, ActivityOutput, ActivityRegistry, Engine, EngineConfig,
-    NativeRunner, TickReport,
+    NativeRunner, RunIds, TickReport,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_conformance::ManualClock;
@@ -483,7 +483,11 @@ async fn drive_flow(name: &str, reducer: Arc<dyn Reducer>) -> (RunView, Vec<Valu
         store(&path, Some(ManualClock::new(T0))),
         reducer,
         flow_functions(effects, None),
-        EngineConfig::default(),
+        // Both kernels drive a run with the same ID, so their histories can match.
+        EngineConfig {
+            run_ids: RunIds::fixed(["run_flow"]),
+            ..EngineConfig::default()
+        },
     );
     let key = engine
         .start(&flow(), json!({"n": 7}), "flow")

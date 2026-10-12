@@ -1062,6 +1062,19 @@ impl Store for SqliteStore {
         })
     }
 
+    async fn find_run(&self, tenant: &str, start_key: &str) -> R<Option<RunKey>> {
+        self.read(|c| {
+            c.query_row(
+                "SELECT run_id FROM runs WHERE tenant = ?1 AND start_key = ?2",
+                params![tenant, start_key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map(|run: Option<String>| run.map(|run| RunKey::new(tenant, run)))
+            .map_err(db)
+        })
+    }
+
     async fn list_runs(
         &self,
         tenant: &str,
