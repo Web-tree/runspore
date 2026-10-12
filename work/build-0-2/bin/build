@@ -40,8 +40,11 @@ EOF
   exec "$bin/build"  # this script as of the new commit
 fi
 
+# Shell variables, not exported: every step, and every agent a step starts, inherits
+# the worker's environment, and a test that ran there (e2e.sh) would find the real
+# database in RUNSPORE_DB and work on the real runs. The scripts read engine.json.
 eval "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b, shlex
-print(f"export SPORE={shlex.quote(b.SPORE)} RUNSPORE_DB={shlex.quote(b.DB)}")' "$bin")"
+print(f"SPORE={shlex.quote(b.SPORE)} db={shlex.quote(b.DB)}")' "$bin")"
 for w in build-0-2 ticket; do
   "$SPORE" validate ".spore/workflows/$w" >/dev/null
 done
@@ -51,4 +54,4 @@ if [ -z "${BUILD_NO_LABELS:-}" ]; then
   gh label create ready-for-agent --repo Max-Levitskiy/skills >/dev/null 2>&1 || true
 fi
 echo "build run: $("$bin/start-run" "$@")"
-exec "$SPORE" --db "$RUNSPORE_DB" worker
+exec "$SPORE" --db "$db" worker
