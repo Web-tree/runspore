@@ -15,7 +15,7 @@ use runspore_types::model::{code, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
 use serde_json::{json, Value};
 
 /// Files a checkout must hold; more may be added.
-const MINIMUM_TRACES: usize = 52;
+const MINIMUM_TRACES: usize = 59;
 
 /// Every failure code, diagnostic code and kernel-produced error code. Each must
 /// be expected by at least one trace, so no part of the vocabulary goes unpinned.
@@ -41,6 +41,7 @@ const VOCABULARY: &[&str] = &[
     code::SIGNAL_BUFFER_OVERFLOW,
     code::SIGNAL_OUTCOME_UNROUTED,
     code::INVOCATION_UNKNOWN,
+    code::INVOCATION_STUCK,
     code::ACTIVITY_RETRY_SCHEDULED,
     code::LIMIT_VISITS_EXCEEDED,
     code::LIMIT_ACTIVATIONS_EXCEEDED,
@@ -122,15 +123,25 @@ fn golden_traces_hold_and_cover_the_vocabulary() {
     assert!(missing.is_empty(), "no golden trace expects {missing:?}");
 }
 
-/// Until a rule of `spec/kernel.md` names 0.2, a 0.2 document runs exactly as the
-/// same document marked 0.1: every trace of a 0.1 document holds unchanged with its
-/// format changed to 0.2.
+/// Traces of a 0.1 document where a step gives up with no `failed` route. Under 0.2
+/// that step is stuck instead (`spec/kernel.md` 7.4); the `14*` traces pin it.
+const STUCK_UNDER_0_2: &[&str] = &[
+    "expired-idempotent-exhausted",
+    "failure-without-error",
+    "retry-exhausted-no-route",
+];
+
+/// Apart from the rules `spec/kernel.md` keys to 0.2, a 0.2 document runs exactly as
+/// the same document marked 0.1: every trace of a 0.1 document holds unchanged with
+/// its format changed to 0.2, except the ones the stuck rule changes, which must
+/// change.
 #[test]
 fn every_0_1_trace_holds_as_a_0_2_document() {
     if bless_requested() {
         return;
     }
     let mut replayed = 0;
+    let mut differ = BTreeSet::new();
     for entry in fs::read_dir(traces()).expect("trace directory is readable") {
         let path = entry.expect("directory entry").path();
         if path.extension().is_none_or(|extension| extension != "json") {
@@ -141,14 +152,17 @@ fn every_0_1_trace_holds_as_a_0_2_document() {
             continue;
         }
         trace.workflow["format"] = json!(WORKFLOW_FORMAT_0_2);
-        run(&NativeReducer, &trace)
-            .unwrap_or_else(|error| panic!("{} as 0.2: {error}", path.display()));
+        if run(&NativeReducer, &trace).is_err() {
+            differ.insert(trace.name.clone());
+        }
         replayed += 1;
     }
-    // Every trace but the four of 0.2 documents and the W01 one, whose format no
-    // version defines.
+    let expected: BTreeSet<String> = STUCK_UNDER_0_2.iter().map(|n| n.to_string()).collect();
+    assert_eq!(differ, expected, "traces that differ as 0.2 documents");
+    // Every trace of a 0.1 document: all but the eleven of 0.2 documents and the W01
+    // one, whose format no version defines.
     assert!(
-        replayed >= MINIMUM_TRACES - 5,
+        replayed >= MINIMUM_TRACES - 12,
         "{replayed} traces replayed as 0.2"
     );
 }

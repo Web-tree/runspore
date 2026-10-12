@@ -1,0 +1,147 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stuck-failed-route-taken",
+  "description": "A 0.2 document whose node draws a failed route: a non-retryable failure still takes that route, as in 0.1, and the step is never stuck.",
+  "workflow": {
+    "actions": {
+      "work": {
+        "argv": ["work"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.2",
+    "name": "stuck-failed-route-taken",
+    "nodes": {
+      "broken": {"error": {"code": "work.broken", "message": "work never passed"}, "kind": "fail"},
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {
+        "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"failed": "broken", "ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-5"}, "runId": "run_stuck_e", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-5"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:c6f5272a04d3c3e90be9e0c7410e292ee069c721f3c02ed9275c82b8562d054f",
+            "invocationId": "inv_432ca4ffa9082f930b80967427e8ddd0",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_e",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:db759b31e983eb723d27ab057f769d721b74a8bc963559652db93cd229b824a3",
+        "commands": [
+          {
+            "commandId": "cmd_1c9b21913d63c07ef9f0131d70e6e485",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_432ca4ffa9082f930b80967427e8ddd0",
+              "input": {"job": "j-5"},
+              "invocationId": "inv_432ca4ffa9082f930b80967427e8ddd0",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:d677170cbce06d89df28ce79f5f6f7b3cc5a67395933021123d8e6f78a2e729d"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_432ca4ffa9082f930b80967427e8ddd0.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_432ca4ffa9082f930b80967427e8ddd0.1",
+          "error": {"code": "work.crashed", "message": "work crashed"},
+          "invocationId": "inv_432ca4ffa9082f930b80967427e8ddd0",
+          "retryable": false,
+          "status": "failure"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-5"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {
+            "work": {
+              "outcome": "failed",
+              "output": {
+                "error": {
+                  "code": "work.crashed",
+                  "details": null,
+                  "message": "work crashed",
+                  "nodeId": "work"
+                }
+              },
+              "visit": 1
+            }
+          },
+          "position": null,
+          "result": {
+            "error": {
+              "code": "work.broken",
+              "details": null,
+              "message": "work never passed",
+              "nodeId": "broken"
+            }
+          },
+          "runId": "run_stuck_e",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"broken": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:d444e3052b223c8d973ff0719f31aa65e773980f82bd2c3e850ebbe3457b7f5b",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:f83db93c2194278f6e3d5638ed78c157e5c58d827f3aceeeabca08629cf4bb0d"
+      }
+    }
+  ]
+}

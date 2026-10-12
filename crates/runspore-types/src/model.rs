@@ -216,7 +216,7 @@ impl Default for RetryPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ErrorInfo {
     pub code: String,
@@ -266,7 +266,8 @@ pub enum RunStatus {
     Running,
     /// Parked at an await-signal node.
     Waiting,
-    /// An unsafe invocation has an unknown outcome; an operator must resolve it.
+    /// An unsafe invocation has an unknown outcome, or a step is stuck; an operator
+    /// must resolve it.
     NeedsIntervention,
     Completed,
     Failed,
@@ -315,6 +316,9 @@ pub struct InvocationState {
     pub attempt: u32,
     pub state: InvocationPhase,
     pub input_digest: String,
+    /// The error that made a [`InvocationPhase::Stuck`] invocation stuck; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +328,8 @@ pub enum InvocationPhase {
     Scheduled,
     /// Attempt `attempt` ended with an unknown outcome on an unsafe action.
     Unknown,
+    /// 0.2 documents: the step gave up with no `failed` route and waits for a person.
+    Stuck,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -516,6 +522,7 @@ pub mod code {
     pub const SIGNAL_BUFFER_OVERFLOW: &str = "signal.buffer-overflow";
     pub const SIGNAL_OUTCOME_UNROUTED: &str = "signal.outcome-unrouted";
     pub const INVOCATION_UNKNOWN: &str = "invocation.unknown";
+    pub const INVOCATION_STUCK: &str = "invocation.stuck";
     pub const ACTIVITY_RETRY_SCHEDULED: &str = "activity.retry-scheduled";
     // ErrorInfo codes produced by the kernel (business-visible failures)
     pub const LIMIT_VISITS_EXCEEDED: &str = "limit.visits-exceeded";

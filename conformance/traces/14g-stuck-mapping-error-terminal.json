@@ -1,0 +1,131 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stuck-mapping-error-terminal",
+  "description": "A 0.2 document: a mapping error is not a step failing, so it ends the run failed as in 0.1 and never makes a step stuck.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "stuck-mapping-error-terminal",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "next": {
+        "action": "work",
+        "input": {"$get": ["nodes", "work", "output", "missing"]},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      },
+      "work": {
+        "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "next"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-7"}, "runId": "run_stuck_g", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-7"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:443cf3be5534a3f000830ac259e6919a7c9b338c045fc5d499875f9abfdbfd86",
+            "invocationId": "inv_60f7ffc0c886915b53371134efb5b591",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_g",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:dc8e7bd022fe08ef4de50209521c5c4e1c77655db7baf5592d5d07525df996c0",
+        "commands": [
+          {
+            "commandId": "cmd_5af8345042a8903e77d77f95172f2ad1",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_60f7ffc0c886915b53371134efb5b591",
+              "input": {"job": "j-7"},
+              "invocationId": "inv_60f7ffc0c886915b53371134efb5b591",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:634400c29705f1a95201693ccdba133b8e546b426548efc7a793c516373e1bf5"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_60f7ffc0c886915b53371134efb5b591.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_60f7ffc0c886915b53371134efb5b591.1",
+          "invocationId": "inv_60f7ffc0c886915b53371134efb5b591",
+          "output": {"present": 1},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-7"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {"work": {"outcome": "ok", "output": {"present": 1}, "visit": 1}},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.missing-path",
+              "details": {"path": ["nodes", "work", "output", "missing"]},
+              "message": "mapping path does not resolve",
+              "nodeId": "next"
+            }
+          },
+          "runId": "run_stuck_g",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"next": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:c3dbc45fe7392b2b1d3bc07fc71d739c58de0cdbc3742c5e4169e70a843c68ba",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:fb560c4dc3d1c13060660bdb5a5877dab5b7865f9444dc480a629cd1313cedc8"
+      }
+    }
+  ]
+}

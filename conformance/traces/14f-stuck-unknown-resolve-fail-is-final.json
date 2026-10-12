@@ -1,0 +1,181 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stuck-unknown-resolve-fail-is-final",
+  "description": "A 0.2 document: an unsafe step with an unknown outcome needs intervention as in 0.1. Resolving it with fail ends the run failed with the given error; a person's fail never makes the step stuck.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "unsafe", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "stuck-unknown-resolve-fail-is-final",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {
+        "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-6"}, "runId": "run_stuck_f", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-6"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:1c7d1cc4d7328e39311bc21fb01018823996658196a2cef40ef499846d98c96d",
+            "invocationId": "inv_41aa5b8b09818d80c160128c91478768",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_f",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:38ffe3cc9055ebf773b06ac235a16b9d35d4a9a213b3e0c214e1cfd2a23f3643",
+        "commands": [
+          {
+            "commandId": "cmd_5de1bed1e1a362f32b5250b382d89e88",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_41aa5b8b09818d80c160128c91478768",
+              "input": {"job": "j-6"},
+              "invocationId": "inv_41aa5b8b09818d80c160128c91478768",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:811a364b4b34df0053323522ceb9d20b9f2c64e6c6fbde207c3298eb71580653"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_41aa5b8b09818d80c160128c91478768.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_41aa5b8b09818d80c160128c91478768.1",
+          "invocationId": "inv_41aa5b8b09818d80c160128c91478768",
+          "status": "unknown"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-6"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:1c7d1cc4d7328e39311bc21fb01018823996658196a2cef40ef499846d98c96d",
+            "invocationId": "inv_41aa5b8b09818d80c160128c91478768",
+            "nodeId": "work",
+            "state": "unknown"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_f",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "needs-intervention",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:8f8c46f7e47fba305f425c0168867f268e121db28a343d7155ac54df4bb31449",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.unknown",
+            "nodeId": "work",
+            "details": {
+              "attempt": 1,
+              "invocationId": "inv_41aa5b8b09818d80c160128c91478768",
+              "status": "unknown"
+            }
+          }
+        ],
+        "decisionDigest": "sha256:66ae99e763ac4432ca1af04419c2eb3e13a5def4c53952d9829fbedbdee45ef0"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:3",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_41aa5b8b09818d80c160128c91478768",
+          "resolution": {
+            "action": "fail",
+            "error": {"code": "operator.failed", "message": "not done"}
+          }
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-6"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "operator.failed",
+              "details": null,
+              "message": "not done",
+              "nodeId": "work"
+            }
+          },
+          "runId": "run_stuck_f",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:b4b50499f3cf214742ba2af1a5b15468bfcd23ad8403528c5bd68e7426f1b560",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:0bb1da56689340ef39579f700e8b249c64275b38edf46e57891c2e15f6497694"
+      }
+    }
+  ]
+}

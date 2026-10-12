@@ -106,6 +106,14 @@ fn consistent(state: &State, graph: &Graph) -> Result<(), &'static str> {
         {
             owned_by(invocation, position, action, state)
         }
+        (RunStatus::NeedsIntervention, Node::Activity { action, .. }, Some(invocation))
+            if invocation.state == InvocationPhase::Stuck =>
+        {
+            if !graph.parks_stuck_steps() {
+                return Err("only a 0.2 document has stuck steps");
+            }
+            owned_by(invocation, position, action, state)
+        }
         _ => Err("status, position and invocation do not agree"),
     }
 }
@@ -127,6 +135,9 @@ fn owned_by(
     }
     if invocation.attempt == 0 {
         return Err("invocation.attempt starts at 1");
+    }
+    if invocation.error.is_some() != (invocation.state == InvocationPhase::Stuck) {
+        return Err("exactly a stuck invocation keeps an error");
     }
     Ok(())
 }

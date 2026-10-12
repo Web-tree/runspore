@@ -195,6 +195,7 @@ impl<'a> Machine<'a> {
                             MESSAGE_UNDECLARED_OUTCOME,
                             details,
                         ),
+                        true,
                     )
                 }
             }
@@ -205,7 +206,7 @@ impl<'a> Machine<'a> {
                     let error = result.error.unwrap_or_else(|| {
                         kernel_error(code::ACTIVITY_FAILED, MESSAGE_ACTIVITY_FAILED, Value::Null)
                     });
-                    self.fail_invocation(&activity, error)
+                    self.fail_invocation(&activity, error, true)
                 }
             }
             AttemptStatus::Unknown | AttemptStatus::Expired => {
@@ -231,6 +232,7 @@ impl<'a> Machine<'a> {
                             MESSAGE_ATTEMPTS_EXHAUSTED,
                             object([("lastStatus", status)]),
                         ),
+                        true,
                     )
                 }
             }
@@ -246,7 +248,7 @@ impl<'a> Machine<'a> {
             .filter(|invocation| invocation.invocation_id == resolved.invocation_id);
         let refusal = match current {
             None => Some(REASON_MISMATCH),
-            Some(invocation) if invocation.state != InvocationPhase::Unknown => {
+            Some(invocation) if invocation.state == InvocationPhase::Scheduled => {
                 Some(REASON_NOT_UNKNOWN)
             }
             Some(_) => None,
@@ -257,6 +259,7 @@ impl<'a> Machine<'a> {
         }
 
         let activity = self.activity()?;
+        let kept = current.and_then(|invocation| invocation.error.clone());
         match resolved.resolution {
             Resolution::Complete { outcome, output } => {
                 if activity.policy.outcomes.contains(&outcome) {
@@ -270,7 +273,13 @@ impl<'a> Machine<'a> {
                 }
             }
             Resolution::Retry => self.retry(&activity, 0),
-            Resolution::Fail { error } => self.fail_invocation(&activity, error),
+            Resolution::Fail { error } => match kept {
+                Some(kept) => {
+                    self.terminate(kept);
+                    Ok(())
+                }
+                None => self.fail_invocation(&activity, error, false),
+            },
         }
     }
 
@@ -403,6 +412,7 @@ impl<'a> Machine<'a> {
             attempt: 1,
             state: InvocationPhase::Scheduled,
             input_digest,
+            error: None,
         });
         self.state.position = Some(position);
         self.state.status = RunStatus::Running;
@@ -527,6 +537,7 @@ impl<'a> Machine<'a> {
         };
         invocation.attempt = attempt;
         invocation.state = InvocationPhase::Scheduled;
+        invocation.error = None;
         let payload = RetryActivity {
             invocation_id: invocation.invocation_id.clone(),
             attempt,
@@ -548,19 +559,24 @@ impl<'a> Machine<'a> {
         )
     }
 
-    /// Fail the invocation (7.4): take the node's `failed` route when it has one,
-    /// otherwise end the run with the error.
+    /// Fail the invocation (7.4): take the node's `failed` route when it has one.
+    /// Otherwise a 0.2 document parks the step as stuck when `may_park`, and anything
+    /// else ends the run with the error.
     fn fail_invocation(
         &mut self,
         activity: &Activity<'a>,
         mut error: ErrorInfo,
+        may_park: bool,
     ) -> Result<(), Failure> {
         error.node_id = Some(activity.node_id.to_string());
-        self.state.invocation = None;
         let Some(target) = activity.outcomes.get(OUTCOME_FAILED) else {
+            if may_park && self.graph.parks_stuck_steps() {
+                return self.stick(activity, error);
+            }
             self.terminate(error);
             return Ok(());
         };
+        self.state.invocation = None;
         let error = serde_json::to_value(&error)
             .map_err(|cause| failure::invariant(format!("error is not JSON: {cause}")))?;
         self.state.nodes.insert(
@@ -572,6 +588,29 @@ impl<'a> Machine<'a> {
             },
         );
         self.enter(target, Some(activity.node_id))
+    }
+
+    /// A stuck step (7.4): the invocation keeps its error and waits for a person.
+    fn stick(&mut self, activity: &Activity<'a>, error: ErrorInfo) -> Result<(), Failure> {
+        let Some(invocation) = self.state.invocation.as_mut() else {
+            return Err(failure::invariant("a stuck step without an invocation"));
+        };
+        let details = object([
+            (
+                "invocationId",
+                Value::String(invocation.invocation_id.clone()),
+            ),
+            ("attempt", Value::from(invocation.attempt)),
+            (
+                "error",
+                serde_json::to_value(&error)
+                    .map_err(|cause| failure::invariant(format!("error is not JSON: {cause}")))?,
+            ),
+        ]);
+        invocation.state = InvocationPhase::Stuck;
+        invocation.error = Some(error);
+        self.state.status = RunStatus::NeedsIntervention;
+        self.diagnose(code::INVOCATION_STUCK, Some(activity.node_id), details)
     }
 
     /// Terminal `failed`: the error becomes the result; position and invocation clear.
