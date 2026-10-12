@@ -51,8 +51,8 @@ code { font: 0.88em var(--mono); background: var(--surface); border: 1px solid v
 .chip.r { background: var(--spore-bg); border-color: var(--spore); }
 .chip.p { background: var(--plug-bg); border-color: var(--plug); }
 .chip.f { background: var(--check-bg); border-color: var(--check); }
-.chip.done { opacity: 0.6; }
-.chip.done .nm { text-decoration: line-through; }
+.chip.done, .chip.dropped { opacity: 0.6; }
+.chip.done .nm, .chip.dropped .nm { text-decoration: line-through; }
 .chip:hover, .chip:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
 .chip .id { font: 600 12px var(--mono); }
 .chip .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42ch; }
@@ -75,7 +75,7 @@ details pre { margin: 0; padding: 12px; border-top: 1px solid var(--line); overf
 <div class="wrap">
   <header class="lede">
     <h1>Runspore build order</h1>
-    <p>The build runs on Runspore: <code>build-0-2</code> is a workflow in the 0.2 format (a <code>workflow.dot</code> and a <code>settings.json</code>), run today by spore 0.1. Each wave starts one <code>ticket</code> run per ticket (implement, test, ship) and finishes when all are merged. Each checkpoint is a decision you answer with <code>go</code> or <code>changes</code>; <code>changes</code> builds tickets made from your changes, then asks again.</p>
+    <p>The build runs on Runspore: <code>build-0-2</code> is a workflow in the 0.2 format (a <code>workflow.dot</code> and a <code>settings.json</code>), run today by spore 0.1. Each wave starts one <code>ticket</code> run per ticket (implement, test, ship) and finishes when every ticket is merged, or closed as not planned by you. Each checkpoint is a decision you answer with <code>go</code> or <code>changes</code>; <code>changes</code> builds tickets made from your changes, then asks again.</p>
     <div class="now"><i></i><span>Now: {{NOW}}</span></div>
     <div class="key">
       <span><i style="background:var(--done)"></i>done</span>

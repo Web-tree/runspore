@@ -27,9 +27,10 @@ elif cmd == ("issue", "close"):
 elif cmd == ("issue", "reopen"):
     issue(repo, a[2])["state"] = "OPEN"
 elif cmd == ("issue", "list"):
-    print(json.dumps([{"number": int(k.split("#")[1]), "state": v["state"]} for k, v in st["issues"].items() if k.startswith(repo + "#")]))
+    print(json.dumps([{"number": int(k.split("#")[1]), "state": v["state"], "stateReason": v.get("reason", "COMPLETED") if v["state"] == "CLOSED" else None} for k, v in st["issues"].items() if k.startswith(repo + "#")]))
 elif cmd == ("pr", "list") and not opt("--head"):
-    print(json.dumps([{"title": p["title"], "body": p["body"]} for k, p in st["prs"].items() if k.startswith(repo + "#") and p["state"] == "OPEN"]))
+    import re
+    print(json.dumps([{"closingIssuesReferences": [{"number": int(n), "url": f"https://github.com/{repo}/issues/{n}"} for n in re.findall(r"Closes #(\d+)", p["body"])]} for k, p in st["prs"].items() if k.startswith(repo + "#") and p["state"] == "OPEN"]))
 elif cmd == ("pr", "list"):
     head = opt("--head"); print(json.dumps([{"number": int(n.split("#")[1]), "state": p["state"], "url": p["url"]} for n, p in st["prs"].items() if n.startswith(repo + "#") and p["head"] == head]))
 elif cmd == ("pr", "create"):

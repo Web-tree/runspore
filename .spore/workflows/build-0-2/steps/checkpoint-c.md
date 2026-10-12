@@ -2,7 +2,7 @@
 
 Comes after wave 5 (R4, R15, R18, P1, P3).
 
-**Try:** From a plain terminal: `spore run coding-loop --input '{"task": …}'` with the real `claude-spore run` as `implement`. Kill it mid-step, run again, and the conversation resumes. Its answer is held to the schema.
+**Try:** From a plain terminal: `spore run coding-loop --key try-c --input '{"task": …}'` with the real `claude-spore run` as `implement`. Kill it mid-step, run the same command again (the same `--key` names the same run), and the conversation resumes. Its answer is held to the schema.
 
 **Feedback asked for:** Is the background Claude step good enough to build the rest of the plugin on?
 

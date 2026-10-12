@@ -65,17 +65,24 @@ def path_of(dot):
 
 
 def ticket_states(settings):
+    """issue -> done (closed as completed), dropped (closed as not planned),
+    in-progress (an open PR closes it), or open."""
     repos = {t["issue"].split("#")[0] for n in settings["nodes"].values()
              for t in n.get("input", {}).get("tickets", {}).get("$literal", [])}
     closed, in_pr = {}, set()
     for repo in repos:
-        for i in gh_json("issue", "list", "-R", repo, "--state", "all", "--limit", "300", "--json", "number,state"):
-            closed[f"{repo}#{i['number']}"] = i["state"] == "CLOSED"
-        for pr in gh_json("pr", "list", "-R", repo, "--state", "open", "--limit", "100", "--json", "title,body"):
-            for m in re.finditer(r"(?:([\w.-]+/[\w.-]+))?#(\d+)", f"{pr['title']} {pr['body']}"):
-                in_pr.add(f"{m.group(1) or repo}#{m.group(2)}")
+        for i in gh_json("issue", "list", "-R", repo, "--state", "all", "--limit", "300",
+                         "--json", "number,state,stateReason"):
+            if i["state"] == "CLOSED":
+                closed[f"{repo}#{i['number']}"] = "dropped" if i.get("stateReason") == "NOT_PLANNED" else "done"
+        # Only GitHub's closing links count: a PR that merely mentions a ticket is not building it.
+        for pr in gh_json("pr", "list", "-R", repo, "--state", "open", "--limit", "100",
+                          "--json", "closingIssuesReferences"):
+            for ref in pr.get("closingIssuesReferences") or []:
+                m = re.search(r"github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)", ref.get("url", ""))
+                in_pr.add(f"{m.group(1)}#{m.group(2)}" if m else f"{repo}#{ref['number']}")
     def state(issue):
-        return "done" if closed.get(issue) else "in-progress" if issue in in_pr else "open"
+        return closed.get(issue) or ("in-progress" if issue in in_pr else "open")
     return state
 
 
@@ -115,7 +122,7 @@ def status():
 
     def ticket(t):
         s = state(t["issue"])
-        if s != "done" and t["issue"] in ticket_runs:
+        if s not in ("done", "dropped") and t["issue"] in ticket_runs:
             r = ticket_runs[t["issue"]][1]
             s = r["status"] if r["status"] in ("failed",) else spore("status", r["runId"])["position"]["nodeId"] or r["status"]
         return {**t, "state": s}
@@ -153,7 +160,7 @@ def planned(dot, settings, seq, state):
         cfg = settings["nodes"].get(node, {})
         if wave_tickets(settings, node):
             ts = [{**t, "state": state(t["issue"])} for t in wave_tickets(settings, node)]
-            done = all(t["state"] == "done" for t in ts)
+            done = all(t["state"] in ("done", "dropped") for t in ts)
             nodes[node] = {"kind": "wave", "tickets": ts, "done": done}
         elif "signal" in cfg:
             done = False
@@ -201,8 +208,8 @@ def page(out_path):
     pos = st["position"]["nodeId"]
     cur = st["nodes"].get(pos, {})
     if cur.get("kind") == "wave":
-        n = sum(t["state"] == "done" for t in cur["tickets"])
-        now = f"{pos.replace('_', ' ').capitalize()}: {n} of {len(cur['tickets'])} tickets merged"
+        n = sum(t["state"] in ("done", "dropped") for t in cur["tickets"])
+        now = f"{pos.replace('_', ' ').capitalize()}: {n} of {len(cur['tickets'])} tickets finished"
     elif cur.get("kind") == "checkpoint":
         now = f"Checkpoint {pos[-1].upper()}: waiting for your answer"
     else:
