@@ -46,8 +46,8 @@ builds them, then asks again.
 At a checkpoint: stop the build (Ctrl-C), answer, then `work/build-0-2/bin/build
 --upgrade`. The new run passes the merged waves at once and gets every `go` you
 gave up front. It prints the commit it came from; `build --upgrade <that commit>`
-goes back to it and its database. Checkpoint 0 is the first of these: R3 has made
-spore read workflow folders, so `bin/build` stops converting them.
+goes back to it and its database. Checkpoint 0 is the first of these: from there on
+the build runs on a spore built from this repository's `main`.
 
 ## See where it is
 
@@ -72,7 +72,6 @@ its own acceptance criteria, so the build uses each fix from the next upgrade on
 
 | Workaround here | Gap | Where it is fixed |
 | --- | --- | --- |
-| `bin/to-0.1` converts the DOT folders to 0.1 JSON (only while the spore can't read them) | No DOT reader | R3 |
 | `fix` and `fix_ci` are separate nodes, so each can read the output of the step before it | A step can't read why it was entered | R12 (`from`, `$get` default) |
 | The step scripts `cd` into the worktree from their input | `cwd` is fixed per action | R25 |
 | Over the visit limit the ticket run fails; the wave tries once more, then asks you | No limit arrow, no stuck step | R10, R11 |

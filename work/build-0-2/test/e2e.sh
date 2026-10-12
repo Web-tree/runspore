@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# End-to-end test of the build-0-2 harness with real spore 0.1 and fake gh and claude.
+# End-to-end test of the build-0-2 harness with a real spore and fake gh and claude.
 #
-#   work/build-0-2/test/e2e.sh [scratch-dir]
+#   work/build-0-2/test/e2e.sh [scratch-dir]   # SPORE=<binary> to test that spore;
+#                                              # else this checkout's spore is built
 #
 # The build runs from a scratch clone of this checkout (with its uncommitted
 # changes), so `build --upgrade` can check it out; each upgrade's "install" is a
-# link to spore 0.1. Scratch git repos stand in for both GitHub repos (fake
+# link to $SPORE. Scratch git repos stand in for both GitHub repos (fake
 # `gh pr merge` squash-merges into their bare origins). Checks: the first
 # `build --upgrade` runs the fast lane and asks checkpoint 0; `go` runs waves 1-2
 # (R9 goes red once and is fixed) and checkpoint A asks; a `changes` answer builds
@@ -15,7 +16,10 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 E="${1:-$(mktemp -d)}"
-SPORE="${SPORE:-$HOME/.local/share/runspore-0.1/bin/spore}"
+if [ -z "${SPORE:-}" ]; then
+  cargo build --quiet --locked --manifest-path "$root/Cargo.toml" -p runspore-cli
+  SPORE="${CARGO_TARGET_DIR:-$root/target}/debug/spore"
+fi
 rm -rf "$E" && mkdir -p "$E"
 for r in runspore skills; do
   git init -q --bare -b main "$E/bare-$r.git"

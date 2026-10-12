@@ -57,7 +57,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Check a workflow document and its actions without touching the database.
+    /// Build a workflow and check it and its actions without touching the database.
     Validate { workflow: PathBuf },
     /// Create a run and return.
     Start(StartArgs),
@@ -109,6 +109,7 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct StartArgs {
+    /// A workflow folder, its workflow.dot, or a JSON workflow document.
     workflow: PathBuf,
     #[arg(long, conflicts_with = "input_file")]
     input: Option<String>,
@@ -314,9 +315,10 @@ fn registry() -> ActivityRegistry {
 
 /// Validation opens no database: it runs the checks of `start` against no store.
 fn validate(cli: &Cli, workflow: &Path) -> Result<Output, Fail> {
-    let bytes = read_file(workflow)?;
+    let source = Source::read(workflow)?;
     let config = EngineConfig::default();
-    let package = validate_workflow(&*reducer(cli)?, &registry(), config.limits, &bytes)?;
+    let package = validate_workflow(&*reducer(cli)?, &registry(), config.limits, &source.bytes)
+        .map_err(|e| source.fail(e))?;
     done(
         json!({"valid": true, "packageBytes": package.len().to_string()}),
         format!("{} is valid", workflow.display()),
@@ -356,7 +358,7 @@ fn started(created: bool) -> &'static str {
 }
 
 async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, bool), Fail> {
-    let workflow = read_file(&args.workflow)?;
+    let source = Source::read(&args.workflow)?;
     let input = match (&args.input, &args.input_file) {
         (Some(text), _) => parse_json("--input", text)?,
         (None, Some(path)) => {
@@ -367,7 +369,10 @@ async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, bool), Fail
         (None, None) => json!({}),
     };
     let start_key = args.key.clone().unwrap_or_else(|| generated("key"));
-    let outcome = engine.start(&workflow, input, &start_key).await?;
+    let outcome = engine
+        .start(&source.bytes, input, &start_key)
+        .await
+        .map_err(|e| source.fail(e))?;
     Ok((start_key, outcome.created))
 }
 
@@ -465,6 +470,43 @@ fn disposition(d: &Disposition) -> &'static str {
     match d {
         Disposition::Applied => "applied",
         Disposition::Duplicate => "duplicate",
+    }
+}
+
+/// The workflow a command was given, as package bytes: a folder built in memory
+/// (spec/dot.md), or a JSON document read as it is.
+struct Source {
+    bytes: Vec<u8>,
+    folder: Option<PathBuf>,
+}
+
+impl Source {
+    fn read(path: &Path) -> Result<Self, Fail> {
+        let build_fail = |e: runspore_build::BuildError| Fail::usage(e.code, e.to_string());
+        match runspore_build::entry(path).map_err(build_fail)? {
+            runspore_build::Entry::Folder(folder) => {
+                let package = runspore_build::build(&folder).map_err(build_fail)?;
+                let bytes = serde_json::to_vec(&package)
+                    .map_err(|e| Fail::internal("json.encode", e.to_string()))?;
+                Ok(Self {
+                    bytes,
+                    folder: Some(folder),
+                })
+            }
+            runspore_build::Entry::Document(path) => Ok(Self {
+                bytes: read_file(&path)?,
+                folder: None,
+            }),
+        }
+    }
+
+    /// A rejection of a built package names the folder it came from.
+    fn fail(&self, e: HostError) -> Fail {
+        let mut fail = Fail::from(e);
+        if let (Some(folder), 2) = (&self.folder, fail.exit) {
+            fail.message = format!("{}: {}", folder.display(), fail.message);
+        }
+        fail
     }
 }
 

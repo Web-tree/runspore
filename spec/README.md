@@ -8,7 +8,7 @@ directory wins for the MVP; `docs/` remains the target architecture.
 ## What the MVP is
 
 A single binary, `spore`, and the Rust library behind it. A user writes a workflow
-as one JSON document, starts a run, and can kill the process at any moment. Restarting
+as a folder holding `workflow.dot` and `settings.json`, starts a run, and can kill the process at any moment. Restarting
 resumes the run from its last committed step. No completed step runs again. A step
 that was interrupted mid-effect is either repeated (when the workflow declares that
 safe) or the run pauses and says so.
@@ -33,8 +33,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 ## Out of scope for the MVP
 
 Timers, fork and join, child workflows, compensation, cancellation, `reconcilable`
-effects, JSON Schema validation of inputs and outputs, a compiler or YAML/DOT
-frontends, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, approvals
+effects, JSON Schema validation of inputs and outputs, a YAML frontend, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, approvals
 and capability brokering, secrets, telemetry, blobs, history compaction, run migration,
 package signing. Each is additive under a later semantics version.
 
@@ -42,7 +41,7 @@ package signing. Each is additive under a later semantics version.
 
 | ID | Decision | Reason |
 | --- | --- | --- |
-| M01 | One workflow document holds graph and action bindings | No compiler yet; the package digest covers both |
+| M01 | One workflow document holds graph and action bindings | No compiler yet; the package digest covers both. Superseded for authoring by workflow folders ([dot.md](dot.md)); the package is still one document |
 | M02 | The kernel reads only `outcomes`, `effect`, `retry` from an action | Implementation fields stay a host concern |
 | M03 | `effect` is required on every action | The author must state what a repeat would do |
 | M04 | Retries are kernel decisions carried by an `activity.retry` command | One implementation of retry semantics (ADR A01) |
@@ -61,6 +60,7 @@ package signing. Each is additive under a later semantics version.
 - [store.md](store.md): store operations, atomicity, failure codes, required tests.
 - [host.md](host.md): engine loop, dispatch, activities, failpoints, wasm packaging.
 - [cli.md](cli.md): the `spore` command surface and exit codes.
+- [dot.md](dot.md): workflow folders, the DOT dialect, settings and the build.
 
 The wire types are code: `crates/runspore-types`. Where prose and that crate disagree,
 the crate wins and the prose is a bug.
@@ -74,6 +74,7 @@ crates/runspore-component     kernel as a WebAssembly component (guest)
 crates/runspore-wasmtime      Reducer implemented by running that component
 crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
+crates/runspore-build         Build: workflow folder (DOT and settings) to package
 crates/runspore-cli           the spore binary and crash-recovery tests
 conformance/traces            golden kernel traces
 conformance/js                Node and Bun trace runners
