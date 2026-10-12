@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""A fake claude -p: commits <id>.txt in cwd; ticket R9 first breaks the checks, the fix repairs them."""
+"""A fake claude -p: commits <id>.txt in cwd; ticket R9 first breaks the checks, the fix repairs them.
+Ticket $FAKE_CLAUDE_STUCK fails every try until the file $FAKE_CLAUDE_UNSTICK exists."""
 import json, os, re, subprocess, sys, time
 prompt = sys.stdin.read()
 inp = json.loads(re.search(r"## Input\n\n```json\n(.*)\n```", prompt, re.S).group(1))
 tid = inp["ticket"]["id"]
+if tid == os.environ.get("FAKE_CLAUDE_STUCK") and not os.path.exists(os.environ.get("FAKE_CLAUDE_UNSTICK", "")):
+    print(f"fake claude: {tid} cannot be done yet", file=sys.stderr)
+    sys.exit(1)
 def git(*a): subprocess.run(["git", *a], check=True, capture_output=True)
 if "failures" in inp:
     if os.path.exists("BROKEN"): git("rm", "-q", "BROKEN")

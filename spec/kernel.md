@@ -19,15 +19,17 @@ created under (check 5). The two are independent: a request of either semantics 
 carry a document of either format.
 
 Version 0.2 is being added beside 0.1 one rule at a time. A rule that applies to one
-version only says so; every other rule applies to both. Outside those rules, a
-`runspore.workflow/0.2` document is validated and run exactly as the same document
-marked `runspore.workflow/0.1`: the same failures, and decisions identical byte for
-byte. The rules marked 0.2 so far:
+version only says so, and is keyed by the document's `format`; every other rule
+applies to both. Outside those rules, a `runspore.workflow/0.2` document is validated
+and run exactly as the same document marked `runspore.workflow/0.1`: the same
+failures, and decisions identical byte for byte. `describe` reports semantics `0.1`
+and format `runspore.workflow/0.1`, the versions a host uses when it does not choose.
+The rules marked 0.2 so far:
 
 | Rule | Where | Applies to |
 | --- | --- | --- |
-| `from` as a path's first step; `default` beside `$get` | §4, W10 | documents in format `runspore.workflow/0.2`, under either semantics | `describe` reports semantics `0.1` and format `runspore.workflow/0.1`, the
-versions a host uses when it does not choose.
+| `from` as a path's first step; `default` beside `$get` | §4, W10 | documents in format `runspore.workflow/0.2`, under either semantics |
+| A step that cannot recover is stuck and waits for a person instead of failing the run | §3, §7.3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
 
 ## 1. Canonical data
 
@@ -110,9 +112,14 @@ Type: `model::State`. `status` is one of:
 | --- | --- | --- | --- |
 | `running` | An attempt of an activity is authorized | the activity node | `scheduled` |
 | `waiting` | Parked at an await-signal node | that node | null |
-| `needs-intervention` | An unsafe invocation has an unknown outcome | the activity node | `unknown` |
+| `needs-intervention` | An unsafe invocation has an unknown outcome, or (0.2) a step is stuck | the activity node | `unknown` or `stuck` |
 | `completed` | Terminal success | null | null |
 | `failed` | Terminal failure | null | null |
+
+An invocation's `state` is `scheduled`, `unknown`, or (0.2 only) `stuck`. A stuck
+invocation keeps the error that made it stuck in `error`; no other invocation has an
+`error`, and the field is absent when it has none. A stuck invocation in the snapshot
+of a 0.1 document is `state.invalid`.
 
 `nodes[id]` holds the latest result of a node: `{visit, outcome, output}`. A later
 visit replaces it. `visits[id]` counts admitted entries. `activations` counts admitted
@@ -255,19 +262,23 @@ same `invocationId` and `attempt`, and is `scheduled`: diagnostic `result.stale`
   effect is `unsafe`: set `inv.state = unknown`, status `needs-intervention`, emit
   diagnostic `invocation.unknown` (details `{"invocationId", "attempt", "status"}`).
 
-**`invocation.resolved`** — unless `state.invocation` has that ID and is `unknown`:
-diagnostic `resolve.not-applicable` (details `{"invocationId", "reason"}`), no other
-change. Otherwise by `resolution.action`:
+**`invocation.resolved`** — unless `state.invocation` has that ID and is `unknown` or
+`stuck`: diagnostic `resolve.not-applicable` (details `{"invocationId", "reason"}`),
+no other change. Otherwise by `resolution.action`:
 
 - `complete`: if the action does not declare the outcome, diagnostic
   `resolve.not-applicable` and no other change. Otherwise as a `success` result with
   that outcome and output.
+- `retry`: *retry* with no delay and regardless of `maxAttempts`. A stuck invocation
+  drops its kept error. The new attempt has the same invocation ID and effect key.
+- `fail`: for an `unknown` invocation, *fail the invocation* with the given error,
+  but never park: with no `failed` route the run ends `failed` even under 0.2. For a
+  `stuck` invocation, terminal `failed` with the kept error as the result; the given
+  error stays in the event only. A person's fail is final.
 
 The `reason` of `resolve.not-applicable` is `invocation-mismatch` (no invocation, or
 another ID), `invocation-not-unknown` (the ID matches but its phase is `scheduled`),
 or `outcome-undeclared`.
-- `retry`: *retry* with no delay and regardless of `maxAttempts`.
-- `fail`: *fail the invocation* with the given error.
 
 ### 7.4 Procedures
 
@@ -304,13 +315,25 @@ Emit `activity.retry` with the new attempt as command ordinal and
 `notBeforeMs = now + retry.delayAfter(previous attempt)` (zero delay when resolving).
 Emit diagnostic `activity.retry-scheduled` (details `{"attempt"}`).
 
-**Fail the invocation(error)** — set `error.nodeId` to the node and clear the
-invocation. If the node routes `failed`: record `nodes[node] = {visit, outcome:
-"failed", output: {"error": error}}` and *enter* the target. Otherwise terminal
-`failed` with `result = {error}`.
+**Fail the invocation(error)** — set `error.nodeId` to the node. If the node routes
+`failed`: clear the invocation, record `nodes[node] = {visit, outcome: "failed",
+output: {"error": error}}` and *enter* the target. Otherwise, for a 0.1 document,
+clear the invocation and end terminal `failed` with `result = {error}`.
+
+For a 0.2 document with no `failed` route the step is **stuck**: set `inv.state =
+stuck` and `inv.error = error`, keep the invocation and the position, set status
+`needs-intervention`, and emit diagnostic `invocation.stuck` (details
+`{"invocationId", "attempt", "error"}`). This covers every way an attempt gives up: a
+non-retryable failure, a retryable failure on the last attempt, the attempts of a
+repeatable action exhausted by `unknown` or `expired` results
+(`activity.attempts-exhausted`), and an undeclared outcome
+(`activity.undeclared-outcome`). No command is emitted; a person answers with
+`invocation.resolved`.
 
 **Terminal `failed` from a limit or mapping error** — status `failed`, `result =
-{error}`, clear `position` and `invocation`.
+{error}`, clear `position` and `invocation`. Limit and mapping errors are not a step
+failing: they never take a `failed` route and never make a step stuck, in either
+version.
 
 ### 7.5 Result checks
 
@@ -335,7 +358,7 @@ Diagnostics appear in the order they were produced. `details` is canonical JSON.
 | `event.ignored-terminal`, `signal.buffer-overflow` | null |
 | `signal.outcome-unrouted` | the await-signal node |
 | `result.stale`, `resolve.not-applicable` | the activity node when the event names the current invocation, else null |
-| `invocation.unknown`, `activity.retry-scheduled` | the activity node |
+| `invocation.unknown`, `invocation.stuck`, `activity.retry-scheduled` | the activity node |
 
 `activity.retry-scheduled` details carry the newly authorized attempt and follow the
 retry command. The `message` of an `ErrorInfo` the kernel creates is fixed text and is
@@ -354,7 +377,7 @@ bounded in practice by the size of the workflow document and of the state.
 | K3 | A terminal state never changes status (I6) |
 | K4 | Each visit of a node has a distinct activation and invocation ID; retries keep the invocation ID and change the command ID |
 | K5 | A signal accepted before its waiter is consumed exactly once, earliest first (C08) |
-| K6 | An unknown outcome on an `unsafe` action never produces a command (C04) |
+| K6 | An unknown outcome on an `unsafe` action never produces a command (C04); nor does a step becoming stuck |
 | K7 | Exceeding a budget commits nothing (C16) |
 | K8 | Keys with supplementary-plane characters keep JCS order and digest (C15) |
 | K9 | Output does not depend on the insertion order of maps in the input documents |
@@ -390,7 +413,9 @@ feed bytes that are not canonical. Every host's runner must pass every trace.
 
 The traces include documents of both formats and requests of both semantics. The Rust
 kernel tests also replay every trace whose document is `runspore.workflow/0.1` with its
-`format` changed to `runspore.workflow/0.2`, and require the same expectations.
+`format` changed to `runspore.workflow/0.2`, and require the same expectations, except
+for the traces where a step gives up with no `failed` route: under 0.2 that step is
+stuck, which the `14*` traces pin.
 
 The 0.2 mapping rules have their own traces: the start node sees `from` `null`; a
 loop back sees the judging step's outcome and output; a `failed` arrow shows as

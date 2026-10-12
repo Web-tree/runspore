@@ -56,6 +56,12 @@ impl Graph {
     pub(crate) fn policy(&self, action: &str) -> Option<&ActionPolicy> {
         self.policies.get(action)
     }
+
+    /// Whether a step that gives up with no `failed` route is stuck (a 0.2 document)
+    /// rather than ending the run (0.1).
+    pub(crate) fn parks_stuck_steps(&self) -> bool {
+        self.workflow.format == WORKFLOW_FORMAT_0_2
+    }
 }
 
 fn violation(rule: &str, details: impl AsRef<str>) -> Failure {

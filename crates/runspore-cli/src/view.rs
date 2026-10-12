@@ -31,13 +31,27 @@ fn arrow_json(arrow: Option<&Arrow>) -> Value {
     )
 }
 
+/// The `maxAttempts` of an action of a canonical package: its retry policy's, else 1.
+fn max_attempts(package: &Value, action_id: &str) -> Value {
+    let declared = package
+        .pointer(&format!("/actions/{action_id}/retry/maxAttempts"))
+        .filter(|n| n.is_u64());
+    declared.cloned().unwrap_or(json!(1))
+}
+
 /// The `status` object of spec/cli.md, plus `startKey` and the latest result per node.
-pub fn status_json(view: &RunView, arrival: &Arrival) -> Value {
+/// With the run's `package`, the invocation carries its action's `maxAttempts`.
+pub fn status_json(view: &RunView, arrival: &Arrival, package: Option<&Value>) -> Value {
     let state = state(view);
     let field = |f: fn(&State) -> Value| state.as_ref().map_or(Value::Null, f);
     let mut position = field(|s| json!(s.position));
     if let Some(position) = position.as_object_mut() {
         position.insert("from".into(), arrow_json(arrival.from.as_ref()));
+    }
+    let mut invocation = field(|s| json!(s.invocation));
+    if let (Some(package), Some(i)) = (package, invocation.as_object_mut()) {
+        let action_id = i["actionId"].as_str().unwrap_or_default().to_string();
+        i.insert("maxAttempts".into(), max_attempts(package, &action_id));
     }
     json!({
         "runId": view.key.run,
@@ -45,7 +59,7 @@ pub fn status_json(view: &RunView, arrival: &Arrival) -> Value {
         "status": view.status,
         "revision": view.revision.to_string(),
         "position": position,
-        "invocation": field(|s| json!(s.invocation)),
+        "invocation": invocation,
         "result": field(|s| json!(s.result)),
         "end": arrival.end.as_ref().map(|end| json!({
             "nodeId": end.node_id, "from": arrow_json(end.from.as_ref())})),
@@ -63,8 +77,8 @@ fn arrow_text(arrow: &Value) -> String {
     }
 }
 
-pub fn status_text(view: &RunView, arrival: &Arrival) -> String {
-    let s = status_json(view, arrival);
+pub fn status_text(view: &RunView, arrival: &Arrival, package: Option<&Value>) -> String {
+    let s = status_json(view, arrival, package);
     let mut text = format!(
         "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\n",
         view.key.run, view.start_key, view.status, view.revision
@@ -85,12 +99,22 @@ pub fn status_text(view: &RunView, arrival: &Arrival) -> String {
         );
     }
     if let Some(i) = s["invocation"].as_object() {
+        let of = i
+            .get("maxAttempts")
+            .map_or_else(String::new, |m| format!(" of {m}"));
         text += &format!(
-            "invocation {} attempt {} {}\n",
+            "invocation {} attempt {}{of} {}\n",
             i["invocationId"].as_str().unwrap_or_default(),
             i["attempt"],
             i["state"].as_str().unwrap_or_default()
         );
+        if let Some(error) = i.get("error") {
+            text += &format!(
+                "error      {}: {}\n",
+                error["code"].as_str().unwrap_or_default(),
+                error["message"].as_str().unwrap_or_default()
+            );
+        }
     }
     if !s["result"].is_null() {
         text += &format!("result     {}\n", s["result"]);

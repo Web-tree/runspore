@@ -1,0 +1,248 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stuck-expiries-exhausted",
+  "description": "A 0.2 document: both attempts of a repeatable step are lost (expired, then unknown), so the step is stuck with activity.attempts-exhausted. Resolving with complete records the given outcome and output and the run follows its route to completion.",
+  "workflow": {
+    "actions": {
+      "work": {
+        "argv": ["work"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"maxAttempts": 2}
+      }
+    },
+    "format": "runspore.workflow/0.2",
+    "name": "stuck-expiries-exhausted",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {
+        "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-3"}, "runId": "run_stuck_c", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-3"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:e84469c368f7f1f9be758f36e21f92e47f30d94286a3055f560afa364983a484",
+            "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_c",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:ec1961f8f7cd45d13903882d65b4318614bbb39739c529ff60a50225c0d724a9",
+        "commands": [
+          {
+            "commandId": "cmd_45d9c54bdcf4933900b4bcb0acb3e73e",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+              "input": {"job": "j-3"},
+              "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:421403e961e540a595e134113354630bbdca3349eab4ba31974fdcd986a58287"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_a6f0fbcaa20642d90ee0252fd49ac9f7.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7.1",
+          "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+          "status": "expired"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-3"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 2,
+            "inputDigest": "sha256:e84469c368f7f1f9be758f36e21f92e47f30d94286a3055f560afa364983a484",
+            "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_c",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:aa05bc711a0ed5923e259242c27d4129384364184c8780a82680f558892690da",
+        "commands": [
+          {
+            "commandId": "cmd_13f9160a98e6e50bb8538195949573bc",
+            "activationId": "work/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 2,
+              "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+              "notBeforeMs": "1100"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:44b42e0b362dd3856d332321d711f3b2e01bb2ba9df997bf7ae73d6f35401079"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_a6f0fbcaa20642d90ee0252fd49ac9f7.2.3",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7.2",
+          "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+          "status": "expired"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-3"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 2,
+            "error": {
+              "code": "activity.attempts-exhausted",
+              "details": {"lastStatus": "expired"},
+              "message": "activity attempts exhausted",
+              "nodeId": "work"
+            },
+            "inputDigest": "sha256:e84469c368f7f1f9be758f36e21f92e47f30d94286a3055f560afa364983a484",
+            "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+            "nodeId": "work",
+            "state": "stuck"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_c",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "needs-intervention",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:0c349b623e94a744f9e7f3eda22ee661b58330a99f4fed614d35537d1626108a",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.stuck",
+            "nodeId": "work",
+            "details": {
+              "attempt": 2,
+              "error": {
+                "code": "activity.attempts-exhausted",
+                "details": {"lastStatus": "expired"},
+                "message": "activity attempts exhausted",
+                "nodeId": "work"
+              },
+              "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7"
+            }
+          }
+        ],
+        "decisionDigest": "sha256:d896ee753e7a4c7e6fba6023b9c7d6ce633036a96b2e3597343e5bfb17b59145"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:4",
+        "sequence": "4",
+        "acceptedAtMs": "1300",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_a6f0fbcaa20642d90ee0252fd49ac9f7",
+          "resolution": {"action": "complete", "outcome": "ok", "output": {"by": "hand"}}
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-3"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1300",
+          "lastSequence": "4",
+          "nodes": {"work": {"outcome": "ok", "output": {"by": "hand"}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"by": "hand"}},
+          "runId": "run_stuck_c",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:8ec1cdea42a4c240027817d10eca99e80a9d6c847beafeb377c12d332763adb5",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:ded09dc9f40a0d48807536f992f2e50b9db46972636cefcd9f82382c25fac7fb"
+      }
+    }
+  ]
+}

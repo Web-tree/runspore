@@ -9,10 +9,15 @@
 # link to $SPORE. Scratch git repos stand in for both GitHub repos (fake
 # `gh pr merge` squash-merges into their bare origins). Checks: the first
 # `build --upgrade` runs the fast lane and asks checkpoint 0; `go` runs waves 1-2
-# (R9 goes red once and is fixed) and checkpoint A asks; a `changes` answer builds
-# two feedback tickets and asks again; `go` moves on to checkpoint B; upgrading to
-# a newer commit starts a new database and replays to B without asking again.
+# (R9 goes red once and is fixed; R10's implement step can't recover, is stuck,
+# and `spore resolve --retry` gets it merged) and checkpoint A asks; a `changes`
+# answer builds two feedback tickets and asks again; `go` moves on to checkpoint B;
+# upgrading to a newer commit starts a new database and replays to B without
+# asking again.
 set -euo pipefail
+# Run from inside a step (a ticket's test, say), the caller's RUNSPORE_DB names the
+# real build's database, and buildlib would prefer it to the scratch one.
+for v in $(compgen -e); do case "$v" in RUNSPORE_*) unset "$v" ;; esac; done
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 E="${1:-$(mktemp -d)}"
@@ -41,6 +46,7 @@ export BUILD_STATE="$E/state" BUILD_HOME="$E/wt" BUILD_POLL_S=0.3 BUILD_NO_LABEL
 export BUILD_REPOS="{\"Web-tree/runspore\": \"$E/runspore\", \"Max-Levitskiy/skills\": \"$E/skills\"}"
 export BUILD_CHECKS='{"Web-tree/runspore": [["bash", "-c", "test ! -f BROKEN"]], "Max-Levitskiy/skills": [["true"]]}'
 export FAKE_GH_STATE="$E/gh.json"
+export FAKE_CLAUDE_STUCK=R10 FAKE_CLAUDE_UNSTICK="$E/r10-unstick"
 export FAKE_GH_BARES="{\"Web-tree/runspore\": \"$E/bare-runspore.git\", \"Max-Levitskiy/skills\": \"$E/bare-skills.git\"}"
 bin="$orch/work/build-0-2/bin"
 worker=""
@@ -72,10 +78,30 @@ check "sum(1 for p in s['prs'].values() if p['state'] == 'MERGED') == 2"
 "$bin/answer" 0 go > /dev/null
 echo "ok: upgrade started the run, the fast lane merged R1 and R3, checkpoint 0 asked"
 
+r10="Web-tree/runspore#60"
+for _ in $(seq 1 300); do
+  python3 -c "import json,sys; s=json.load(open('$FAKE_GH_STATE'))
+sys.exit(0 if any('is stuck' in c for c in s['issues'].get('$r10', {}).get('comments', [])) else 1)" 2>/dev/null && break
+  sleep 1
+done
+check "any('resolve' in c and '--retry' in c for c in s['issues']['$r10']['comments'])"
+stuck_run="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b
+r = [r for r in b.runs() if r["startKey"] == "ticket:" + sys.argv[2] + ":1"][0]
+d = b.spore("status", r["runId"]); i = d["invocation"]
+assert d["status"] == "needs-intervention" and i["state"] == "stuck" and i["attempt"] == i["maxAttempts"] == 3, d
+assert i["error"]["code"] == "command.exit", d
+assert not [r for r in b.runs() if r["startKey"] == "ticket:" + sys.argv[2] + ":2"], "a second try started"
+print(r["runId"])' "$bin" "$r10")" || { echo "FAIL: R10's ticket run is not stuck"; exit 1; }
+touch "$FAKE_CLAUDE_UNSTICK"
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b
+assert b.spore("resolve", sys.argv[2], "--retry")["disposition"] == "applied"' "$bin" "$stuck_run"
+echo "ok: R10's implement step could not recover, so its ticket run is stuck and the wave asked; resolve --retry"
+
 wait_for waiting checkpoint_a 1
 check "sum(1 for p in s['prs'].values() if p['state'] == 'MERGED') == 11"
 check "s['issues']['Web-tree/runspore#59']['state'] == 'CLOSED'"
 test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R9: ')" = 1 || { echo "FAIL: R9 not merged once"; exit 1; }
+test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R10: ')" = 1 || { echo "FAIL: R10 not merged once"; exit 1; }
 echo "ok: waves 1-2 merged, checkpoint A asked"
 
 "$bin/answer" a changes "Errors should name the settings key" "skills: the menu needs a hint line" > /dev/null

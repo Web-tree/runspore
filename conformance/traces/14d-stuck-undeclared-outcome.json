@@ -1,0 +1,147 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stuck-undeclared-outcome",
+  "description": "A 0.2 document: a success with an outcome the action does not declare makes the step stuck with activity.undeclared-outcome instead of ending the run.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "read-only", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "stuck-undeclared-outcome",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {
+        "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-4"}, "runId": "run_stuck_d", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-4"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:1e928cbe36e45df0f988ad5723bab46f1eee9910cd24c973531d7d3e7c28a296",
+            "invocationId": "inv_d8e94ff0e1c920934d0b2e23098f82d2",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_d",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:a363cf42bf7bfee9fab388b49cab39b6c7329cddc97ec31ab66a511c89443f90",
+        "commands": [
+          {
+            "commandId": "cmd_d973a9d8fb1ee60f81ff3bec075703c6",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_d8e94ff0e1c920934d0b2e23098f82d2",
+              "input": {"job": "j-4"},
+              "invocationId": "inv_d8e94ff0e1c920934d0b2e23098f82d2",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:5dd3cc8ad1555271ebd51608215671a740bdcc985f0765c0287737f09208e207"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_d8e94ff0e1c920934d0b2e23098f82d2.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_d8e94ff0e1c920934d0b2e23098f82d2.1",
+          "invocationId": "inv_d8e94ff0e1c920934d0b2e23098f82d2",
+          "outcome": "maybe",
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-4"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "error": {
+              "code": "activity.undeclared-outcome",
+              "details": {"outcome": "maybe"},
+              "message": "activity reported an undeclared outcome",
+              "nodeId": "work"
+            },
+            "inputDigest": "sha256:1e928cbe36e45df0f988ad5723bab46f1eee9910cd24c973531d7d3e7c28a296",
+            "invocationId": "inv_d8e94ff0e1c920934d0b2e23098f82d2",
+            "nodeId": "work",
+            "state": "stuck"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_d",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "needs-intervention",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:b093a80ae3690aa5ba8f212a6ead9ce1a994f8affefae38dee124f4766f0e7b9",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.stuck",
+            "nodeId": "work",
+            "details": {
+              "attempt": 1,
+              "error": {
+                "code": "activity.undeclared-outcome",
+                "details": {"outcome": "maybe"},
+                "message": "activity reported an undeclared outcome",
+                "nodeId": "work"
+              },
+              "invocationId": "inv_d8e94ff0e1c920934d0b2e23098f82d2"
+            }
+          }
+        ],
+        "decisionDigest": "sha256:7d4914badeb0bba1405d541d42269d4e983b100c8cf3c203437a4bca88142726"
+      }
+    }
+  ]
+}

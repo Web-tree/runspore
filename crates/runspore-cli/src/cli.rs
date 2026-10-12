@@ -12,7 +12,7 @@ use runspore_host::{
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
-use runspore_types::model::{ErrorInfo, Resolution};
+use runspore_types::model::{ErrorInfo, Resolution, State};
 use runspore_types::reducer::Reducer;
 use runspore_types::store::{Disposition, RunKey, RunView, StoreFailureKind};
 use runspore_wasmtime::WasmtimeReducer;
@@ -91,11 +91,12 @@ pub enum Command {
         #[arg(long)]
         id: Option<String>,
     },
-    /// Answer an invocation whose outcome is unknown.
+    /// Answer a stuck step, or an invocation whose outcome is unknown. Without an
+    /// invocation ID, the run's outstanding one.
     #[command(group(ArgGroup::new("resolution").required(true).args(["complete", "retry", "fail"])))]
     Resolve {
         run_id: String,
-        invocation_id: String,
+        invocation_id: Option<String>,
         #[arg(long)]
         complete: Option<String>,
         #[arg(long, requires = "complete")]
@@ -220,9 +221,10 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Status { run_id } => {
             let view = existing(&engine, run_id).await?;
             let arrival = engine.arrival(&view).await?;
+            let package = package(&engine, &view).await?;
             done(
-                view::status_json(&view, &arrival),
-                view::status_text(&view, &arrival),
+                view::status_json(&view, &arrival, package.as_ref()),
+                view::status_text(&view, &arrival, package.as_ref()),
             )
         }
         Command::List => list(&engine).await,
@@ -264,7 +266,13 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             fail,
             id,
         } => {
-            let key = existing(&engine, run_id).await?.key;
+            let view = existing(&engine, run_id).await?;
+            let invocation_id = match invocation_id {
+                Some(id) => id.clone(),
+                None => outstanding(&view)?,
+            };
+            let invocation_id = &invocation_id;
+            let key = view.key;
             let resolution = match (complete, fail) {
                 (Some(outcome), _) => Resolution::Complete {
                     outcome: outcome.clone(),
@@ -399,15 +407,39 @@ async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
         }
     };
     let arrival = engine.arrival(&view).await?;
-    let mut json = view::status_json(&view, &arrival);
+    let package = package(engine, &view).await?;
+    let mut json = view::status_json(&view, &arrival, package.as_ref());
     if exit == EXIT_INTERRUPTED {
         json["interrupted"] = json!(true);
     }
     Ok(Output {
-        text: view::status_text(&view, &arrival),
+        text: view::status_text(&view, &arrival, package.as_ref()),
         json,
         exit,
     })
+}
+
+/// The ID of the run's outstanding invocation, which `resolve` answers by default.
+fn outstanding(view: &RunView) -> Result<String, Fail> {
+    let state: Option<State> = view
+        .snapshot
+        .as_deref()
+        .and_then(|bytes| serde_json::from_slice(bytes).ok());
+    state
+        .and_then(|state| state.invocation)
+        .map(|invocation| invocation.invocation_id)
+        .ok_or_else(|| {
+            Fail::usage(
+                "run.no-invocation",
+                format!("run {} has no step to resolve", view.key.run),
+            )
+        })
+}
+
+/// The run's package as JSON, `None` if it is not stored.
+async fn package(engine: &Engine, view: &RunView) -> Result<Option<Value>, Fail> {
+    let bytes = engine.get_package(&view.package_digest).await?;
+    Ok(bytes.and_then(|bytes| serde_json::from_slice(&bytes).ok()))
 }
 
 async fn existing(engine: &Engine, run: &str) -> Result<RunView, Fail> {

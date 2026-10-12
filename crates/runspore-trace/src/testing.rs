@@ -238,6 +238,7 @@ impl Turn<'_> {
                     attempt: 1,
                     state: InvocationPhase::Scheduled,
                     input_digest: digest::body(b"null"),
+                    error: None,
                 });
             }
             Node::AwaitSignal { .. } => {

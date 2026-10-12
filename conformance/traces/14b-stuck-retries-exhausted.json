@@ -1,0 +1,435 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "stuck-retries-exhausted",
+  "description": "A 0.2 document: the last of two allowed attempts fails retryably, so the step is stuck with the reported error. Resolving with retry authorizes attempt 3 past maxAttempts on the same invocation and effect key, with no delay; it fails again and is stuck again; a second retry succeeds and the run completes.",
+  "workflow": {
+    "actions": {
+      "work": {
+        "argv": ["work"],
+        "effect": "idempotent",
+        "kind": "command",
+        "retry": {"backoffMs": "500", "maxAttempts": 2}
+      }
+    },
+    "format": "runspore.workflow/0.2",
+    "name": "stuck-retries-exhausted",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {
+        "action": "work",
+        "input": {"job": {"$get": ["input", "job"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"job": "j-2"}, "runId": "run_stuck_b", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099",
+            "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:61bd4013fe77aad7731bfb776a23f6365329ccfcd636a9d94430857e0b008ac2",
+        "commands": [
+          {
+            "commandId": "cmd_56a02e9709adf9261dae52e66833c271",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_269f7ada129e3c1f88086115fc004c06",
+              "input": {"job": "j-2"},
+              "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:daf4ef1ce01404b001c976bb087fd8cd39c614185f488972c04e806524a6134e"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_269f7ada129e3c1f88086115fc004c06.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_269f7ada129e3c1f88086115fc004c06.1",
+          "error": {"code": "work.crashed", "message": "work crashed"},
+          "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+          "status": "failure"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 2,
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099",
+            "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:214779d6c986ccb23ac3f341177e71c02798fe42d1ae1d7e6595c94e1aeefcc1",
+        "commands": [
+          {
+            "commandId": "cmd_ac3c04c4b929e0332b7c96417aba8c38",
+            "activationId": "work/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 2,
+              "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+              "notBeforeMs": "1600"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:c70b3a918bdbf1c35387ccf31753bed0c3225dc7e9a1bcd05b9b528cae26e4a6"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_269f7ada129e3c1f88086115fc004c06.2.3",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_269f7ada129e3c1f88086115fc004c06.2",
+          "error": {"code": "work.crashed", "message": "work crashed"},
+          "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+          "status": "failure"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 2,
+            "error": {
+              "code": "work.crashed",
+              "details": null,
+              "message": "work crashed",
+              "nodeId": "work"
+            },
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099",
+            "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+            "nodeId": "work",
+            "state": "stuck"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "needs-intervention",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:e9e32e8816839075e4f402c780fc11338e464c2a46b21a0142954dfa78edba3e",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.stuck",
+            "nodeId": "work",
+            "details": {
+              "attempt": 2,
+              "error": {
+                "code": "work.crashed",
+                "details": null,
+                "message": "work crashed",
+                "nodeId": "work"
+              },
+              "invocationId": "inv_269f7ada129e3c1f88086115fc004c06"
+            }
+          }
+        ],
+        "decisionDigest": "sha256:1c63077b2e011aa8b67d9bc9e279f5fa40fc0992acd46de7cdb100415186f150"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:4",
+        "sequence": "4",
+        "acceptedAtMs": "1300",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+          "resolution": {"action": "retry"}
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 3,
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099",
+            "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1300",
+          "lastSequence": "4",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:b27cadb172b231d507158a814282eea119fba1bcfc255a1f9893d3346dd52587",
+        "commands": [
+          {
+            "commandId": "cmd_1ddead3364eb7f1f7b74b7e8adf58ada",
+            "activationId": "work/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 3,
+              "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+              "notBeforeMs": "1300"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 3}}
+        ],
+        "decisionDigest": "sha256:d7ac6291a5c2dfd7020718ae913631d320a89f1946b26762f3a6cfffb4314e6f"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_269f7ada129e3c1f88086115fc004c06.3.5",
+        "sequence": "5",
+        "acceptedAtMs": "1400",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 3,
+          "attemptId": "inv_269f7ada129e3c1f88086115fc004c06.3",
+          "error": {"code": "work.crashed", "message": "crashed again"},
+          "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+          "status": "failure"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 3,
+            "error": {
+              "code": "work.crashed",
+              "details": null,
+              "message": "crashed again",
+              "nodeId": "work"
+            },
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099",
+            "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+            "nodeId": "work",
+            "state": "stuck"
+          },
+          "lastAcceptedAtMs": "1400",
+          "lastSequence": "5",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "needs-intervention",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:78be0948412f77c9064fc03b088af605aa4ef0c94ea4d43f053da94e024d6d56",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "invocation.stuck",
+            "nodeId": "work",
+            "details": {
+              "attempt": 3,
+              "error": {
+                "code": "work.crashed",
+                "details": null,
+                "message": "crashed again",
+                "nodeId": "work"
+              },
+              "invocationId": "inv_269f7ada129e3c1f88086115fc004c06"
+            }
+          }
+        ],
+        "decisionDigest": "sha256:e1e5a7fa7b782d9a96028303546a6b06911ad7bb9bb85f4fb127c70630b463fe"
+      }
+    },
+    {
+      "event": {
+        "eventId": "res:6",
+        "sequence": "6",
+        "acceptedAtMs": "1500",
+        "kind": "invocation.resolved",
+        "payload": {
+          "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+          "resolution": {"action": "retry"}
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 4,
+            "inputDigest": "sha256:f9c6cce53bd058df1a5ce0a9cdb53e58297c02fc027c471a9782aaf01b4ee099",
+            "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1500",
+          "lastSequence": "6",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:735322ffb18ce6896dddabb220869a839a485252f2eff597358d0b9ff250c44f",
+        "commands": [
+          {
+            "commandId": "cmd_81bfd3ed588682bf9687edef8e642ada",
+            "activationId": "work/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 4,
+              "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+              "notBeforeMs": "1500"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "work", "details": {"attempt": 4}}
+        ],
+        "decisionDigest": "sha256:7f9587d7573b699a7efdff39e428bbd58032f61788e4f1304450553e597fa960"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_269f7ada129e3c1f88086115fc004c06.4.7",
+        "sequence": "7",
+        "acceptedAtMs": "1600",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 4,
+          "attemptId": "inv_269f7ada129e3c1f88086115fc004c06.4",
+          "invocationId": "inv_269f7ada129e3c1f88086115fc004c06",
+          "output": {"built": true},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"job": "j-2"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1600",
+          "lastSequence": "7",
+          "nodes": {"work": {"outcome": "ok", "output": {"built": true}, "visit": 1}},
+          "position": null,
+          "result": {"output": {"built": true}},
+          "runId": "run_stuck_b",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "work": 1}
+        },
+        "snapshotDigest": "sha256:a222be12c26c51464fbe57d8108ff8327ba07cf5a98aef2f13eb72fd1776dff9",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:fbd2c2d17992d4ac99b4aa9562b0fdfe7e1393aa4899f83e17d57fc42b0dae06"
+      }
+    }
+  ]
+}
