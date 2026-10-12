@@ -148,13 +148,19 @@
             "output"
           ]
         },
+        "from": {
+          "$get": [
+            "from",
+            "node"
+          ]
+        },
         "failures": {
           "$get": [
-            "nodes",
-            "test",
+            "from",
             "output",
             "stdout"
-          ]
+          ],
+          "default": "(the step reported no output)"
         }
       }
     },
@@ -181,33 +187,6 @@
             "output",
             "result",
             "summary"
-          ]
-        }
-      }
-    },
-    "fix_ci": {
-      "action": "implement",
-      "instructions": "steps/implement.md",
-      "input": {
-        "ticket": {
-          "$get": [
-            "input",
-            "ticket"
-          ]
-        },
-        "worktree": {
-          "$get": [
-            "nodes",
-            "setup",
-            "output"
-          ]
-        },
-        "failures": {
-          "$get": [
-            "nodes",
-            "ship",
-            "output",
-            "stdout"
           ]
         }
       }

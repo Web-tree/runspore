@@ -1,0 +1,335 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "get-default",
+  "description": "0.2 mappings, `$get` with `default`: on a's first visit nodes.b does not exist and the default is used, unevaluated even when it looks like a mapping; on the loop back the path resolves and the default is ignored. A path into `from` without a default still fails the run with mapping.missing-path.",
+  "workflow": {
+    "actions": {
+      "act": {"argv": ["act"], "effect": "pure", "kind": "command"},
+      "judge": {
+        "argv": ["judge"],
+        "effect": "pure",
+        "kind": "command",
+        "outcomes": ["ok", "again"]
+      }
+    },
+    "format": "runspore.workflow/0.2",
+    "name": "get-default",
+    "nodes": {
+      "a": {
+        "action": "act",
+        "input": {
+          "literal": {"$get": ["input", "absent"], "default": {"$get": ["input"]}},
+          "previous": {"$get": ["nodes", "b", "output", "note"], "default": "none"}
+        },
+        "kind": "activity",
+        "outcomes": {"ok": "b"}
+      },
+      "b": {"action": "judge", "kind": "activity", "outcomes": {"again": "a", "ok": "done"}},
+      "done": {"kind": "complete", "output": {"$get": ["from", "output", "missing"]}}
+    },
+    "start": "a"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"x": 1}, "runId": "run_get_default", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"x": 1},
+          "invocation": {
+            "actionId": "act",
+            "activationId": "a/1",
+            "attempt": 1,
+            "inputDigest": "sha256:2c054295c0c2a8b0c68e23b85df1fe102f2c816417d8a04fb32f056fd706669f",
+            "invocationId": "inv_37bbe813fe0e1972c04e72375d29f074",
+            "nodeId": "a",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "a/1", "nodeId": "a", "visit": 1},
+          "result": null,
+          "runId": "run_get_default",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"a": 1}
+        },
+        "snapshotDigest": "sha256:2f3c45c833133e96aa4d3ec73d7bb8770a3d40d580e6b8004bea3f8bcc70bc9a",
+        "commands": [
+          {
+            "commandId": "cmd_c32ac277703fe56445c0e7ed5a504f47",
+            "activationId": "a/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "act",
+              "activationId": "a/1",
+              "attempt": 1,
+              "effectKey": "inv_37bbe813fe0e1972c04e72375d29f074",
+              "input": {"literal": {"$get": ["input"]}, "previous": "none"},
+              "invocationId": "inv_37bbe813fe0e1972c04e72375d29f074",
+              "nodeId": "a",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:e1a8cac3a2bf1b98445c1506ca74b237ff6fbe23520039a2c573f1b181fe8456"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_37bbe813fe0e1972c04e72375d29f074.1",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_37bbe813fe0e1972c04e72375d29f074.1",
+          "invocationId": "inv_37bbe813fe0e1972c04e72375d29f074",
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"x": 1},
+          "invocation": {
+            "actionId": "judge",
+            "activationId": "b/1",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_c302be60659b9d90ce60fd066dd45543",
+            "nodeId": "b",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {"a": {"outcome": "ok", "output": null, "visit": 1}},
+          "position": {"activationId": "b/1", "nodeId": "b", "visit": 1},
+          "result": null,
+          "runId": "run_get_default",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"a": 1, "b": 1}
+        },
+        "snapshotDigest": "sha256:71d60a9f92c18b8346305d5b7d2d1a3c1ccfdecb806fc3d402c353873f6bb3f4",
+        "commands": [
+          {
+            "commandId": "cmd_96d44cbbd24ebd2ffa85cd96e5c27670",
+            "activationId": "b/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "judge",
+              "activationId": "b/1",
+              "attempt": 1,
+              "effectKey": "inv_c302be60659b9d90ce60fd066dd45543",
+              "input": null,
+              "invocationId": "inv_c302be60659b9d90ce60fd066dd45543",
+              "nodeId": "b",
+              "notBeforeMs": "1100"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:799122b769ac467cc7c8542a1020a38f15bdad81eceeac027c33212166a5e922"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_c302be60659b9d90ce60fd066dd45543.1",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_c302be60659b9d90ce60fd066dd45543.1",
+          "invocationId": "inv_c302be60659b9d90ce60fd066dd45543",
+          "outcome": "again",
+          "output": {"note": "hi"},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"x": 1},
+          "invocation": {
+            "actionId": "act",
+            "activationId": "a/2",
+            "attempt": 1,
+            "inputDigest": "sha256:08a0ac720be9da105f3ac6a2bb580c415af9237e416448b7fb6a3cb03293b1a7",
+            "invocationId": "inv_f94c7708153dad8b44efe6e8bd73ae05",
+            "nodeId": "a",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {
+            "a": {"outcome": "ok", "output": null, "visit": 1},
+            "b": {"outcome": "again", "output": {"note": "hi"}, "visit": 1}
+          },
+          "position": {"activationId": "a/2", "nodeId": "a", "visit": 2},
+          "result": null,
+          "runId": "run_get_default",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"a": 2, "b": 1}
+        },
+        "snapshotDigest": "sha256:9c77cd2ec2bd5ae3e537839acf7a2864eadb6bbc0b05695f848606e8ac7a98a0",
+        "commands": [
+          {
+            "commandId": "cmd_9534c12dc3c886fd85239a6096c6b9a1",
+            "activationId": "a/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "act",
+              "activationId": "a/2",
+              "attempt": 1,
+              "effectKey": "inv_f94c7708153dad8b44efe6e8bd73ae05",
+              "input": {"literal": {"$get": ["input"]}, "previous": "hi"},
+              "invocationId": "inv_f94c7708153dad8b44efe6e8bd73ae05",
+              "nodeId": "a",
+              "notBeforeMs": "1200"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:416f8bd5ec29393a4af4a88fb5fe914c50de3af90b1f8b925833a7e25a08d526"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_f94c7708153dad8b44efe6e8bd73ae05.1",
+        "sequence": "4",
+        "acceptedAtMs": "1300",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_f94c7708153dad8b44efe6e8bd73ae05.1",
+          "invocationId": "inv_f94c7708153dad8b44efe6e8bd73ae05",
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 4,
+          "format": "runspore.state/0.1",
+          "input": {"x": 1},
+          "invocation": {
+            "actionId": "judge",
+            "activationId": "b/2",
+            "attempt": 1,
+            "inputDigest": "sha256:ebb01f5521e6649f4fe9caac75d4ab1a92ffead7bc7d55a0ae556d9d7a6c91e0",
+            "invocationId": "inv_5b96c294a0b1276ef21f2c5b648ff345",
+            "nodeId": "b",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1300",
+          "lastSequence": "4",
+          "nodes": {
+            "a": {"outcome": "ok", "output": null, "visit": 2},
+            "b": {"outcome": "again", "output": {"note": "hi"}, "visit": 1}
+          },
+          "position": {"activationId": "b/2", "nodeId": "b", "visit": 2},
+          "result": null,
+          "runId": "run_get_default",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"a": 2, "b": 2}
+        },
+        "snapshotDigest": "sha256:47dd668518999a4fe5bb5556dab6fffa6e4e43a8cef6c28a9277fa3af2c65791",
+        "commands": [
+          {
+            "commandId": "cmd_9f0a7c7143a52fde199b54d83aaa6df7",
+            "activationId": "b/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "judge",
+              "activationId": "b/2",
+              "attempt": 1,
+              "effectKey": "inv_5b96c294a0b1276ef21f2c5b648ff345",
+              "input": null,
+              "invocationId": "inv_5b96c294a0b1276ef21f2c5b648ff345",
+              "nodeId": "b",
+              "notBeforeMs": "1300"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:2ca02e245d85e9895c5302dc503455f087a7f57e7c494c916bca1bc7313c3464"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_5b96c294a0b1276ef21f2c5b648ff345.1",
+        "sequence": "5",
+        "acceptedAtMs": "1400",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_5b96c294a0b1276ef21f2c5b648ff345.1",
+          "invocationId": "inv_5b96c294a0b1276ef21f2c5b648ff345",
+          "outcome": "ok",
+          "output": {"note": "done"},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 5,
+          "format": "runspore.state/0.1",
+          "input": {"x": 1},
+          "invocation": null,
+          "lastAcceptedAtMs": "1400",
+          "lastSequence": "5",
+          "nodes": {
+            "a": {"outcome": "ok", "output": null, "visit": 2},
+            "b": {"outcome": "ok", "output": {"note": "done"}, "visit": 2}
+          },
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.missing-path",
+              "details": {"path": ["from", "output", "missing"]},
+              "message": "mapping path does not resolve",
+              "nodeId": "done"
+            }
+          },
+          "runId": "run_get_default",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"a": 2, "b": 2, "done": 1}
+        },
+        "snapshotDigest": "sha256:ed7a7702b5c54cb1f42ec4bd4ffe535e9e326651e868517879fa58a776b6a69e",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:9c2a3fd5901a69da37fc131b4c103c22528cfb6da0ce06d1731eb36e9bbed2f7"
+      }
+    }
+  ]
+}

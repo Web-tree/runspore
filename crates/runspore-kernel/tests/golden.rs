@@ -15,7 +15,7 @@ use runspore_types::model::{code, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
 use serde_json::{json, Value};
 
 /// Files a checkout must hold; more may be added.
-const MINIMUM_TRACES: usize = 49;
+const MINIMUM_TRACES: usize = 52;
 
 /// Every failure code, diagnostic code and kernel-produced error code. Each must
 /// be expected by at least one trace, so no part of the vocabulary goes unpinned.
@@ -145,9 +145,10 @@ fn every_0_1_trace_holds_as_a_0_2_document() {
             .unwrap_or_else(|error| panic!("{} as 0.2: {error}", path.display()));
         replayed += 1;
     }
-    // Every trace but the 0.2 one and the W01 one, whose format no version defines.
+    // Every trace but the four of 0.2 documents and the W01 one, whose format no
+    // version defines.
     assert!(
-        replayed >= MINIMUM_TRACES - 2,
+        replayed >= MINIMUM_TRACES - 5,
         "{replayed} traces replayed as 0.2"
     );
 }

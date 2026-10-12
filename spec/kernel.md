@@ -19,10 +19,14 @@ created under (check 5). The two are independent: a request of either semantics 
 carry a document of either format.
 
 Version 0.2 is being added beside 0.1 one rule at a time. A rule that applies to one
-version only says so; every other rule applies to both. Until such a rule exists, a
+version only says so; every other rule applies to both. Outside those rules, a
 `runspore.workflow/0.2` document is validated and run exactly as the same document
 marked `runspore.workflow/0.1`: the same failures, and decisions identical byte for
-byte. `describe` reports semantics `0.1` and format `runspore.workflow/0.1`, the
+byte. The rules marked 0.2 so far:
+
+| Rule | Where | Applies to |
+| --- | --- | --- |
+| `from` as a path's first step; `default` beside `$get` | §4, W10 | documents in format `runspore.workflow/0.2`, under either semantics | `describe` reports semantics `0.1` and format `runspore.workflow/0.1`, the
 versions a host uses when it does not choose.
 
 ## 1. Canonical data
@@ -122,25 +126,40 @@ A mapping is a JSON value evaluated against the run context:
 
 ```json
 {"input": <run input>, "nodes": {"<id>": {"visit": 1, "outcome": "ok", "output": ...}},
- "run": {"id": "<runId>", "tenant": "<tenant>"}}
+ "run": {"id": "<runId>", "tenant": "<tenant>"},
+ "from": {"node": "<id>", "outcome": "red", "output": ...} | null}
 ```
 
 - An object whose only key is `$get` is replaced by the value at that path. The path
   is an array of one or more steps; a string step selects an object member, a
   non-negative integer step selects an array element. The first step must be `input`,
-  `nodes`, or `run`.
+  `nodes`, or `run`; in a 0.2 document it may also be `from`.
+- In a 0.2 document, a `$get` object may carry one more key, `default`. When the path
+  does not resolve, the object is replaced by the value of `default`, unevaluated (as
+  `$literal`). When the path resolves, `default` is ignored.
 - An object whose only key is `$literal` is replaced by its value, unevaluated.
-- Any other object key starting with `$`, or a `$get`/`$literal` object with more keys,
-  is a validation error (W10), as is a malformed path.
+- Any other object key starting with `$`, a `$literal` object with more keys, or a
+  `$get` object with a key other than `$get` and (0.2) `default`, is a validation
+  error (W10), as is a malformed path.
 - Other objects and arrays are evaluated member by member; scalars are themselves.
 
-A path that does not resolve fails the run: terminal `failed` with error
-`mapping.missing-path`, `nodeId` set, `details` `{"path": [...]}`.
+`from` (0.2) is the arrow the run took into the node whose mapping is being evaluated:
+the node whose result routed there, the outcome it routed on, and the output recorded
+with it, all as `nodes[node]` holds them at that moment. A `failed` arrow shows
+outcome `failed` and output `{"error": ErrorInfo}` (*fail the invocation*); a signal's
+arrow shows the waiter, the signal's outcome and its data. When the node is entered
+as the start node, `from` is `null`. It exists only while the entered node's mappings
+are evaluated; the state gains no field. `{"$get": ["from"]}` always resolves; a deeper
+path into a `null` `from` does not.
+
+A path that does not resolve, on a `$get` without `default`, fails the run: terminal
+`failed` with error `mapping.missing-path`, `nodeId` set, `details` `{"path": [...]}`.
 
 Each mapping value visited costs one expression operation; each path step costs one,
-for the whole path even when it does not resolve. `$literal` costs one and an absent
-mapping costs one. Members of an object are evaluated in canonical key order, which
-fixes which missing path is reported when several are missing.
+for the whole path even when it does not resolve. A `$get` that falls back to its
+`default` costs one more. `$literal` costs one and an absent mapping costs one. Members
+of an object are evaluated in canonical key order, which fixes which missing path is
+reported when several are missing.
 
 ## 5. Events
 
@@ -372,3 +391,9 @@ feed bytes that are not canonical. Every host's runner must pass every trace.
 The traces include documents of both formats and requests of both semantics. The Rust
 kernel tests also replay every trace whose document is `runspore.workflow/0.1` with its
 `format` changed to `runspore.workflow/0.2`, and require the same expectations.
+
+The 0.2 mapping rules have their own traces: the start node sees `from` `null`; a
+loop back sees the judging step's outcome and output; a `failed` arrow shows as
+`failed` with the error; a signal's arrow shows its outcome and data; a `default` is
+used, unevaluated, while its path is missing and ignored once it resolves; a `$get`
+object with a key besides `default` is `workflow.invalid`.

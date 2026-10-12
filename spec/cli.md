@@ -21,7 +21,7 @@ engine. It never listens on a network.
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database |
 | `run <workflow> [--input …] [--key …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
-| `status <runId>` | Status, position, result, quarantine reason, outstanding invocation |
+| `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation |
 | `list` | All runs with status |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
@@ -59,10 +59,27 @@ decimal strings. `status` output:
 
 ```json
 {"format": "runspore.cli/0.1", "runId": "run_…", "status": "needs-intervention",
- "revision": "4", "position": {"nodeId": "deploy", "activationId": "deploy/1", "visit": 1},
+ "revision": "4", "position": {"nodeId": "deploy", "activationId": "deploy/1", "visit": 1,
+                               "from": {"nodeId": "test", "outcome": "ok"}},
  "invocation": {"invocationId": "inv_…", "attempt": 1, "state": "unknown"},
- "result": null, "quarantine": null}
+ "result": null, "end": null, "quarantine": null}
 ```
+
+`position.from` is the arrow the run took into its position: the node whose result
+routed there and the outcome it routed on, the same arrow a mapping reads as `from`
+(kernel.md §4). It is `null` at the start node's first activation. `end` is `null`
+unless the run is `completed` or `failed`; then it is `{"nodeId", "from"}`: the node
+the run ended at and the arrow into it, for example
+`{"nodeId": "done", "from": {"nodeId": "approve", "outcome": "approved"}}`. The node is
+the complete or fail node the run reached, or the node named by the error that ended
+it (`result.error.nodeId`): a step that failed with no `failed` arrow, or a node it
+could not enter or whose mapping did not resolve. `from` is `null` when a run ends at
+its start node.
+
+The kernel's state holds no arrow. `status` finds both by replaying the run's consumed
+events through the kernel: for each transition that moved the run, it starts at the
+node the run was parked at and follows the route of the result each node then holds,
+until it reaches the new node. The cost is one transition per event of the run.
 
 Text output is for people and is not a stable interface.
 

@@ -14,8 +14,10 @@ If the input has no `failures`: build the ticket. Use the
 comments first with `gh issue view`; the spec it points to is part of the ticket.
 
 If the input has `failures`: earlier work for this ticket is already committed on
-the branch. The checks, CI or a rebase onto `origin/main` failed with the output in
-`failures`. Fix the cause; do not weaken or skip tests. A rebase conflict means:
+the branch, and `from` names the step that sent it back. From `test`, the repo's
+checks failed; from `ship`, CI failed, the rebase onto `origin/main` conflicted, or
+the checks failed after that rebase. `failures` holds that step's output. Fix the
+cause; do not weaken or skip tests. A rebase conflict means:
 run `git fetch origin main`, `git rebase origin/main`, resolve each conflict by the
 intent of both sides, and continue the rebase.
 

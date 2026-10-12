@@ -42,6 +42,10 @@ _Avoid_: wrapper, supervisor, shim
 The run going back to an earlier step along an arrow, such as failing tests sending it back to implement. Each loop-back is a new visit of that step.
 _Avoid_: retry (that repeats one visit after it was lost)
 
+**Arrived from**:
+The arrow that brought the run into the step it is entering: the step whose result routed it there, that result's outcome and its output. A mapping reads it as `from`; at the start step it is null.
+_Avoid_: previous step (the previous visit of the same step), parent
+
 **Loop limit**:
 How many times in a row a step may send the run along one arrow before the run takes that step's exhausted arrow instead. Any other result from the step starts the count again.
 _Avoid_: retry limit, max attempts, visit limit (the workflow-wide safety net)

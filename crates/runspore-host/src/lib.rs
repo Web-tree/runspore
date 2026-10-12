@@ -5,6 +5,7 @@
 //! outcome route; it only moves durable records between the store and the reducer.
 
 mod activity;
+mod arrival;
 mod command;
 mod engine;
 mod error;
@@ -13,6 +14,7 @@ pub mod guard;
 pub use activity::{
     ActivityContext, ActivityOutput, ActivityRegistry, ActivityRunner, NativeFn, NativeRunner,
 };
+pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
 pub use engine::{validate_workflow, Engine, EngineConfig, RunIds, StartOutcome, TickReport};
 pub use error::HostError;

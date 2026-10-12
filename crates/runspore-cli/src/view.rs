@@ -1,6 +1,7 @@
 //! Rendering of store views as CLI JSON objects and text. Counters and timestamps are
 //! decimal strings.
 
+use runspore_host::{Arrival, Arrow};
 use runspore_types::model::State;
 use runspore_types::store::{EventRecord, RunView};
 use serde_json::{json, Value};
@@ -23,35 +24,64 @@ fn state(view: &RunView) -> Option<State> {
     serde_json::from_slice(view.snapshot.as_deref()?).ok()
 }
 
+fn arrow_json(arrow: Option<&Arrow>) -> Value {
+    arrow.map_or(
+        Value::Null,
+        |a| json!({"nodeId": a.node_id, "outcome": a.outcome}),
+    )
+}
+
 /// The `status` object of spec/cli.md, plus `startKey` and the latest result per node.
-pub fn status_json(view: &RunView) -> Value {
+pub fn status_json(view: &RunView, arrival: &Arrival) -> Value {
     let state = state(view);
     let field = |f: fn(&State) -> Value| state.as_ref().map_or(Value::Null, f);
+    let mut position = field(|s| json!(s.position));
+    if let Some(position) = position.as_object_mut() {
+        position.insert("from".into(), arrow_json(arrival.from.as_ref()));
+    }
     json!({
         "runId": view.key.run,
         "startKey": view.start_key,
         "status": view.status,
         "revision": view.revision.to_string(),
-        "position": field(|s| json!(s.position)),
+        "position": position,
         "invocation": field(|s| json!(s.invocation)),
         "result": field(|s| json!(s.result)),
+        "end": arrival.end.as_ref().map(|end| json!({
+            "nodeId": end.node_id, "from": arrow_json(end.from.as_ref())})),
         "nodes": field(|s| json!(s.nodes)),
         "quarantine": view.quarantine.as_ref().map(|q| json!({
             "code": q.code, "details": q.details, "atMs": q.at_ms.to_string()})),
     })
 }
 
-pub fn status_text(view: &RunView) -> String {
-    let s = status_json(view);
+/// `node on outcome`, the way an arrow reads in text.
+fn arrow_text(arrow: &Value) -> String {
+    match (arrow["nodeId"].as_str(), arrow["outcome"].as_str()) {
+        (Some(node), Some(outcome)) => format!(", from {node} on {outcome}"),
+        _ => String::new(),
+    }
+}
+
+pub fn status_text(view: &RunView, arrival: &Arrival) -> String {
+    let s = status_json(view, arrival);
     let mut text = format!(
         "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\n",
         view.key.run, view.start_key, view.status, view.revision
     );
     if let Some(p) = s["position"].as_object() {
         text += &format!(
-            "position   {} ({})\n",
+            "position   {} ({}{})\n",
             p["nodeId"].as_str().unwrap_or_default(),
-            p["activationId"].as_str().unwrap_or_default()
+            p["activationId"].as_str().unwrap_or_default(),
+            arrow_text(&p["from"])
+        );
+    }
+    if let Some(end) = s["end"].as_object() {
+        text += &format!(
+            "end        {}{}\n",
+            end["nodeId"].as_str().unwrap_or_default(),
+            arrow_text(&end["from"])
         );
     }
     if let Some(i) = s["invocation"].as_object() {

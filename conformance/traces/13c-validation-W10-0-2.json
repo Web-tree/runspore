@@ -1,0 +1,57 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W10-0-2",
+  "description": "W10 in a 0.2 document: a $get object may carry `default` and no other key; one with an extra key `else` fails with invalid-input / workflow.invalid.",
+  "workflow": {
+    "actions": {
+      "test": {
+        "argv": ["test"],
+        "effect": "read-only",
+        "kind": "command",
+        "outcomes": ["ok", "red"]
+      },
+      "work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.2",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "validation-W10-0-2",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "work"},
+        "signal": "approval"
+      },
+      "done": {"kind": "complete", "output": {"$get": ["from"]}},
+      "test": {
+        "action": "test",
+        "input": {"after": {"$get": ["from", "output", "summary"]}},
+        "kind": "activity",
+        "outcomes": {"failed": "work", "ok": "approve", "red": "work"}
+      },
+      "work": {
+        "action": "work",
+        "input": {
+          "cameFrom": {"$get": ["from"]},
+          "lastTest": {"$get": ["nodes", "test"], "default": null, "else": 1},
+          "task": {"$get": ["input", "task"]}
+        },
+        "kind": "activity",
+        "outcomes": {"ok": "test"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"task": "t-1"}, "runId": "run_w10_0_2", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}
