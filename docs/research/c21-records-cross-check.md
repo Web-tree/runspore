@@ -8,7 +8,7 @@ Facts only. Nothing here decides; `/to-spec` does, after the map closed its deci
 
 - **Change items:** `kernel.md` 18, `host.md` 37, `store.md` 13, `cli.md` 25, new `dot.md` 12, new `artifact.md` 8, the schema subset 8 (its own `schema.md` or a `kernel.md` section; placement is open), the plugin's spec in `max-skills` 25, and `spec/README.md` 4. That makes 150 in total.
 - **Contradictions with no later decision:** 9 (U1–U9 in §2.2). Another 5 gaps were never decided (U10–U14), and 12 routine items are left for `/to-spec` (§2.3).
-- **Stale statements with a later decision:** 53 places in the records (§2.1) and 38 in docs outside `spec/` (§4).
+- **Stale statements with a later decision:** 53 places in the records (§2.1) and 37 in docs outside `spec/` (§4).
 - **Terms used two ways:** 20 (§3). `CONTEXT.md` is also missing 27 terms the records define.
 - **Concurrency:** on one machine, with one OS user and one database per checkout, any mix of drivers is safe. Several machines, two repositories sharing one database on purpose, another OS user, who is *allowed* to claim, and how later steps run inside a worktree a step made are all undecided (§5).
 
@@ -55,12 +55,12 @@ Facts only. Nothing here decides; `/to-spec` does, after the map closed its deci
 | h.10 | `validate_workflow` checks schemas against the subset (`workflow.invalid-schema`), `inputSchema` included | [C12][c12] §Host; [C08][c08] §inputSchema |
 | h.11 | Action kind `external` (fields `actor`, `async`, `effect`, `outcomes`, `retry`); the worker never claims or runs it | [C03][c03] L1, §Action fields |
 | h.12 | The `async` object: `timeoutMs` (1 h), `leaseMs`, `probe`, `watch`, `channels` (`["store"]`), and `stop` | [C03][c03] R6, §Action fields; [C08][c08] L4 |
-| h.13 | Tagged references `{"command": {…}}` or `{"component": {…}}` for probe, watch and stop; `component` is refused until a host advertises it | [C07][c07] R4; [C08][c08] §spore cancel |
+| h.13 | Tagged references `{"command": {…}}` or `{"component": {…}}` for probe and watch; `component` is refused until a host advertises it. `async.stop` is tagged the same way but only its `command` form is given; a component stop is undecided | [C07][c07] R4; [C08][c08] §spore cancel |
 | h.14 | A `./` probe or watch is bundled as an action asset; a bare name is looked up on the host | [C07][c07] R8 |
 | h.15 | Async start: input on stdin, `RUNSPORE_TOKEN`, `RUNSPORE_RESULT_CHANNEL`; on exit 0, stdout (≤ 4 KiB canonical JSON) is the holder handle; other results map through the 0.1 table | [C03][c03] §The async attempt |
 | h.16 | The start command of a repeatable async action must be repeatable by its effect key | [C15][c15] L5a |
 | h.17 | Probe contract (`{"holder": alive\|dead\|unknown}`, 10 s timeout, only `dead` frees); probes on claim, `status`, `continue`, and in the sweep at most every 30 s | [C03][c03] L3, §2, §Probe and watch |
-| h.18 | Watch contract; one watch per held attempt under its own limit; watches stop on shutdown | [C03][c03] R3, §2 |
+| h.18 | Watch contract; a worker runs one watch per held attempt, under its own limit (several drivers may each watch the same attempt; the first result wins, [C06][c06]); watches stop on shutdown | [C03][c03] R3, §2 |
 | h.19 | A watch may print a non-final `{"needs": "person", "message"}` line | [C06][c06] §CLI 0.2, Changes |
 | h.20 | `command` result mode `output: "result"` | [C07][c07] R3 |
 | h.21 | `command.undeclared-outcome` (not retryable) for every command | [C07][c07] R7 |
@@ -75,7 +75,7 @@ Facts only. Nothing here decides; `/to-spec` does, after the map closed its deci
 | h.30 | The sweep removes step files under a per-artifact lock | [C14][c14] R4, §Host step 6 |
 | h.31 | An `argv[0]` of `./<asset>` (and a probe's or watch's `./…`) is rewritten to the step-files copy | [C14][c14] R5 |
 | h.32 | A guard in front of every command, async start, probe and watch | [C15][c15] L2, §Host |
-| h.33 | Every stop is SIGTERM, then `stop_grace_ms` (5000), then SIGKILL; this replaces 0.1's immediate SIGKILL | [C15][c15] L4 |
+| h.33 | A stop on timeout, lease loss, shutdown or a dead host is SIGTERM, then `stop_grace_ms` (5000), then SIGKILL; this replaces 0.1's immediate SIGKILL. After a normal ending the leftover group is still stopped at once, as in 0.1 (c15:80) | [C15][c15] L4 |
 | h.34 | `set_process` before the program runs; cleared when the command ends and by `hold_attempt` | [C15][c15] §Host |
 | h.35 | Before a lease expiry, stop a live recorded group on this host and boot; another host or EPERM expires with `process.unchecked` | [C15][c15] L3, L6 |
 | h.36 | After `cancel_run`, run `async.stop` once (holder handle on stdin, C14 environment); its output is late evidence and its failure is ignored | [C08][c08] §spore cancel |
@@ -125,7 +125,7 @@ Facts only. Nothing here decides; `/to-spec` does, after the map closed its deci
 | c.20 | `list --unfinished`; rows gain `workflow`, `nodeId`, `needs`, `since` and `actor`, newest first | [C08][c08] §spore list |
 | c.21 | `needs: working` when a matching signal is already stored | [C11][c11] R5 |
 | c.22 | `run` and `worker --until-parked` return at an async step | [C03][c03] R2 |
-| c.23 | Exit codes: 6 ([C03][c03] R2, given more meanings by [C06][c06]); 7 ([C08][c08]); 2 for `output.invalid`, `input.invalid` and an undeclared outcome ([C12][c12] R2, [C08][c08] R6, [C03][c03] R9); 4 at a stuck step ([C07][c07]); 10 for a newer store schema and for `step show` artifact errors ([C10][c10] R6, [C14][c14] R6) | as listed |
+| c.23 | Exit codes: 6 ([C03][c03] R2, given more meanings by [C06][c06]); 7 ([C08][c08]); 2 for `output.invalid`, `input.invalid`, and an undeclared outcome given to `step complete` ([C12][c12] R2, [C08][c08] R6, [C03][c03] R9; a command's undeclared outcome is the `command.undeclared-outcome` failure, h.21, not an exit code); 4 at a stuck step ([C07][c07]); 10 for a newer store schema and for `step show` artifact errors ([C10][c10] R6, [C14][c14] R6) | as listed |
 | c.24 | `--stop-grace-ms` for `worker`, `run` and `continue` | [C15][c15] §CLI 0.2 |
 | c.25 | JSON format `runspore.cli/0.2` | [C14][c14] §CLI; [C17][c17] §CLI |
 
@@ -135,7 +135,7 @@ Facts only. Nothing here decides; `/to-spec` does, after the map closed its deci
 |---|---|---|
 | d.1 | Strict grammar: what is accepted, what is rejected (with a line number); an unknown attribute is an error; the `dot` binary is never required | [C02][c02] R1 |
 | d.2 | The render-attribute allowlist (an initial list; whether it is final is open) | [C02][c02] §`workflow.dot`, Risks |
-| d.3 | Attributes with meaning: graph `dialect` (required, checked first) and `start`; node `kind` (default `activity`); edge `on` (default `ok`); `label` is render-only | [C02][c02] L7, R5 |
+| d.3 | Attributes with meaning: graph `dialect` (required, checked first) and `start` (required); node `kind` (default `activity`); edge `on` (default `ok`); `label` is render-only | [C02][c02] L7, R5 |
 | d.4 | Dialects `runspore/0.1` and `runspore/0.2`; the dialect must agree with the settings `format` | [C02][c02] R5; [C13][c13] R2 |
 | d.5 | ID and outcome patterns; at most 256 nodes; the graph id is the workflow name | [C02][c02] §`workflow.dot`, R4 |
 | d.6 | `on="exhausted"` (0.2); `on="failed"` routes a failure | [C13][c13] §Package; [C02][c02] §`settings.json` |
@@ -151,7 +151,7 @@ Facts only. Nothing here decides; `/to-spec` does, after the map closed its deci
 | ID | Change | Source |
 |---|---|---|
 | a.1 | WIT world `runspore:artifact@0.1.0`, interface `reader` (`manifest`, `blob`); imports nothing | [C02][c02] L5, L8 |
-| a.2 | Manifest `runspore.artifact/0.1`: `dialect`, `name`, `main`, `entries[{path, digest, kind, owner}]` | [C02][c02] R9 |
+| a.2 | Manifest `runspore.artifact/0.1`: `dialect`, `name`, `main`, `entries[{path, digest, kind, owner?}]`; `owner` (a node or an action) is set on `instructions` and `asset` entries and absent on `source` entries (`workflow.dot`, `settings.json`) | [C02][c02] R9 |
 | a.3 | `executable: true` on an entry | [C14][c14] R9 |
 | a.4 | `workflow.dot` and `settings.json` ride along as `source` entries; `inspect --run --file` reads them | [C02][c02] R9; [C17][c17] L3 |
 | a.5 | The composed artifact exports both worlds unchanged (a fixed WAC composition holding the certified kernel bytes) | [C02][c02] L9, R3 |
@@ -356,11 +356,11 @@ Terms the records define that `CONTEXT.md` lacks (27):
 - C16: Run ID.
 - C17: Live view, Run line. (Dot drawing is plugin-only.)
 
-## 4. Docs outside `spec/` that still say the old thing (38)
+## 4. Docs outside `spec/` that still say the old thing (37)
 
 | File:line | Says | Now |
 |---|---|---|
-| CONTEXT.md:68 | An external step's actor may be "a Claude session" | Generic and still true, but after C07 L2 the profile uses external steps only for a person's manual work (C07 Terms) |
+| CONTEXT.md:68 | An external step's actor may be "a Claude session" | Not stale: generically true (C03 keeps actors generic). At most a profile note: after C07 L2 the Claude profile uses external steps only for a person's manual work (C07 Terms). Not counted in the 37 |
 | CONTEXT.md:76 | The actor label is "on an external step" | It is on the action (C03 R1) |
 | CONTEXT.md:121–123 | The mod lets a person "watch" runs | C06 avoids "watching" for following |
 | CONTEXT.md:133–135 | The entry menu: runs, workflows, "writing a new one" | It also offers "change a workflow" (C09 R2) and View (C17) |
@@ -407,8 +407,8 @@ C02's open thread (c02:284) worried that uncommitted "bundle" edits to `CONTEXT.
 
 - **One database, many processes on one host.** One SQLite file; WAL; `synchronous = FULL`; a busy timeout of at least 5 s; every mutation in `BEGIN IMMEDIATE`; `store.busy` is retried identically. The capabilities say `multiworkerClaims = true` for the same host. Receipts, revision compare-and-swap and fences make competing coordinators collapse into one result (store.md §1, §3; host.md H1, H2).
 - **Any mix of drivers on one run is safe.** Claims, leases and fences decide who does each try. When two watches race, the store keeps the first result and the other becomes late evidence. There is no owner per run ([C06][c06] L1, which rejected a stored owner).
-- **On one machine, one try runs at a time.** The guard stops a dead worker's command group, and the sweep stops a recorded live group before expiring its attempt ([C15][c15] L1–L4). Step files are made by rename and swept under a per-artifact lock ([C14][c14] R4).
-- **Where the database is.** One `.spore/` per checkout, so two checkouts never share runs ([C08][c08] L1). Several unfinished runs may share a checkout, and keeping them apart is the workflow's job (L2, L3). Steps inherit `RUNSPORE_DB`, so a step in a worktree reaches its own run's database (§The project folder).
+- **On one machine, a step's tries never overlap.** Runs and steps still run side by side; only an earlier try of the same step is stopped before its replacement starts. The guard stops a dead worker's command group, and the sweep stops a recorded live group before expiring its attempt ([C15][c15] L1–L4). Step files are made by rename and swept under a per-artifact lock ([C14][c14] R4).
+- **Where the database is.** One `.spore/` per checkout, so under default walk-up two checkouts do not share runs ([C08][c08] L1); `--db` and `RUNSPORE_DB` can still point two checkouts at one database (see below). Several unfinished runs may share a checkout, and keeping them apart is the workflow's job (L2, L3). Steps inherit `RUNSPORE_DB`, so a step in a worktree reaches its own run's database (§The project folder).
 - **Run identity.** A start key names a run only within one database. A copied database copies its runs, and continuing one run in both copies runs its steps twice (accepted risk) ([C16][c16] L1, Risks).
 - **Which external steps a claimer takes.** `--actor <label>` takes only steps with that label; no `--actor` takes only unlabelled steps (Max did not rule on this default). The claim token is the attempt, so only its bearer can renew, complete or fail it ([C03][c03] R1, Terms, Open threads).
 - **A process record from another machine or OS user.** It cannot be checked; the attempt expires by lease, with `process.unchecked` ([C15][c15] L6).
