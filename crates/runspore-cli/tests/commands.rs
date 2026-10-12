@@ -7,7 +7,16 @@ use std::time::{Duration, Instant};
 use common::{effect_argv, Dir};
 use serde_json::{json, Value};
 
-const FAST: [&str; 5] = ["--native-kernel", "--poll-ms", "20", "--lease-ms", "500"];
+/// The heartbeat renews the lease well before it runs out on a busy machine.
+const FAST: [&str; 7] = [
+    "--native-kernel",
+    "--poll-ms",
+    "20",
+    "--lease-ms",
+    "500",
+    "--heartbeat-ms",
+    "100",
+];
 
 fn flow(sleep: &str, effect: &str) -> Value {
     json!({
