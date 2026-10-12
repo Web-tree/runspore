@@ -1,0 +1,310 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "format-0-2",
+  "description": "The review-loop example as a runspore.workflow/0.2 document, run under semantics 0.2: a retry, a red loop back, approval and completion follow 0.1's rules, and the state records semantics 0.2. A request under semantics 0.1 cannot continue the run (version.state-format).",
+  "workflow": {
+    "actions": {
+      "build": {
+        "argv": ["make"],
+        "effect": "idempotent",
+        "kind": "command",
+        "outcomes": ["ok", "red"],
+        "retry": {"backoffMs": "500", "maxAttempts": 3}
+      }
+    },
+    "format": "runspore.workflow/0.2",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "format-0-2",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "build"},
+        "signal": "approval"
+      },
+      "broken": {"error": {"code": "build.broken", "message": "never passed"}, "kind": "fail"},
+      "build": {
+        "action": "build",
+        "input": {"repo": {"$get": ["input", "repo"]}},
+        "kind": "activity",
+        "outcomes": {"failed": "broken", "ok": "approve", "red": "build"}
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "build", "output"]}}
+    },
+    "start": "build"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"repo": "r"}, "runId": "run_format_0_2", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"repo": "r"},
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/1",
+            "attempt": 1,
+            "inputDigest": "sha256:41d1c4c5f46a4d500a9119fb028cd183f25a3c4f98cc94b8106f6cb254f06cd5",
+            "invocationId": "inv_80f25686556e01f2870e7871cf9e5448",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "build/1", "nodeId": "build", "visit": 1},
+          "result": null,
+          "runId": "run_format_0_2",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1}
+        },
+        "snapshotDigest": "sha256:2dab9f2e21bc92776faa39d98926866b9d66eef1caa95b9ee384728314de3238",
+        "commands": [
+          {
+            "commandId": "cmd_b23466f2d265db88105a56b884fbe32f",
+            "activationId": "build/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "build",
+              "activationId": "build/1",
+              "attempt": 1,
+              "effectKey": "inv_80f25686556e01f2870e7871cf9e5448",
+              "input": {"repo": "r"},
+              "invocationId": "inv_80f25686556e01f2870e7871cf9e5448",
+              "nodeId": "build",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:caa5316609d0076fb4d926ac30a60906a31846433b7ed47397a82387c50ff0f4"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_80f25686556e01f2870e7871cf9e5448.1",
+        "sequence": "2",
+        "acceptedAtMs": "2000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_80f25686556e01f2870e7871cf9e5448.1",
+          "error": {"code": "make.crashed", "message": "make crashed"},
+          "invocationId": "inv_80f25686556e01f2870e7871cf9e5448",
+          "retryable": true,
+          "status": "failure"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"repo": "r"},
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/1",
+            "attempt": 2,
+            "inputDigest": "sha256:41d1c4c5f46a4d500a9119fb028cd183f25a3c4f98cc94b8106f6cb254f06cd5",
+            "invocationId": "inv_80f25686556e01f2870e7871cf9e5448",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "2000",
+          "lastSequence": "2",
+          "nodes": {},
+          "position": {"activationId": "build/1", "nodeId": "build", "visit": 1},
+          "result": null,
+          "runId": "run_format_0_2",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 1}
+        },
+        "snapshotDigest": "sha256:6db06d41693b57129c5c4245088f1f59c6adfc65ebc8058dfe4ff75dcf0b180e",
+        "commands": [
+          {
+            "commandId": "cmd_f628d160eaa24ad82cc3853e9c11aaab",
+            "activationId": "build/1",
+            "kind": "activity.retry",
+            "payload": {
+              "attempt": 2,
+              "invocationId": "inv_80f25686556e01f2870e7871cf9e5448",
+              "notBeforeMs": "2500"
+            }
+          }
+        ],
+        "diagnostics": [
+          {"code": "activity.retry-scheduled", "nodeId": "build", "details": {"attempt": 2}}
+        ],
+        "decisionDigest": "sha256:336f25b2cc7275d51f3d754908987e0d15bb7d65b87a41309bb54b97318eb101"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_80f25686556e01f2870e7871cf9e5448.2",
+        "sequence": "3",
+        "acceptedAtMs": "3000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 2,
+          "attemptId": "inv_80f25686556e01f2870e7871cf9e5448.2",
+          "invocationId": "inv_80f25686556e01f2870e7871cf9e5448",
+          "outcome": "red",
+          "output": {"failing": 2},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"repo": "r"},
+          "invocation": {
+            "actionId": "build",
+            "activationId": "build/2",
+            "attempt": 1,
+            "inputDigest": "sha256:41d1c4c5f46a4d500a9119fb028cd183f25a3c4f98cc94b8106f6cb254f06cd5",
+            "invocationId": "inv_7eacf966b5768db14539aaa7ecb307c1",
+            "nodeId": "build",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "3000",
+          "lastSequence": "3",
+          "nodes": {"build": {"outcome": "red", "output": {"failing": 2}, "visit": 1}},
+          "position": {"activationId": "build/2", "nodeId": "build", "visit": 2},
+          "result": null,
+          "runId": "run_format_0_2",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"build": 2}
+        },
+        "snapshotDigest": "sha256:8d6736dbd14e0eb9989e16acc3e64da374d29534580da0c8527df5d1ca92d95b",
+        "commands": [
+          {
+            "commandId": "cmd_e319f90077383a21681de590fb69ca11",
+            "activationId": "build/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "build",
+              "activationId": "build/2",
+              "attempt": 1,
+              "effectKey": "inv_7eacf966b5768db14539aaa7ecb307c1",
+              "input": {"repo": "r"},
+              "invocationId": "inv_7eacf966b5768db14539aaa7ecb307c1",
+              "nodeId": "build",
+              "notBeforeMs": "3000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:9b66c287bf57d0c9148d444dec626e4747ffc2db5dd310929ad2880afe999cc8"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_7eacf966b5768db14539aaa7ecb307c1.1",
+        "sequence": "4",
+        "acceptedAtMs": "4000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_7eacf966b5768db14539aaa7ecb307c1.1",
+          "invocationId": "inv_7eacf966b5768db14539aaa7ecb307c1",
+          "output": {"failing": 0},
+          "status": "success"
+        }
+      },
+      "expect": {"failure": {"kind": "incompatible-version", "code": "version.state-format"}}
+    },
+    {
+      "event": {
+        "eventId": "att:inv_7eacf966b5768db14539aaa7ecb307c1.1",
+        "sequence": "4",
+        "acceptedAtMs": "4000",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_7eacf966b5768db14539aaa7ecb307c1.1",
+          "invocationId": "inv_7eacf966b5768db14539aaa7ecb307c1",
+          "output": {"failing": 0},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"repo": "r"},
+          "invocation": null,
+          "lastAcceptedAtMs": "4000",
+          "lastSequence": "4",
+          "nodes": {"build": {"outcome": "ok", "output": {"failing": 0}, "visit": 2}},
+          "position": {"activationId": "approve/1", "nodeId": "approve", "visit": 1},
+          "result": null,
+          "runId": "run_format_0_2",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"approve": 1, "build": 2}
+        },
+        "snapshotDigest": "sha256:9f7dc4f71b390d24927463d6c5cdf164329b41a23ef9c68abcccc99c6ea997c0",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:25d62ac88b3582cd93e67b7f32e8a2360e165401931255aefd12b7de84cfe9cc"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:approve-1",
+        "sequence": "5",
+        "acceptedAtMs": "5000",
+        "kind": "signal.received",
+        "payload": {"data": {"by": "ana"}, "name": "approval", "outcome": "approved"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 4,
+          "format": "runspore.state/0.1",
+          "input": {"repo": "r"},
+          "invocation": null,
+          "lastAcceptedAtMs": "5000",
+          "lastSequence": "5",
+          "nodes": {
+            "approve": {"outcome": "approved", "output": {"by": "ana"}, "visit": 1},
+            "build": {"outcome": "ok", "output": {"failing": 0}, "visit": 2}
+          },
+          "position": null,
+          "result": {"output": {"failing": 0}},
+          "runId": "run_format_0_2",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"approve": 1, "build": 2, "done": 1}
+        },
+        "snapshotDigest": "sha256:f3a88213a288959cbc4fa0a0d60a42eea574f6d8d7fe696172bc9ab8f36afb3a",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:3b6de95105ed2ada283a6de2a08d9c003c577728940a4b09520fcf71b0a92954"
+      }
+    }
+  ]
+}

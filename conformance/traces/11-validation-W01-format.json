@@ -1,7 +1,7 @@
 {
   "format": "runspore.trace/0.1",
   "name": "validation-W01-format",
-  "description": "W01: the review-loop example of spec/kernel.md with one change: format names workflow format 0.2. Validation runs on every transition before anything that depends on the graph, so both run.started and a later event without a snapshot fail with invalid-input / workflow.invalid.",
+  "description": "W01: the review-loop example of spec/kernel.md with one change: format names workflow format 0.3, which no version defines. Validation runs on every transition before anything that depends on the graph, so both run.started and a later event without a snapshot fail with invalid-input / workflow.invalid.",
   "workflow": {
     "actions": {
       "build": {
@@ -12,7 +12,7 @@
         "retry": {"backoffMs": "500", "maxAttempts": 3}
       }
     },
-    "format": "runspore.workflow/0.2",
+    "format": "runspore.workflow/0.3",
     "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
     "name": "validation-W01-format",
     "nodes": {

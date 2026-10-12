@@ -6,7 +6,7 @@ mod common;
 
 use common::*;
 use runspore_kernel::transition;
-use runspore_types::model::{code, event_kind};
+use runspore_types::model::{code, event_kind, SEMANTICS_VERSION, SEMANTICS_VERSION_0_2};
 use runspore_types::reducer::FailureKind::{IncompatibleVersion, InvalidInput};
 use runspore_types::reducer::TransitionRequest;
 use serde_json::{json, Value};
@@ -41,9 +41,19 @@ fn a_well_formed_request_is_accepted() {
 }
 
 #[test]
+fn check_1_semantics_0_1_and_0_2_are_accepted() {
+    for version in [SEMANTICS_VERSION, SEMANTICS_VERSION_0_2] {
+        let mut request = start();
+        request.identity.semantics_version = version.to_string();
+        let decision = transition(&request).expect("accepted");
+        assert_eq!(parse(&decision.snapshot)["semantics"], json!(version));
+    }
+}
+
+#[test]
 fn check_1_semantics_version() {
     let mut request = start();
-    request.identity.semantics_version = "0.2".to_string();
+    request.identity.semantics_version = "0.3".to_string();
     request.identity.codec_version = "jcs-int53/2".to_string();
     request.graph = NOT_JSON.to_vec();
     assert_failure(
@@ -269,9 +279,10 @@ fn check_5_snapshot_undecodable() {
 #[test]
 fn check_5_snapshot_of_another_version() {
     let run = running();
-    let edits: [fn(&mut Value); 3] = [
+    let edits: [fn(&mut Value); 4] = [
         |state| set(state, "/format", json!("runspore.state/0.2")),
-        |state| set(state, "/semantics", json!("0.2")),
+        |state| set(state, "/semantics", json!(SEMANTICS_VERSION_0_2)),
+        |state| set(state, "/semantics", json!("0.3")),
         |state| {
             set(state, "/format", json!("runspore.state/9.9"));
             set(state, "/addedLater", json!(true));
@@ -286,6 +297,24 @@ fn check_5_snapshot_of_another_version() {
             code::VERSION_STATE_FORMAT,
         );
     }
+}
+
+/// A run continues under the semantics it was started with, and only under those.
+#[test]
+fn check_5_snapshot_of_the_request_semantics() {
+    let run = running();
+    let mut request = run.next(event_kind::SIGNAL_RECEIVED, &signal(), 2_000);
+    request.identity.semantics_version = SEMANTICS_VERSION_0_2.to_string();
+    assert_failure(
+        transition(&request),
+        IncompatibleVersion,
+        code::VERSION_STATE_FORMAT,
+    );
+
+    let mut state = run.state();
+    set(&mut state, "/semantics", json!(SEMANTICS_VERSION_0_2));
+    request.snapshot = Some(canon(&state));
+    assert!(transition(&request).is_ok());
 }
 
 /// A snapshot that decodes but contradicts itself or the graph is not a state this

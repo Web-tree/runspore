@@ -1,4 +1,4 @@
-# Kernel semantics 0.1
+# Kernel semantics 0.1 and 0.2
 
 The kernel is one pure function:
 
@@ -9,6 +9,21 @@ transition(identity, graph, snapshot?, event, limits) -> decision | failure
 It performs no I/O, reads no clock, and uses no randomness, floating point, threads,
 or unordered collections. The same request yields the same bytes on every host. Wire
 types are in `crates/runspore-types` (`model`, `reducer`); this file specifies behavior.
+
+## Versions
+
+The kernel speaks semantics `0.1` and `0.2` and accepts workflow documents in format
+`runspore.workflow/0.1` and `runspore.workflow/0.2`. A request names its semantics in
+`identity.semanticsVersion` (check 1), and the state records the semantics it was
+created under (check 5). The two are independent: a request of either semantics may
+carry a document of either format.
+
+Version 0.2 is being added beside 0.1 one rule at a time. A rule that applies to one
+version only says so; every other rule applies to both. Until such a rule exists, a
+`runspore.workflow/0.2` document is validated and run exactly as the same document
+marked `runspore.workflow/0.1`: the same failures, and decisions identical byte for
+byte. `describe` reports semantics `0.1` and format `runspore.workflow/0.1`, the
+versions a host uses when it does not choose.
 
 ## 1. Canonical data
 
@@ -67,7 +82,7 @@ of their IDs; the first violation is reported.
 
 | Rule | Requirement |
 | --- | --- |
-| W01 | `format` is `runspore.workflow/0.1` |
+| W01 | `format` is `runspore.workflow/0.1` or `runspore.workflow/0.2` |
 | W02 | `name` matches `[A-Za-z0-9_.-]{1,128}` |
 | W03 | 1 to 256 nodes; node IDs match `[A-Za-z0-9_-]{1,64}` |
 | W04 | Action IDs match `[A-Za-z0-9_-]{1,64}` |
@@ -153,7 +168,8 @@ fixes which missing path is reported when several are missing.
 
 In order; the first failing check returns its failure and nothing else happens.
 
-1. `identity.semanticsVersion` is `0.1`, else `incompatible-version` / `version.semantics`.
+1. `identity.semanticsVersion` is `0.1` or `0.2`, else `incompatible-version` /
+   `version.semantics`.
 2. `identity.codecVersion` is `jcs-int53/1`, else `incompatible-version` / `version.codec`.
 3. `graph` decodes as a canonical `Workflow` and passes validation.
 4. `inputEvent.kind` is known, else `invalid-input` / `event.unknown-kind`. The payload
@@ -161,8 +177,8 @@ In order; the first failing check returns its failure and nothing else happens.
 5. Snapshot: absent with a kind other than `run.started` is `invalid-input` /
    `state.missing`; present with `run.started` is `invalid-input` /
    `state.unexpected-start`; undecodable is `invalid-input` / `state.invalid`; a
-   `format` or `semantics` other than this version's is `incompatible-version` /
-   `version.state-format`.
+   `format` other than `runspore.state/0.1`, or a `semantics` other than
+   `identity.semanticsVersion`, is `incompatible-version` / `version.state-format`.
 6. Sequence: `run.started` must have sequence 1; any other event must have sequence
    `lastSequence + 1`. Else `invalid-input` / `event.out-of-order`.
 7. `RunStarted.tenant` and `runId` match `[A-Za-z0-9_.-]{1,128}`, else `event.invalid`.
@@ -193,9 +209,9 @@ updated `lastAcceptedAtMs`.
 If the state is terminal, every event is consumed with diagnostic
 `event.ignored-terminal` (details `{"kind": <event kind>}`) and no other change.
 
-**`run.started`** — create the state: status `running`, the given tenant, run ID and
-input, empty `nodes`, `visits`, `signals`, zero `activations`, no result. Then *enter*
-the start node.
+**`run.started`** — create the state: status `running`, `semantics` from
+`identity.semanticsVersion`, the given tenant, run ID and input, empty `nodes`,
+`visits`, `signals`, zero `activations`, no result. Then *enter* the start node.
 
 **`signal.received`** — if status is `waiting` and the signal's name equals the
 parked node's `signal`, the signal is taken directly, exactly as *consume* would take
@@ -352,3 +368,7 @@ canonicalizes them before use and compares bytes. `limits` is optional and overr
 individual fields of the default budget. A step that expects a failure leaves the
 snapshot unchanged for the next step. `payloadRaw` (a string) may replace `payload` to
 feed bytes that are not canonical. Every host's runner must pass every trace.
+
+The traces include documents of both formats and requests of both semantics. The Rust
+kernel tests also replay every trace whose document is `runspore.workflow/0.1` with its
+`format` changed to `runspore.workflow/0.2`, and require the same expectations.

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runspore_types::canonical;
 use runspore_types::model::{
     code, ActionPolicy, Effect, Node, Workflow, WorkflowLimits, MAX_NODES, OUTCOME_FAILED,
-    WORKFLOW_FORMAT,
+    WORKFLOW_FORMATS,
 };
 use runspore_types::reducer::Failure;
 use serde::Deserialize;
@@ -68,10 +68,13 @@ fn violation(rule: &str, details: impl AsRef<str>) -> Failure {
 fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failure> {
     let nodes = &workflow.nodes;
 
-    if workflow.format != WORKFLOW_FORMAT {
+    if !WORKFLOW_FORMATS.contains(&workflow.format.as_str()) {
         return Err(violation(
             "W01",
-            format!("format {:?} is not {WORKFLOW_FORMAT:?}", workflow.format),
+            format!(
+                "format {:?} is not one of {WORKFLOW_FORMATS:?}",
+                workflow.format
+            ),
         ));
     }
 

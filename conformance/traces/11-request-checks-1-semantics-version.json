@@ -21,7 +21,7 @@
         "kind": "run.started",
         "payload": {"input": null, "runId": "run_check_1", "tenant": "default"}
       },
-      "identity": {"semanticsVersion": "0.2"},
+      "identity": {"semanticsVersion": "0.3"},
       "expect": {"failure": {"kind": "incompatible-version", "code": "version.semantics"}}
     },
     {

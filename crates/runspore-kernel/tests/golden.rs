@@ -9,12 +9,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use runspore_kernel::NativeReducer;
-use runspore_trace::{load, run_dir, Expect};
-use runspore_types::model::code;
-use serde_json::Value;
+use runspore_trace::run::bless_requested;
+use runspore_trace::{load, run, run_dir, Expect};
+use runspore_types::model::{code, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
+use serde_json::{json, Value};
 
 /// Files a checkout must hold; more may be added.
-const MINIMUM_TRACES: usize = 48;
+const MINIMUM_TRACES: usize = 49;
 
 /// Every failure code, diagnostic code and kernel-produced error code. Each must
 /// be expected by at least one trace, so no part of the vocabulary goes unpinned.
@@ -119,4 +120,34 @@ fn golden_traces_hold_and_cover_the_vocabulary() {
         .filter(|code| !seen.contains(*code))
         .collect();
     assert!(missing.is_empty(), "no golden trace expects {missing:?}");
+}
+
+/// Until a rule of `spec/kernel.md` names 0.2, a 0.2 document runs exactly as the
+/// same document marked 0.1: every trace of a 0.1 document holds unchanged with its
+/// format changed to 0.2.
+#[test]
+fn every_0_1_trace_holds_as_a_0_2_document() {
+    if bless_requested() {
+        return;
+    }
+    let mut replayed = 0;
+    for entry in fs::read_dir(traces()).expect("trace directory is readable") {
+        let path = entry.expect("directory entry").path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let mut trace = load(&path).unwrap_or_else(|error| panic!("{error}"));
+        if trace.workflow["format"] != WORKFLOW_FORMAT {
+            continue;
+        }
+        trace.workflow["format"] = json!(WORKFLOW_FORMAT_0_2);
+        run(&NativeReducer, &trace)
+            .unwrap_or_else(|error| panic!("{} as 0.2: {error}", path.display()));
+        replayed += 1;
+    }
+    // Every trace but the 0.2 one and the W01 one, whose format no version defines.
+    assert!(
+        replayed >= MINIMUM_TRACES - 2,
+        "{replayed} traces replayed as 0.2"
+    );
 }

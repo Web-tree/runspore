@@ -4,7 +4,7 @@ mod common;
 
 use common::*;
 use runspore_kernel::transition;
-use runspore_types::model::{code, event_kind, WORKFLOW_FORMAT};
+use runspore_types::model::{code, event_kind, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::FailureKind::{IncompatibleVersion, InvalidInput};
 use runspore_types::reducer::{Decision, Failure};
 use serde_json::{json, Map, Value};
@@ -96,8 +96,32 @@ fn limits_and_actions_are_optional() {
 
 #[test]
 fn w01_format() {
-    assert_invalid(&edited("/format", json!("runspore.workflow/0.2")));
+    assert_valid(&edited("/format", json!(WORKFLOW_FORMAT)));
+    assert_valid(&edited("/format", json!(WORKFLOW_FORMAT_0_2)));
+    assert_invalid(&edited("/format", json!("runspore.workflow/0.3")));
     assert_invalid(&edited("/format", json!("")));
+}
+
+/// Until a rule names 0.2, a 0.2 document is judged by 0.1's rules: the same
+/// documents are refused, with the same code.
+#[test]
+fn a_0_2_document_follows_the_0_1_rules() {
+    let refused = [
+        edited("/name", json!("has space")),
+        edited("/start", json!("missing")),
+        edited("/limits/maxVisitsPerNode", json!(0)),
+        edited("/actions/build/outcomes", json!(["ok", "failed"])),
+        edited("/actions/build/effect", json!("reconcilable")),
+        edited("/nodes/build/outcomes/exhausted", json!("done")),
+        with_input(json!({"$get": ["from"]})),
+        with_input(json!({"$get": ["input"], "default": 1})),
+    ];
+    for workflow in refused {
+        let expected = check(&workflow).expect_err("refused as 0.1");
+        let actual = check(&with(workflow, "/format", json!(WORKFLOW_FORMAT_0_2)))
+            .expect_err("refused as 0.2");
+        assert_eq!((actual.kind, actual.code), (expected.kind, expected.code));
+    }
 }
 
 #[test]
