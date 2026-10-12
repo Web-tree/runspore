@@ -327,14 +327,15 @@ the sweep settles the record before `expire_attempt`:
 | This host, another boot | Expires: the group is gone |
 | This host and boot, a group that is not ours, or none | Expires |
 | This host and boot, our group | Stops the group, waits until no process of it remains, then expires |
-| A group the host may not signal (EPERM) | Expires, with `processUnchecked` |
+| A group the host may not signal (EPERM) or whose members it cannot read | Expires, with `processUnchecked` |
 
 A group is ours when its leader is alive with the recorded start time, or, when it has
 lost its leader, when every member started at or after that time: the operating system
 does not hand out a group's ID again while any member of it lives. A process with the
 group's ID and another start time took the number after our group was gone, and is left
-alone. Stopping is the stop sequence of the guard, and the wait for the group to be gone
-is bounded by `stop_grace_ms` plus 1 s. A group still there after that leaves the
+alone. A zombie is not a member: its parent, or init, reaps it. Stopping is the stop
+sequence of the guard, and the wait for the group to be gone is bounded by
+`stop_grace_ms` plus 1 s. A group still there after that leaves the
 attempt unexpired; the sweep tries again on its next pass.
 
 Where the check cannot be made, the host signals nothing. A record from another machine
