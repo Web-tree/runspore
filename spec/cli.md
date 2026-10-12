@@ -11,6 +11,7 @@ engine. It never listens on a network.
 | `--json` | off | One JSON object on stdout instead of text |
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
 | `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
+| `--stop-grace-ms` | 5000 | Time a stopped command's process group gets between SIGTERM and SIGKILL (host.md §3, `stop_grace_ms`); used by `worker` and `run` |
 
 ## Commands
 
@@ -49,7 +50,7 @@ not quarantined succeeds and changes nothing.
 | 4 | The run needs intervention |
 | 5 | The run is quarantined |
 | 10 | Store or internal error |
-| 130 | Interrupted by SIGINT or SIGTERM after a graceful shutdown |
+| 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
 ## JSON output
 
@@ -67,5 +68,11 @@ Text output is for people and is not a stable interface.
 
 ## Interrupts
 
-On SIGINT or SIGTERM the worker stops claiming, gives in-flight activities a short
-grace period, and exits. Work it leaves behind is picked up by the next worker.
+On SIGINT, SIGTERM or SIGHUP the worker stops claiming, gives in-flight activities a
+short grace period, stops the commands still running with the stop sequence (host.md
+§3), and exits. Closing the terminal (SIGHUP) therefore shuts down like Ctrl-C. Work it
+leaves behind is picked up by the next worker.
+
+A worker that dies without a graceful shutdown (SIGKILL, a crash) still stops its
+commands: each one's guard stops its process group. The guard is a hidden mode of
+`spore` itself; it is not a command.

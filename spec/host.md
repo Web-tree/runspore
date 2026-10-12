@@ -4,8 +4,8 @@ The host is everything around the kernel: it packages the kernel as a component,
 it, commits its decisions, and executes activities. It contains no graph logic. It
 never decides a branch, a retry, or an outcome route.
 
-Host 0.2 replaces 0.1 one rule at a time. A rule that changed says what 0.1 did; every
-other rule is the same in both.
+Host 0.2 replaces 0.1 one rule at a time. A rule that changed says what 0.1 did, or is
+marked **0.2** and names the 0.1 rule it replaces; every other rule is the same in both.
 
 ## 1. Kernel packaging
 
@@ -56,6 +56,8 @@ process on its own.
 | `limits` | `Limits::default()` | Frozen kernel budget |
 | `base_dir` | current directory | Base for relative `cwd` of command actions |
 | `run_ids` | the operating system's random source | Where the ID of each new run comes from; tests give a fixed sequence |
+| `stop_grace_ms` | 5000 | **0.2.** Time between SIGTERM and SIGKILL when a process group is stopped (§3) |
+| `guard` | the host's own executable | **0.2.** The executable whose guard mode runs in front of every process (§3) |
 
 ### Client operations
 
@@ -186,16 +188,17 @@ shuts down. The registry maps an action's `kind` to a runner.
 - The child also gets `RUNSPORE_RUN_ID`, `RUNSPORE_NODE_ID`, `RUNSPORE_INVOCATION_ID`,
   `RUNSPORE_ATTEMPT`, and `RUNSPORE_EFFECT_KEY`. The effect key is identical on every
   attempt of one invocation; an idempotent command passes it to whatever it calls.
-- It runs in its own process group. On timeout or stop the whole group is killed.
+- **0.2** (replaces 0.1's "It runs in its own process group. On timeout or stop the
+  whole group is killed."): it runs under a guard, below.
 
 Result mapping:
 
 | What happened | Runner output |
 | --- | --- |
-| Could not be spawned | `Failure`, `command.spawn`, retryable |
+| Could not be spawned, or its program could not be run | `Failure`, `command.spawn`, retryable |
 | Exit 0, or an exit code listed in `exitOutcomes` | `Success` with outcome `ok` or the mapped name |
 | Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stderrTail}` |
-| Killed by a signal it did not get from the engine | `Unknown`, `command.signaled` |
+| Killed by a signal it did not get from the engine, or its guard ended without reporting | `Unknown`, `command.signaled` |
 | Timed out, or stopped by the engine | `Unknown`, `command.timeout` or `command.stopped` |
 | Stdout over 64 KiB | `Failure`, `command.output-too-large`, not retryable |
 | `output: "json"` and stdout is not JSON in the canonical domain | `Failure`, `command.malformed-output`, not retryable |
@@ -204,6 +207,41 @@ Success output by `output` mode: `text` (default) gives `{"exitCode": n, "stdout
 "<utf-8, lossy>"}`; `json` gives the parsed stdout value; `none` gives `null`.
 `validate` checks the shape of every field above and that every `exitOutcomes` value
 is a declared outcome.
+
+### The guard (0.2)
+
+Every process the host starts for an attempt runs under a guard. In 0.2 that is a
+`command`'s `argv`.
+
+- The guard is a hidden mode of the host's own executable (config `guard`), so there
+  is nothing extra to install. It is never named in a workflow and no action opts out.
+- The host starts the guard with two pipes: a control pipe the host writes to and a
+  report pipe it reads. The guard moves to a session and process group of its own,
+  apart from the host's and from the command's, so a signal sent to either group never
+  reaches it.
+- The guard starts the command's process as the leader of a new process group, with
+  default signal dispositions and an empty signal mask. That process waits until the
+  host says go; only then does it run the program. The guard reports the process ID
+  first, so the host knows the group before anything runs. If the host's end of the
+  control pipe closes before go, the guard kills the waiting process and exits: no
+  program runs that the host does not know about.
+- The command inherits the standard input, output and error pipes directly. The guard
+  reports how the command ended (its exit code, or the signal that ended it).
+- The guard stops the command's group when the host asks (timeout, lease lost,
+  shutdown) and when the host's end of the control pipe closes without a stop: the host
+  died, for any reason, including SIGKILL. A dead host's try records nothing; its lease
+  runs out as in 0.1 and the sweep expires it.
+
+**Stopping a group** is SIGTERM to the group, a wait of up to `stop_grace_ms` for the
+group to be gone, then SIGKILL. It is used on timeout, on stop (lease lost, shutdown)
+and when the guard sees the host die, so a command can save its state before it goes.
+With the defaults, a dead host's group is gone (5 s at most) well before its lease runs
+out (10 s), so the next try never starts beside it.
+On a normal ending (the command's process exited) the rest of its group is killed at
+once, as in 0.1, so nothing the command left behind outlives it.
+
+A command that starts its own process group or session escapes the guard, as it
+escapes 0.1's timeout kill.
 
 ### `native`
 
@@ -229,3 +267,6 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H4 | Kernel failure (budget exceeded) | Run quarantined, event still pending, no hot loop; `release` resumes |
 | H5 | Command runner result table | Every row above, including process-group kill on timeout |
 | H6 | Crash at every host and store failpoint during a multi-step run, then restart | Final state equals the uninterrupted run's; idempotent steps ran at most `maxAttempts` times; an `unsafe` step interrupted after its effect leaves the run in `needs-intervention`, and resolving it completes the run with the effect performed once |
+| H12 | **0.2.** SIGKILL the worker while a command runs | The command's group is gone within `stop_grace_ms` + 1 s; the next try starts only after it |
+| H14 | **0.2.** SIGKILL the worker while a command that ignores SIGTERM runs | The guard survives its own SIGTERM to the group and sends SIGKILL after `stop_grace_ms` |
+| H15 | **0.2.** SIGKILL the worker while a command that traps SIGTERM runs | The command writes its file before the group goes |
