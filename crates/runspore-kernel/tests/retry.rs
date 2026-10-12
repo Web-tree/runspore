@@ -5,12 +5,22 @@ mod common;
 
 use common::*;
 use runspore_types::digest::ids;
-use runspore_types::model::{code, command_kind, event_kind};
+use runspore_types::model::{code, command_kind, event_kind, WORKFLOW_FORMAT};
 use runspore_types::reducer::Decision;
 use serde_json::{json, Value};
 
 fn backoff() -> Value {
     json!({"maxAttempts": 3, "backoffMs": "500", "maxBackoffMs": "800"})
+}
+
+/// A single activity with no `failed` route in a 0.1 document, where giving up ends
+/// the run. Under 0.2 the step is stuck instead; the `14*` traces pin that.
+fn gives_up(effect: &str, retry: Value) -> Value {
+    with(
+        single_activity(effect, retry, false),
+        "/format",
+        json!(WORKFLOW_FORMAT),
+    )
 }
 
 fn io_error(node: &str) -> Value {
@@ -117,10 +127,7 @@ fn exhausted_retries_take_the_failed_route() {
 
 #[test]
 fn exhausted_retries_without_a_failed_route_end_the_run() {
-    let mut run = Run::started(
-        &single_activity("idempotent", backoff(), false),
-        json!(null),
-    );
+    let mut run = Run::started(&gives_up("idempotent", backoff()), json!(null));
     run.fail(true, 2_000);
     run.fail(true, 3_000);
     let decision = run.fail(true, 4_000);
@@ -143,10 +150,7 @@ fn a_non_retryable_failure_skips_the_retry_budget() {
         json!({"error": io_error("work")})
     );
 
-    let mut run = Run::started(
-        &single_activity("idempotent", backoff(), false),
-        json!(null),
-    );
+    let mut run = Run::started(&gives_up("idempotent", backoff()), json!(null));
     run.fail(false, 2_000);
     assert_eq!(run.state()["status"], json!("failed"));
     assert_eq!(run.state()["result"], json!({"error": io_error("work")}));
@@ -154,10 +158,7 @@ fn a_non_retryable_failure_skips_the_retry_budget() {
 
 #[test]
 fn one_attempt_is_the_default_budget() {
-    let mut run = Run::started(
-        &single_activity("idempotent", json!({}), false),
-        json!(null),
-    );
+    let mut run = Run::started(&gives_up("idempotent", json!({})), json!(null));
     let decision = run.fail(true, 2_000);
     assert!(decision.commands.is_empty());
     assert_eq!(run.status(), "failed");
@@ -165,7 +166,7 @@ fn one_attempt_is_the_default_budget() {
 
 #[test]
 fn a_failure_without_an_error_is_activity_failed() {
-    let mut run = Run::started(&single_activity("pure", json!({}), false), json!(null));
+    let mut run = Run::started(&gives_up("pure", json!({})), json!(null));
     let payload = run.result("failure");
     run.step(event_kind::ACTIVITY_RESULT, &payload, 2_000);
     assert_eq!(
@@ -177,7 +178,7 @@ fn a_failure_without_an_error_is_activity_failed() {
 
 #[test]
 fn the_failing_node_replaces_the_reported_node_id() {
-    let mut run = Run::started(&single_activity("pure", json!({}), false), json!(null));
+    let mut run = Run::started(&gives_up("pure", json!({})), json!(null));
     let mut payload = run.result("failure");
     set(
         &mut payload,
@@ -212,10 +213,7 @@ fn an_unknown_or_expired_attempt_of_a_repeatable_action_is_retried() {
 #[test]
 fn a_repeatable_action_out_of_attempts_is_exhausted() {
     for status in ["unknown", "expired"] {
-        let mut run = Run::started(
-            &single_activity("idempotent", backoff(), false),
-            json!(null),
-        );
+        let mut run = Run::started(&gives_up("idempotent", backoff()), json!(null));
         run.lose(status, 2_000);
         run.lose(status, 3_000);
         let decision = run.lose(status, 4_000);
