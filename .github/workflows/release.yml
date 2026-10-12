@@ -1,0 +1,96 @@
+# Builds, signs, attests and publishes a release on a tag v*. The contract is
+# spec/release.md; a failure at any step publishes nothing.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      # musl-tools provides musl-gcc for the C code of the bundled SQLite.
+      CC_aarch64_unknown_linux_musl: musl-gcc
+      CC_x86_64_unknown_linux_musl: musl-gcc
+    steps:
+      - uses: actions/checkout@v5
+      - if: endsWith(matrix.target, '-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # The first cargo call installs the toolchain rust-toolchain.toml pins.
+      - run: cargo --version && rustup target add ${{ matrix.target }}
+      - run: cargo build --release --locked -p runspore-cli --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          staging=$(mktemp -d)
+          cp target/${{ matrix.target }}/release/spore LICENSE "$staging/"
+          chmod 0755 "$staging/spore"
+          tar -czf spore-${{ matrix.target }}.tar.gz -C "$staging" spore LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spore-${{ matrix.target }}
+          path: spore-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: spore-*
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: |
+          test "$(ls spore-*.tar.gz | wc -l)" -eq 4
+          sha256sum spore-*.tar.gz >SHA256SUMS
+          cat SHA256SUMS
+      - name: Sign SHA256SUMS
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY" || { echo "secret RELEASE_SIGNING_KEY is not set (spec/release.md section 4)"; exit 1; }
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" >"$key"
+          ssh-keygen -q -Y sign -f "$key" -n runspore-release dist/SHA256SUMS
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/spore-*.tar.gz
+      - name: Check the assets with install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=$(SPORE_DOWNLOAD_URL="file://$PWD/dist" SPORE_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh)
+          echo "$out"
+          echo "$out" | grep -qx 'attestation checked'
+          test "$("$RUNNER_TEMP/bin/spore" --version)" = "spore ${GITHUB_REF_NAME#v}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
