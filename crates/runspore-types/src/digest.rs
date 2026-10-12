@@ -119,12 +119,6 @@ pub mod ids {
         format!("{invocation_id}.{attempt}")
     }
 
-    /// Run identity derived from a client start key.
-    pub fn run_from_start_key(tenant: &str, start_key: &str) -> String {
-        let hex = hash_hex("run", &[tenant.as_bytes(), start_key.as_bytes()]);
-        format!("run_{}", &hex[..32])
-    }
-
     pub const EVENT_STARTED: &str = "start";
 
     pub fn event_for_attempt(attempt_id: &str) -> String {

@@ -68,6 +68,22 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
         (json!(true), json!(false))
     );
     assert_eq!(start["runId"], again["runId"]);
+    let elsewhere = dir
+        .run(&args(&[
+            "--json",
+            "--db",
+            "other.db",
+            "start",
+            "flow.json",
+            "--key",
+            "k1",
+        ]))
+        .json();
+    assert_eq!(elsewhere["created"], json!(true));
+    assert_ne!(
+        elsewhere["runId"], start["runId"],
+        "a start key names a run only in its own database"
+    );
     let run = start["runId"].as_str().unwrap();
     assert_eq!(dir.run(&args(&["start", "flow.json"])).code(), Some(0));
     assert_eq!(

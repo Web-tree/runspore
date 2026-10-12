@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,6 +35,7 @@ pub struct EngineConfig {
     pub turns_per_run: u32,
     pub limits: Limits,
     pub base_dir: PathBuf,
+    pub run_ids: RunIds,
 }
 
 impl Default for EngineConfig {
@@ -49,7 +51,57 @@ impl Default for EngineConfig {
             turns_per_run: 32,
             limits: Limits::default(),
             base_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            run_ids: RunIds::random(),
         }
+    }
+}
+
+type NextRunId = dyn Fn() -> Result<String, HostError> + Send + Sync;
+
+/// Where the ID of each new run comes from. Run IDs are never derived from a start
+/// key, so two stores never share a run ID or anything built from it.
+#[derive(Clone)]
+pub struct RunIds(Arc<NextRunId>);
+
+impl RunIds {
+    /// `run_<32 lowercase hex>`: 128 bits from the operating system's random source.
+    pub fn random() -> Self {
+        Self(Arc::new(|| {
+            let mut bytes = [0u8; 16];
+            getrandom::fill(&mut bytes).map_err(|e| {
+                HostError::invalid("run.id-unavailable", format!("random source: {e}"))
+            })?;
+            Ok(bytes.iter().fold(String::from("run_"), |mut id, b| {
+                id.push_str(&format!("{b:02x}"));
+                id
+            }))
+        }))
+    }
+
+    /// Hands out `ids` in order, for tests. Once they run out, starting a new run
+    /// fails with `run.ids-exhausted`.
+    pub fn fixed<I>(ids: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        let ids = Mutex::new(ids.into_iter().map(Into::into).collect::<VecDeque<_>>());
+        Self(Arc::new(move || {
+            ids.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop_front()
+                .ok_or_else(|| HostError::invalid("run.ids-exhausted", "no run IDs left"))
+        }))
+    }
+
+    fn next(&self) -> Result<String, HostError> {
+        (self.0)()
+    }
+}
+
+impl fmt::Debug for RunIds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RunIds")
     }
 }
 
@@ -295,20 +347,41 @@ impl Engine {
         RunKey::new(&self.inner.config.tenant, run)
     }
 
-    /// Validates and starts a workflow. Retrying with the same `start_key` is a duplicate.
+    /// Validates and starts a workflow. Retrying with the same `start_key` is a
+    /// duplicate; the key names a run only within this store.
     pub async fn start(
         &self,
         workflow_json: &[u8],
         input: Value,
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
+        match self.try_start(workflow_json, &input, start_key).await {
+            // Another start with this key created its run after our lookup; the next
+            // lookup finds it.
+            Err(HostError::Store(f)) if f.code == "run.start-key-mismatch" => {
+                self.try_start(workflow_json, &input, start_key).await
+            }
+            other => other,
+        }
+    }
+
+    async fn try_start(
+        &self,
+        workflow_json: &[u8],
+        input: &Value,
+        start_key: &str,
+    ) -> Result<StartOutcome, HostError> {
         let inner = &self.inner;
         let tenant = &inner.config.tenant;
-        let key = self.key(&ids::run_from_start_key(tenant, start_key));
+        let found = retry(false, || inner.store.find_run(tenant, start_key)).await?;
+        let key = match found {
+            Some(key) => key,
+            None => self.key(&inner.config.run_ids.next()?),
+        };
         let started = evidence(&RunStarted {
             tenant: tenant.clone(),
             run_id: key.run.clone(),
-            input,
+            input: input.clone(),
         })?;
         let package = check_workflow(
             &*inner.reducer,

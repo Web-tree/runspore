@@ -6,13 +6,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use common::*;
-use runspore_host::{ActivityOutput, EngineConfig, NativeRunner, TickReport};
+use runspore_host::{ActivityOutput, EngineConfig, NativeRunner, RunIds, TickReport};
 use runspore_store_conformance::ManualClock;
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::canonical;
 use runspore_types::digest;
 use runspore_types::reducer::*;
-use runspore_types::store::{Disposition, InvocationStatus, StoreFailure, StoreFailureKind};
+use runspore_types::store::{
+    Disposition, InvocationStatus, RunKey, StoreFailure, StoreFailureKind,
+};
 use serde_json::{json, Value};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -332,6 +334,88 @@ async fn client_operations_are_idempotent_by_their_keys() {
             .len(),
         3
     );
+}
+
+/// Starts `key` twice in a fresh store, runs it, and returns the run key and the IDs of
+/// its invocations, which are also its effect keys.
+async fn start_twice_and_run(name: &str, key: &str) -> (RunKey, Vec<String>) {
+    let store = Arc::new(SqliteStore::open(temp_db(name)).unwrap());
+    let engine = engine(
+        store,
+        one_step,
+        counting_echo(Arc::default()),
+        EngineConfig::default(),
+    );
+    let first = engine.start(WORKFLOW, json!({}), key).await.unwrap();
+    let again = engine.start(WORKFLOW, json!({}), key).await.unwrap();
+    assert!(first.created && !again.created);
+    assert_eq!(first.key, again.key);
+    let view = engine.run_until_parked(&first.key).await.unwrap();
+    assert_eq!(view.status, "completed");
+    let invocations = engine.list_invocations(&first.key).await.unwrap();
+    (
+        first.key,
+        invocations.into_iter().map(|i| i.invocation_id).collect(),
+    )
+}
+
+#[tokio::test]
+async fn a_start_key_names_one_run_per_store_and_run_ids_are_random() {
+    let (a, effects_a) = start_twice_and_run("key-a", "same").await;
+    let (b, effects_b) = start_twice_and_run("key-b", "same").await;
+    for key in [&a, &b] {
+        let hex = key.run.strip_prefix("run_").unwrap();
+        assert_eq!(hex.len(), 32);
+        assert!(hex
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)));
+    }
+    assert_ne!(a.run, b.run);
+    assert_eq!((effects_a.len(), effects_b.len()), (1, 1));
+    assert_ne!(effects_a, effects_b);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_starts_with_one_key_end_on_one_run() {
+    let path = temp_db("start-race");
+    // `a` looks the key up, misses, and stops in its dry run until `b` has started.
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let gate = Mutex::new(Some((entered_tx, go_rx)));
+    let slow = move |request: &TransitionRequest| {
+        if let Some((entered, go)) = gate.lock().unwrap().take() {
+            entered.send(()).unwrap();
+            go.recv().unwrap();
+        }
+        one_step(request)
+    };
+    let config = |run: &str| EngineConfig {
+        run_ids: RunIds::fixed([run]),
+        ..EngineConfig::default()
+    };
+    let a = engine(
+        Arc::new(SqliteStore::open(&path).unwrap()),
+        slow,
+        counting_echo(Arc::default()),
+        config("run_a"),
+    );
+    let b = engine(
+        Arc::new(SqliteStore::open(&path).unwrap()),
+        one_step,
+        counting_echo(Arc::default()),
+        config("run_b"),
+    );
+    let late = tokio::spawn(async move { a.start(WORKFLOW, json!({}), "race").await });
+    tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
+        .await
+        .unwrap();
+    let won = b.start(WORKFLOW, json!({}), "race").await.unwrap();
+    go_tx.send(()).unwrap();
+    let lost = late.await.unwrap().unwrap();
+    assert!(won.created && !lost.created);
+    assert_eq!(won.key.run, "run_b");
+    assert_eq!(lost.key, won.key);
+    assert_eq!(b.list_runs(None, 10).await.unwrap().items.len(), 1);
 }
 
 #[tokio::test]

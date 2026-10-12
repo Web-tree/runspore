@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S14 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S15 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::fmt::Debug;
@@ -1036,6 +1036,54 @@ pub async fn s14_append_limits(factory: &dyn StoreFactory) {
         .is_none());
 }
 
+/// S15: two starts race with one start key and two run IDs; `find_run` names the winner.
+pub async fn s15_start_key_race(factory: &dyn StoreFactory) {
+    for n in 0..RACES {
+        let clock = ManualClock::new(1_000);
+        let fixture = factory.fresh(clock.clone());
+        let start_key = format!("s15-{n}");
+        let request = |run: &str| {
+            let mut request = create_run(&RunKey::new(DEFAULT_TENANT, run), "start", 0);
+            request.start_key = start_key.clone();
+            request
+        };
+        let (a, b) = (request("s15-a"), request("s15-b"));
+        let (sa, sb) = (fixture.store.clone(), fixture.second(clock));
+        let (ra, rb) = race(async move { sa.create_run(a).await }, async move {
+            sb.create_run(b).await
+        })
+        .await;
+        let (winner, loser) = match (ra, rb) {
+            (Ok(won), Err(lost)) | (Err(lost), Ok(won)) => (won, lost),
+            other => panic!("expected one winner, got {other:?}"),
+        };
+        assert_eq!(winner.disposition, Disposition::Applied);
+        assert_eq!(
+            (loser.kind, loser.code),
+            (StoreFailureKind::Conflict, "run.start-key-mismatch".into())
+        );
+        let store = &fixture.store;
+        assert_eq!(
+            store.find_run(DEFAULT_TENANT, &start_key).await.unwrap(),
+            Some(winner.value.key)
+        );
+        assert_eq!(
+            store
+                .list_runs(DEFAULT_TENANT, None, 10)
+                .await
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+        assert_eq!(
+            store.find_run(DEFAULT_TENANT, "s15-unknown").await.unwrap(),
+            None
+        );
+        assert_eq!(store.find_run("other", &start_key).await.unwrap(), None);
+    }
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1044,7 +1092,8 @@ macro_rules! store_conformance_tests {
             s01_concurrent_commit s02_replay_after_progress s03_request_identity
             s04_result_after_expiry s05_heartbeat_deadline s06_event_id_conflict
             s07_concurrent_appends s08_atomic_commit s09_not_before s10_fences
-            s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits);
+            s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
+            s15_start_key_race);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(
