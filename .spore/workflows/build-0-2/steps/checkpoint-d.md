@@ -6,4 +6,7 @@ Comes after wave 6 (P8, R14, R25).
 
 **Feedback asked for:** Does the interview ask the right things, and only those?
 
-Answer `go` to start the next wave. Answer `changes` with the list of changes; the run goes back to the wave before this checkpoint, which finishes when the tickets made from your changes are merged.
+Answer from the orchestrator folder:
+
+- `work/build-0-2/bin/answer d go` starts the next wave.
+- `work/build-0-2/bin/answer d changes "<change>" ["skills: <change>"]...` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.

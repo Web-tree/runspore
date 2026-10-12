@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Start (or resume) the build-0-2 run and work on it and its ticket runs.
+#
+#   work/build-0-2/bin/build             # Ctrl-C to stop; run again to go on
+#   work/build-0-2/bin/build --restart   # a new try after a failed one (see start-run)
+#
+# Converts both workflow folders to 0.1 documents (spore 0.1 has no DOT reader
+# yet), checks them, makes sure the build run exists (start keys make this safe to
+# repeat), then runs one worker for every run in the database. Stopping and running
+# this again picks up where it was.
+set -euo pipefail
+cd "$(dirname "$0")/../../.."
+export SPORE="${SPORE:-$HOME/.local/share/runspore-0.1/bin/spore}"
+export RUNSPORE_DB="${RUNSPORE_DB:-$PWD/.spore/runspore.db}"
+bin=work/build-0-2/bin
+mkdir -p .spore/gen
+for w in build-0-2 ticket; do
+  "$bin/to-0.1" ".spore/workflows/$w" > ".spore/gen/$w.json"
+  "$SPORE" validate ".spore/gen/$w.json" >/dev/null
+done
+if [ -z "${BUILD_NO_LABELS:-}" ]; then
+  gh label create checkpoint --repo Web-tree/runspore --color f0b765 \
+    --description "Try the build and answer" >/dev/null 2>&1 || true
+  gh label create ready-for-agent --repo Max-Levitskiy/skills >/dev/null 2>&1 || true
+fi
+echo "build run: $("$bin/start-run" "$@")"
+exec "$SPORE" --db "$RUNSPORE_DB" worker

@@ -6,4 +6,7 @@ Comes after wave 11 (P9, R28).
 
 **Feedback asked for:** Lock the map; close the old skills-repo map.
 
-Answer `go` to start the next wave. Answer `changes` with the list of changes; the run goes back to the wave before this checkpoint, which finishes when the tickets made from your changes are merged.
+Answer from the orchestrator folder:
+
+- `work/build-0-2/bin/answer g go` starts the next wave.
+- `work/build-0-2/bin/answer g changes "<change>" ["skills: <change>"]...` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.

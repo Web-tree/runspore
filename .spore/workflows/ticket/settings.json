@@ -1,0 +1,228 @@
+{
+  "format": "runspore.workflow/0.2",
+  "limits": {
+    "maxVisitsPerNode": 5,
+    "maxActivations": 32
+  },
+  "actions": {
+    "setup": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/ticket-step",
+        "setup"
+      ],
+      "output": "json",
+      "effect": "idempotent",
+      "retry": {
+        "maxAttempts": 3,
+        "backoffMs": "30000",
+        "maxBackoffMs": "600000"
+      },
+      "timeoutMs": "600000",
+      "outcomes": [
+        "ok"
+      ]
+    },
+    "implement": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/ticket-step",
+        "implement"
+      ],
+      "output": "json",
+      "effect": "idempotent",
+      "retry": {
+        "maxAttempts": 3,
+        "backoffMs": "30000",
+        "maxBackoffMs": "600000"
+      },
+      "timeoutMs": "7200000",
+      "outcomes": [
+        "ok"
+      ]
+    },
+    "test": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/ticket-step",
+        "test"
+      ],
+      "effect": "read-only",
+      "retry": {
+        "maxAttempts": 2,
+        "backoffMs": "30000",
+        "maxBackoffMs": "600000"
+      },
+      "timeoutMs": "3600000",
+      "outcomes": [
+        "ok",
+        "red"
+      ],
+      "exitOutcomes": {
+        "1": "red"
+      }
+    },
+    "ship": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/ticket-step",
+        "ship"
+      ],
+      "effect": "idempotent",
+      "retry": {
+        "maxAttempts": 5,
+        "backoffMs": "30000",
+        "maxBackoffMs": "600000"
+      },
+      "timeoutMs": "7200000",
+      "outcomes": [
+        "ok",
+        "red"
+      ],
+      "exitOutcomes": {
+        "1": "red"
+      }
+    }
+  },
+  "nodes": {
+    "setup": {
+      "action": "setup",
+      "input": {
+        "ticket": {
+          "$get": [
+            "input",
+            "ticket"
+          ]
+        }
+      }
+    },
+    "implement": {
+      "action": "implement",
+      "instructions": "steps/implement.md",
+      "input": {
+        "ticket": {
+          "$get": [
+            "input",
+            "ticket"
+          ]
+        },
+        "worktree": {
+          "$get": [
+            "nodes",
+            "setup",
+            "output"
+          ]
+        }
+      }
+    },
+    "test": {
+      "action": "test",
+      "input": {
+        "worktree": {
+          "$get": [
+            "nodes",
+            "setup",
+            "output"
+          ]
+        }
+      }
+    },
+    "fix": {
+      "action": "implement",
+      "instructions": "steps/implement.md",
+      "input": {
+        "ticket": {
+          "$get": [
+            "input",
+            "ticket"
+          ]
+        },
+        "worktree": {
+          "$get": [
+            "nodes",
+            "setup",
+            "output"
+          ]
+        },
+        "failures": {
+          "$get": [
+            "nodes",
+            "test",
+            "output",
+            "stdout"
+          ]
+        }
+      }
+    },
+    "ship": {
+      "action": "ship",
+      "input": {
+        "ticket": {
+          "$get": [
+            "input",
+            "ticket"
+          ]
+        },
+        "worktree": {
+          "$get": [
+            "nodes",
+            "setup",
+            "output"
+          ]
+        },
+        "summary": {
+          "$get": [
+            "nodes",
+            "implement",
+            "output",
+            "result",
+            "summary"
+          ]
+        }
+      }
+    },
+    "fix_ci": {
+      "action": "implement",
+      "instructions": "steps/implement.md",
+      "input": {
+        "ticket": {
+          "$get": [
+            "input",
+            "ticket"
+          ]
+        },
+        "worktree": {
+          "$get": [
+            "nodes",
+            "setup",
+            "output"
+          ]
+        },
+        "failures": {
+          "$get": [
+            "nodes",
+            "ship",
+            "output",
+            "stdout"
+          ]
+        }
+      }
+    },
+    "done": {
+      "output": {
+        "pr": {
+          "$get": [
+            "nodes",
+            "ship",
+            "output",
+            "stdout"
+          ]
+        }
+      }
+    }
+  }
+}

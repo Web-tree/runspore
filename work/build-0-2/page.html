@@ -75,7 +75,7 @@ details pre { margin: 0; padding: 12px; border-top: 1px solid var(--line); overf
 <div class="wrap">
   <header class="lede">
     <h1>Runspore build order</h1>
-    <p>The build plan is itself a Runspore workflow, <code>build-0-2</code>, in the format it builds: a <code>workflow.dot</code> and a <code>settings.json</code>. Each wave is an external step that finishes when all its tickets are merged. Each checkpoint is a decision you answer with <code>go</code> or <code>changes</code>; <code>changes</code> sends the run back into the wave before it.</p>
+    <p>The build runs on Runspore: <code>build-0-2</code> is a workflow in the 0.2 format (a <code>workflow.dot</code> and a <code>settings.json</code>), run today by spore 0.1. Each wave starts one <code>ticket</code> run per ticket (implement, test, ship) and finishes when all are merged. Each checkpoint is a decision you answer with <code>go</code> or <code>changes</code>; <code>changes</code> builds tickets made from your changes, then asks again.</p>
     <div class="now"><i></i><span>Now: {{NOW}}</span></div>
     <div class="key">
       <span><i style="background:var(--done)"></i>done</span>
@@ -99,10 +99,10 @@ details pre { margin: 0; padding: 12px; border-top: 1px solid var(--line); overf
   </section>
 
   <section>
-    <h2>How it is tracked</h2>
+    <h2>How it runs</h2>
     <div class="how">
-      <div><b>Now</b><p><code>work/build-0-2/track.py</code> reads the workflow folder, the GitHub state of each ticket (merged, PR open, open) and <code>checkpoints.json</code>, your answers. It prints the position in the shape of <code>spore status --json</code> and redraws this page.</p></div>
-      <div><b>From wave 6</b><p>Once spore has external steps (R19), <code>continue</code> (R22) and the project folder (R8), the build becomes a real run: <code>spore start build-0-2</code>. Waves are claimed and completed with <code>spore step</code>, checkpoints are answered with <code>spore signal</code>, and the script retires.</p></div>
+      <div><b>Now: spore 0.1</b><p><code>work/build-0-2/bin/build</code> converts both workflow folders to 0.1 documents, starts the run and works on it. You answer a checkpoint with <code>work/build-0-2/bin/answer a go</code>. This page reads the run from <code>spore status</code>.</p></div>
+      <div><b>Moving to 0.2</b><p>Once 0.2 reads workflow folders (R3, R12, R13), the same workflow starts on 0.2 with <code>build --restart</code>: merged waves pass at once and your <code>go</code> answers are sent up front.</p></div>
       <div><b>From checkpoint F</b><p>The plugin's run line and live view (P7) draw this same workflow inside Claude Code.</p></div>
     </div>
   </section>

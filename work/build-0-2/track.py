@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
-"""Track the build-0-2 workflow until spore 0.2 can run it itself.
+"""Show where the build-0-2 run is.
 
-Reads .spore/workflows/build-0-2 (the plan, written as a runspore 0.2 workflow),
-the GitHub state of every ticket it names, and checkpoints.json (the answers given
-at each checkpoint). Prints where the build is in the shape of `spore status --json`,
-or renders the build-order page with the workflow drawn and the position highlighted.
+Reads the workflow folder (.spore/workflows/build-0-2), the run itself from the
+spore database (`spore status` of the run keyed `build-0-2` and of its ticket runs),
+and the GitHub state of each ticket. Prints the position as JSON, or renders the
+build-order page with the workflow drawn from its DOT and the position highlighted.
 
     python3 work/build-0-2/track.py            # status JSON
     python3 work/build-0-2/track.py --page OUT.html
 
-Once spore 0.2 has external steps (R19) and `continue` (R22), start a real run of
-the workflow and read `spore status --json` instead; this script then retires.
+Before the run is started it reads the position from GitHub alone: the first wave
+with an open ticket. Once the plugin's live view (P7) lands, it draws this instead.
 """
-import html, json, re, subprocess, sys
+import html, json, os, re, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 WF = REPO / ".spore/workflows/build-0-2"
+SPORE = os.environ.get("SPORE", str(Path.home() / ".local/share/runspore-0.1/bin/spore"))
+DB = os.environ.get("RUNSPORE_DB", str(REPO / ".spore/runspore.db"))
+STATE = Path(os.environ.get("BUILD_STATE", REPO / ".spore/build-state"))
 
 # Placeholder colours in the display DOT; the page's CSS maps them to theme tokens.
 DONE, CURRENT, ARROW = "#010101", "#020202", "#030303"
@@ -31,8 +34,18 @@ def gh_json(*args):
 def load():
     dot = (WF / "workflow.dot").read_text()
     settings = json.loads((WF / "settings.json").read_text())
-    checkpoints = json.loads((HERE / "checkpoints.json").read_text())
-    return dot, settings, checkpoints
+    return dot, settings
+
+
+def spore(*args):
+    out = subprocess.run([SPORE, "--db", DB, "--json", *args], capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+def edges(dot):
+    """(from, to, on) for every arrow; no `on` means `ok`."""
+    return [(a, b, (re.search(r'on="([^"]+)"', at or "") or [None, "ok"])[1])
+            for a, b, at in re.findall(r"^\s*(\w+)\s*->\s*(\w+)\s*(\[[^\]]*\])?;", dot, re.M)]
 
 
 def path_of(dot):
@@ -66,37 +79,93 @@ def ticket_states(settings):
     return state
 
 
+def wave_tickets(settings, node):
+    return settings["nodes"].get(node, {}).get("input", {}).get("tickets", {}).get("$literal", [])
+
+
+def feedback_tickets(run_id):
+    """Tickets made from `changes` answers in this run, from the step's own records."""
+    out = {}
+    for f in sorted(STATE.glob("feedback-*.json")) if STATE.exists() else []:
+        for e in json.loads(f.read_text()).values():
+            if e.get("run") != run_id:
+                continue
+            k = e["title"].split()[1].lower()
+            out.setdefault(f"feedback_{k}", []).append(
+                {"id": f"F{k.upper()}-{e['issue'].split('#')[1]}", "issue": e["issue"], "title": e["title"]})
+    return out
+
+
 def status():
-    dot, settings, checkpoints = load()
-    seq, nxt = path_of(dot)
+    dot, settings = load()
+    seq, _ = path_of(dot)
     state = ticket_states(settings)
+    all_runs = spore("list")["runs"] if Path(DB).exists() else []
+    tries = sorted((int(m.group(1) or 1), r) for r in all_runs
+                   for m in [re.fullmatch(r"build-0-2(?::(\d+))?", r["startKey"])] if m)
+    build = tries[-1][1] if tries else None
+    if build is None:
+        return planned(dot, settings, seq, state)
+    run = spore("status", build["runId"])
+    ticket_runs = {}
+    for r in all_runs:
+        m = re.match(r"ticket:(.+):(\d+)$", r["startKey"])
+        if m and int(m.group(2)) >= ticket_runs.get(m.group(1), (0,))[0]:
+            ticket_runs[m.group(1)] = (int(m.group(2)), r)
+
+    def ticket(t):
+        s = state(t["issue"])
+        if s != "done" and t["issue"] in ticket_runs:
+            r = ticket_runs[t["issue"]][1]
+            s = r["status"] if r["status"] in ("failed",) else spore("status", r["runId"])["position"]["nodeId"] or r["status"]
+        return {**t, "state": s}
+
+    pos = run["position"]["nodeId"] if run["status"] in ("running", "waiting") else None
+    visited = run["nodes"]
+    fb = feedback_tickets(build["runId"])
+    nodes = {}
+    order = seq + sorted(n for n in visited if n not in seq)
+    for node in order:
+        cfg = settings["nodes"].get(node, {})
+        if node.startswith("feedback_") or wave_tickets(settings, node):
+            ts = [ticket(t) for t in (fb.get(node, []) if node.startswith("feedback_") else wave_tickets(settings, node))]
+            nodes[node] = {"kind": "wave", "tickets": ts, "done": node in visited and node != pos}
+        elif "signal" in cfg:
+            nodes[node] = {"kind": "checkpoint", "signal": cfg["signal"],
+                           "answer": {"outcome": visited[node]["outcome"]} if node in visited else None,
+                           "done": node in visited and node != pos}
+        else:
+            nodes[node] = {"kind": "end", "done": run["status"] == "completed"}
+    frm = None
+    if pos:
+        came = [(a, on) for a, b, on in edges(dot) if b == pos and a in visited and visited[a]["outcome"] == on]
+        if len(came) > 1 and run["position"]["visit"] > 1:
+            came = [c for c in came if c[0].startswith("feedback_")] or came
+        frm = {"nodeId": came[0][0], "outcome": came[0][1]} if came else None
+    return {"format": "build-0-2.track/0.2", "workflow": "build-0-2", "runId": build["runId"],
+            "status": run["status"], "position": {"nodeId": pos, "from": frm}, "path": order, "nodes": nodes}
+
+
+def planned(dot, settings, seq, state):
+    """No run yet: the first wave with an open ticket."""
     nodes, position, prev, frm = {}, None, None, None
-    # Feedback tickets made from a checkpoint's `changes` answer belong to the wave before it.
-    extra = {}
-    for a, b in zip(seq, seq[1:]):
-        answer = checkpoints.get(settings["nodes"].get(b, {}).get("signal", ""), {})
-        if answer.get("outcome") == "changes":
-            extra[a] = [{"id": "fix", "issue": i, "title": "Checkpoint feedback"} for i in answer.get("tickets", [])]
     for node in seq:
         cfg = settings["nodes"].get(node, {})
-        tickets = cfg.get("input", {}).get("tickets", {}).get("$literal", [])
-        if tickets:
-            ts = [{**t, "state": state(t["issue"])} for t in tickets + extra.get(node, [])]
+        if wave_tickets(settings, node):
+            ts = [{**t, "state": state(t["issue"])} for t in wave_tickets(settings, node)]
             done = all(t["state"] == "done" for t in ts)
             nodes[node] = {"kind": "wave", "tickets": ts, "done": done}
         elif "signal" in cfg:
-            answer = checkpoints.get(cfg["signal"], {})
-            done = answer.get("outcome") == "go"
-            nodes[node] = {"kind": "checkpoint", "signal": cfg["signal"], "answer": answer or None, "done": done}
+            done = False
+            nodes[node] = {"kind": "checkpoint", "signal": cfg["signal"], "answer": None, "done": False}
         else:
             done = False
             nodes[node] = {"kind": "end", "done": False}
         if position is None and not done:
             position = node
-            frm = {"nodeId": prev, "outcome": nxt[prev][1]} if prev else None
+            frm = {"nodeId": prev, "outcome": "ok"} if prev else None
         prev = node
-    return {"format": "build-0-2.track/0.1", "workflow": "build-0-2",
-            "status": "completed" if position == seq[-1] else "running",
+    return {"format": "build-0-2.track/0.2", "workflow": "build-0-2", "runId": None, "status": "not started",
             "position": {"nodeId": position, "from": frm}, "path": seq, "nodes": nodes}
 
 
@@ -126,7 +195,7 @@ def svg(display):
 
 
 def page(out_path):
-    dot, settings, _ = load()
+    dot, settings = load()
     st = status()
     template = (HERE / "page.html").read_text()
     pos = st["position"]["nodeId"]
@@ -135,7 +204,7 @@ def page(out_path):
         n = sum(t["state"] == "done" for t in cur["tickets"])
         now = f"{pos.replace('_', ' ').capitalize()}: {n} of {len(cur['tickets'])} tickets merged"
     elif cur.get("kind") == "checkpoint":
-        now = f"{pos.replace('_', ' ').capitalize()}: waiting for your answer"
+        now = f"Checkpoint {pos[-1].upper()}: waiting for your answer"
     else:
         now = "0.2 shipped"
     waves = []

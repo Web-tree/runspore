@@ -6,4 +6,7 @@ Comes after wave 5 (R4, R15, R18, P1, P3).
 
 **Feedback asked for:** Is the background Claude step good enough to build the rest of the plugin on?
 
-Answer `go` to start the next wave. Answer `changes` with the list of changes; the run goes back to the wave before this checkpoint, which finishes when the tickets made from your changes are merged.
+Answer from the orchestrator folder:
+
+- `work/build-0-2/bin/answer c go` starts the next wave.
+- `work/build-0-2/bin/answer c changes "<change>" ["skills: <change>"]...` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.

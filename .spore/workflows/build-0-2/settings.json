@@ -5,21 +5,28 @@
     "maxActivations": 256
   },
   "actions": {
-    "build-wave": {
-      "kind": "external",
-      "actor": "orchestrator",
-      "effect": "unsafe",
+    "run-wave": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/run-wave"
+      ],
+      "output": "json",
+      "effect": "idempotent",
+      "retry": {
+        "maxAttempts": 100,
+        "backoffMs": "5000",
+        "maxBackoffMs": "600000"
+      },
+      "timeoutMs": "1209600000",
       "outcomes": [
         "ok"
-      ],
-      "async": {
-        "timeoutMs": "1209600000"
-      }
+      ]
     }
   },
   "nodes": {
     "wave_1": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 1
@@ -57,16 +64,11 @@
               "title": "ml-workflow plugin skeleton"
             }
           ]
-        },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
         }
       }
     },
     "wave_2": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 2
@@ -100,15 +102,13 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-a.md"
         }
       }
     },
     "wave_3": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 3
@@ -142,15 +142,13 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-b.md"
         }
       }
     },
     "wave_4": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 4
@@ -183,16 +181,11 @@
               "title": "An action's working folder can come from the step's input"
             }
           ]
-        },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
         }
       }
     },
     "wave_5": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 5
@@ -211,15 +204,13 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-c.md"
         }
       }
     },
     "wave_6": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 6
@@ -248,15 +239,13 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-d.md"
         }
       }
     },
     "wave_7": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 7
@@ -284,16 +273,11 @@
               "title": "Interactive Claude step in a herdr pane"
             }
           ]
-        },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
         }
       }
     },
     "wave_8": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 8
@@ -312,15 +296,13 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-e.md"
         }
       }
     },
     "wave_9": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 9
@@ -338,16 +320,11 @@
               "title": "Session-start line and the entry menu"
             }
           ]
-        },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
         }
       }
     },
     "wave_10": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 10
@@ -361,15 +338,13 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-f.md"
         }
       }
     },
     "wave_11": {
-      "action": "build-wave",
+      "action": "run-wave",
       "input": {
         "wave": {
           "$literal": 11
@@ -383,10 +358,8 @@
             }
           ]
         },
-        "cameFrom": {
-          "$get": [
-            "from"
-          ]
+        "ask": {
+          "$literal": "steps/checkpoint-g.md"
         }
       }
     },
@@ -414,6 +387,25 @@
         }
       }
     },
+    "feedback_a": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "a"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_a",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-a.md"
+        }
+      }
+    },
     "checkpoint_b": {
       "signal": "checkpoint-b",
       "instructions": "steps/checkpoint-b.md",
@@ -435,6 +427,25 @@
               "description": "What to change before the next wave starts, one item per change."
             }
           }
+        }
+      }
+    },
+    "feedback_b": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "b"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_b",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-b.md"
         }
       }
     },
@@ -462,6 +473,25 @@
         }
       }
     },
+    "feedback_c": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "c"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_c",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-c.md"
+        }
+      }
+    },
     "checkpoint_d": {
       "signal": "checkpoint-d",
       "instructions": "steps/checkpoint-d.md",
@@ -483,6 +513,25 @@
               "description": "What to change before the next wave starts, one item per change."
             }
           }
+        }
+      }
+    },
+    "feedback_d": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "d"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_d",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-d.md"
         }
       }
     },
@@ -510,6 +559,25 @@
         }
       }
     },
+    "feedback_e": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "e"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_e",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-e.md"
+        }
+      }
+    },
     "checkpoint_f": {
       "signal": "checkpoint-f",
       "instructions": "steps/checkpoint-f.md",
@@ -531,6 +599,25 @@
               "description": "What to change before the next wave starts, one item per change."
             }
           }
+        }
+      }
+    },
+    "feedback_f": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "f"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_f",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-f.md"
         }
       }
     },
@@ -557,6 +644,26 @@
           }
         }
       }
-    }
+    },
+    "feedback_g": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "g"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_g",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-g.md"
+        }
+      }
+    },
+    "done": {}
   }
 }

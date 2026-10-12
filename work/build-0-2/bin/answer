@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Answer a checkpoint of the build-0-2 run.
+
+    answer <a-g> go
+    answer <a-g> changes "<change>" ["skills: <change>"]...
+
+`go` starts the next wave and closes the checkpoint issue. `changes` turns each
+change into a ticket (runspore, or the skills repo with `skills:`), builds them,
+then asks the checkpoint again. The signal is held if the run is not waiting yet.
+"""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from buildlib import build_run_id, load_state, save_state, sh, spore  # noqa: E402
+
+args = sys.argv[1:]
+if len(args) < 2 or args[0] not in "abcdefg" or len(args[0]) != 1 or args[1] not in ("go", "changes") \
+        or (args[1] == "go") != (len(args) == 2) or any(not a.strip() for a in args[2:]):
+    sys.exit(__doc__.strip())
+k, outcome, changes = args[0], args[1], args[2:]
+cmd = ["signal", build_run_id(), f"checkpoint-{k}", "--outcome", outcome]
+if changes:
+    cmd += ["--data", json.dumps({"changes": changes})]
+res = spore(*cmd)
+print(json.dumps(res, indent=2))
+if outcome == "go":
+    # A restarted build run gets this answer again up front; see bin/start-run.
+    answers = load_state("answers")
+    answers[k] = "go"
+    save_state("answers", answers)
+cp = load_state("checkpoints").get(k)
+if outcome == "go" and cp:
+    num = cp["url"].rstrip("/").split("/")[-1]
+    sh("gh", "issue", "close", num, "--repo", "Web-tree/runspore", "--comment", "Answered `go`.", check=False)
