@@ -22,7 +22,7 @@ sha2 = "0.11"
 hex = "0.4"
 thiserror = "2"
 async-trait = "0.1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "sync", "signal", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "sync", "signal", "io-util", "net"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

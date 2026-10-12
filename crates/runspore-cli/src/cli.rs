@@ -23,7 +23,7 @@ use crate::view;
 
 pub const FORMAT: &str = "runspore.cli/0.1";
 
-/// Exit code after a graceful shutdown on SIGINT or SIGTERM: for `worker` always, for
+/// Exit code after a graceful shutdown on SIGINT, SIGTERM or SIGHUP: for `worker` always, for
 /// `run` and `worker --until-parked` when the run had not parked yet.
 const EXIT_INTERRUPTED: u8 = 130;
 
@@ -52,6 +52,8 @@ pub struct Cli {
     pub poll_ms: Option<u64>,
     #[arg(long, global = true)]
     pub grace_ms: Option<u64>,
+    #[arg(long, global = true)]
+    pub stop_grace_ms: Option<u64>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -333,6 +335,7 @@ fn engine(cli: &Cli) -> Result<Engine, Fail> {
     config.heartbeat_ms = cli.heartbeat_ms.unwrap_or(config.heartbeat_ms);
     config.poll_ms = cli.poll_ms.unwrap_or(config.poll_ms);
     config.shutdown_grace_ms = cli.grace_ms.unwrap_or(config.shutdown_grace_ms);
+    config.stop_grace_ms = cli.stop_grace_ms.unwrap_or(config.stop_grace_ms);
     Ok(Engine::new(
         Arc::new(store),
         reducer(cli)?,
@@ -372,7 +375,7 @@ async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, StartOutcom
     Ok((start_key, outcome))
 }
 
-/// `run_until_parked`, or on SIGINT/SIGTERM `Engine::shutdown`, which applies the
+/// `run_until_parked`, or on SIGINT/SIGTERM/SIGHUP `Engine::shutdown`, which applies the
 /// results of the attempts it drains and leaves the rest of the run to the next worker.
 async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
     let mut stop = Interrupts::install()?;
@@ -527,10 +530,12 @@ fn generated(prefix: &str) -> String {
     format!("{prefix}_{:016x}", hasher.finish())
 }
 
-/// SIGINT and SIGTERM, installed before work starts so neither kills the process.
+/// SIGINT, SIGTERM and SIGHUP, installed before work starts so none kills the process.
+/// A closed terminal (SIGHUP) shuts down like Ctrl-C.
 struct Interrupts {
     int: Signal,
     term: Signal,
+    hup: Signal,
 }
 
 impl Interrupts {
@@ -539,6 +544,7 @@ impl Interrupts {
         Ok(Self {
             int: install(SignalKind::interrupt())?,
             term: install(SignalKind::terminate())?,
+            hup: install(SignalKind::hangup())?,
         })
     }
 
@@ -546,6 +552,7 @@ impl Interrupts {
         tokio::select! {
             _ = self.int.recv() => {}
             _ = self.term.recv() => {}
+            _ = self.hup.recv() => {}
         }
     }
 }

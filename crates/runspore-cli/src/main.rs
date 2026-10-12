@@ -13,6 +13,9 @@ use serde_json::{json, Value};
 use cli::{Cli, Fail, FORMAT};
 
 fn main() -> ExitCode {
+    if let Some(code) = runspore_host::guard::main_if_requested() {
+        return code;
+    }
     let json_mode = std::env::args().any(|a| a == "--json");
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

@@ -78,8 +78,13 @@ unchanged on `unavailable` and, where the store may have committed, `unknown-com
 
 ## Limits
 
-- Unix only: `command` runs each child in its own process group and kills the group
-  on timeout, stop, and after the child exits.
+- Unix only: `command` runs each child in its own process group under a guard (the
+  `guard` module, a hidden mode of the host's executable; spec/host.md §3). The guard
+  stops the group with SIGTERM, `stop_grace_ms`, SIGKILL on timeout, on stop, and when
+  the host dies; after the child exits it kills the rest of the group at once. A
+  binary that embeds the engine calls `guard::main_if_requested()` first thing in
+  `main`, or sets `EngineConfig::guard` to an executable that does, such as the
+  `runspore-guard` binary of this crate.
 - The reducer is called inline on the tick's task; use a multi-thread runtime when a
   transition may be slow.
 - A release that follows two quarantines in the same millisecond at the same revision

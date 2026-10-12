@@ -8,6 +8,7 @@ mod activity;
 mod command;
 mod engine;
 mod error;
+pub mod guard;
 
 pub use activity::{
     ActivityContext, ActivityOutput, ActivityRegistry, ActivityRunner, NativeFn, NativeRunner,

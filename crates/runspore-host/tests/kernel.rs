@@ -177,6 +177,10 @@ fn kernel_engine(
     native: NativeRunner,
     config: EngineConfig,
 ) -> Engine {
+    let config = EngineConfig {
+        guard: env!("CARGO_BIN_EXE_runspore-guard").into(),
+        ..config
+    };
     Engine::new(
         store,
         reducer,

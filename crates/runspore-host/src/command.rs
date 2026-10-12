@@ -1,24 +1,22 @@
-use std::os::unix::process::ExitStatusExt;
 use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nix::sys::signal::{killpg, Signal};
-use nix::unistd::Pid;
 use runspore_types::canonical;
 use serde_json::{json, Map, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRunner};
+use crate::guard::{Ending, Guarded};
 
 /// Largest stdout a command may produce.
 pub const MAX_STDOUT: usize = 64 * 1024;
 /// How much of stderr is kept for a failure's details.
 const STDERR_TAIL: usize = 4 * 1024;
 
-/// The `command` runner: executes `argv` directly in its own process group.
-/// Unix only.
+/// The `command` runner: executes `argv` directly in its own process group, under the
+/// guard `ctx.guard`. Unix only.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CommandRunner;
 
@@ -123,12 +121,6 @@ async fn drain(mut reader: impl AsyncRead + Unpin, limit: usize, head: bool) -> 
     (kept, overflow)
 }
 
-fn kill_group(pid: Option<u32>) {
-    if let Some(pid) = pid.and_then(|p| i32::try_from(p).ok()) {
-        let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);
-    }
-}
-
 fn failure(code: &str, message: String, details: Value, retryable: bool) -> ActivityOutput {
     ActivityOutput::Failure {
         error: ActivityOutput::error(code, message, details),
@@ -142,8 +134,9 @@ fn unknown(code: &str, message: &str) -> ActivityOutput {
     }
 }
 
-enum Ending {
-    Exited(std::process::ExitStatus),
+/// Why the runner stopped waiting for the command.
+enum Stop {
+    Ended(Ending),
     TimedOut,
     Stopped,
 }
@@ -162,38 +155,36 @@ impl ActivityRunner for CommandRunner {
             Err(e) => return failure("command.invalid", e, Value::Null, false),
         };
         let stdin_bytes = canonical::to_vec(input).unwrap_or_default();
-        let mut command = Command::new(&spec.argv[0]);
-        command
-            .args(&spec.argv[1..])
-            .current_dir(ctx.base_dir.join(spec.cwd.as_deref().unwrap_or(".")))
-            .envs(spec.env.iter().cloned())
-            .env("RUNSPORE_RUN_ID", &ctx.key.run)
-            .env("RUNSPORE_NODE_ID", &ctx.node_id)
-            .env("RUNSPORE_INVOCATION_ID", &ctx.invocation_id)
-            .env("RUNSPORE_ATTEMPT", ctx.attempt.to_string())
-            .env("RUNSPORE_EFFECT_KEY", &ctx.effect_key)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(e) => return failure("command.spawn", e.to_string(), Value::Null, true),
+        let cwd = ctx.base_dir.join(spec.cwd.as_deref().unwrap_or("."));
+        let setup = |command: &mut Command| {
+            command
+                .current_dir(cwd)
+                .envs(spec.env.iter().cloned())
+                .env("RUNSPORE_RUN_ID", &ctx.key.run)
+                .env("RUNSPORE_NODE_ID", &ctx.node_id)
+                .env("RUNSPORE_INVOCATION_ID", &ctx.invocation_id)
+                .env("RUNSPORE_ATTEMPT", ctx.attempt.to_string())
+                .env("RUNSPORE_EFFECT_KEY", &ctx.effect_key)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
         };
-        let pid = child.id();
-        let stdin = child.stdin.take();
+        let mut guarded = match Guarded::spawn(&ctx.guard, ctx.stop_grace, &spec.argv, setup).await
+        {
+            Ok(guarded) => guarded,
+            Err(e) => return failure("command.spawn", e, Value::Null, true),
+        };
+        if let Err(e) = guarded.go().await {
+            return failure("command.spawn", e, Value::Null, true);
+        }
+        let (stdin, stdout, stderr) = guarded.stdio();
         let feed = tokio::spawn(async move {
             if let Some(mut stdin) = stdin {
                 let _ = stdin.write_all(&stdin_bytes).await;
             }
         });
-        let stdout = tokio::spawn(drain(child.stdout.take().expect("piped"), MAX_STDOUT, true));
-        let stderr = tokio::spawn(drain(
-            child.stderr.take().expect("piped"),
-            STDERR_TAIL,
-            false,
-        ));
+        let stdout = tokio::spawn(drain(stdout.expect("piped"), MAX_STDOUT, true));
+        let stderr = tokio::spawn(drain(stderr.expect("piped"), STDERR_TAIL, false));
         let timeout = async {
             match spec.timeout_ms {
                 Some(ms) => tokio::time::sleep(Duration::from_millis(ms)).await,
@@ -201,26 +192,26 @@ impl ActivityRunner for CommandRunner {
             }
         };
         let ending = tokio::select! {
-            status = child.wait() => match status {
-                Ok(status) => Ending::Exited(status),
-                Err(_) => Ending::Stopped,
-            },
-            () = timeout => Ending::TimedOut,
-            () = ctx.stopped() => Ending::Stopped,
+            ending = guarded.wait() => Stop::Ended(ending),
+            () = timeout => Stop::TimedOut,
+            () = ctx.stopped() => Stop::Stopped,
         };
-        kill_group(pid);
-        let _ = child.wait().await;
+        if !matches!(ending, Stop::Ended(_)) {
+            guarded.stop().await;
+        }
         feed.abort();
         let (stdout, overflow) = stdout.await.unwrap_or_default();
         let (stderr, _) = stderr.await.unwrap_or_default();
-        let status = match ending {
-            Ending::TimedOut => return unknown("command.timeout", "the command timed out"),
-            Ending::Stopped => return unknown("command.stopped", "the engine stopped the command"),
-            Ending::Exited(status) => status,
-        };
-        let Some(code) = status.code() else {
-            let signal = status.signal().unwrap_or_default();
-            return unknown("command.signaled", &format!("killed by signal {signal}"));
+        let code = match ending {
+            Stop::TimedOut => return unknown("command.timeout", "the command timed out"),
+            Stop::Stopped => return unknown("command.stopped", "the engine stopped the command"),
+            Stop::Ended(Ending::Exited(code)) => code,
+            Stop::Ended(Ending::Signaled(signal)) => {
+                return unknown("command.signaled", &format!("killed by signal {signal}"));
+            }
+            Stop::Ended(Ending::Lost) => {
+                return unknown("command.signaled", "the guard ended without reporting");
+            }
         };
         let outcome = match spec.exit_outcomes.iter().find(|(c, _)| *c == code) {
             Some((_, name)) => name.clone(),

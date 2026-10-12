@@ -19,8 +19,9 @@ use serde_json::{json, Map, Value};
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinSet;
 
-use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry};
+use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::error::HostError;
+use crate::guard;
 
 /// Engine settings. Defaults are those of the host specification.
 #[derive(Debug, Clone)]
@@ -36,6 +37,11 @@ pub struct EngineConfig {
     pub limits: Limits,
     pub base_dir: PathBuf,
     pub run_ids: RunIds,
+    /// SIGTERM to SIGKILL when a command's process group is stopped.
+    pub stop_grace_ms: u64,
+    /// The executable whose guard mode runs in front of every command; by default this
+    /// process's own. Its `main` must call `guard::main_if_requested` first.
+    pub guard: PathBuf,
 }
 
 impl Default for EngineConfig {
@@ -52,6 +58,8 @@ impl Default for EngineConfig {
             limits: Limits::default(),
             base_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             run_ids: RunIds::random(),
+            stop_grace_ms: DEFAULT_STOP_GRACE_MS,
+            guard: guard::own_executable(),
         }
     }
 }
@@ -883,7 +891,7 @@ impl Inner {
         failpoint::hit("host.attempt.after-claim");
         let attempt = claim.attempt.clone();
         let (stop, stop_rx) = watch::channel(false);
-        let ctx = ActivityContext::new(
+        let mut ctx = ActivityContext::new(
             attempt.key.clone(),
             claim.node_id.clone(),
             claim.action_id.clone(),
@@ -893,6 +901,8 @@ impl Inner {
             self.config.base_dir.clone(),
             stop_rx,
         );
+        ctx.guard = self.config.guard.clone();
+        ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
         let mut lost = false;
         let mut stopping = false;
         let output = match self.resolve_action(&attempt.key, &claim).await {
