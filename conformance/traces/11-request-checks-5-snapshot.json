@@ -4,7 +4,7 @@
   "description": "Check 5: an event other than run.started needs a snapshot (state.missing); run.started must not have one (state.unexpected-start); the snapshot must be a canonical state (state.invalid) of this format and semantics (version.state-format, reported even when the newer document has members this version does not know); and it must not contradict itself (state.invalid). snapshotRaw replaces the threaded snapshot for one step.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-5-snapshot",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

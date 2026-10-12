@@ -57,7 +57,7 @@ bytes are the package; `digest::package` of them is the package digest.
 
 ```json
 {
-  "format": "runspore.workflow/0.1",
+  "format": "runspore.workflow/0.2",
   "name": "review-loop",
   "start": "build",
   "limits": {"maxVisitsPerNode": 16, "maxActivations": 256},
@@ -411,11 +411,14 @@ individual fields of the default budget. A step that expects a failure leaves th
 snapshot unchanged for the next step. `payloadRaw` (a string) may replace `payload` to
 feed bytes that are not canonical. Every host's runner must pass every trace.
 
-The traces include documents of both formats and requests of both semantics. The Rust
-kernel tests also replay every trace whose document is `runspore.workflow/0.1` with its
-`format` changed to `runspore.workflow/0.2`, and require the same expectations, except
-for the traces where a step gives up with no `failed` route: under 0.2 that step is
-stuck, which the `14*` traces pin.
+Every trace's document is `runspore.workflow/0.2`, except the W01 trace, whose format
+no version defines, and the three traces where a step gives up with no `failed` route,
+which pin the 0.1 rule; the traces include requests of both semantics. The Rust kernel
+tests also replay every trace with its `format` switched between `runspore.workflow/0.1`
+and `runspore.workflow/0.2`, and require the same expectations, so a 0.1 document stays
+accepted. The exceptions are the traces of a rule that names a format, which must change:
+the three 0.1 traces above, where a 0.2 step is stuck, which the `14*` traces pin, and
+the 0.2 traces of `from`, `$get` `default` and the stuck step.
 
 The 0.2 mapping rules have their own traces: the start node sees `from` `null`; a
 loop back sees the judging step's outcome and output; a `failed` arrow shows as

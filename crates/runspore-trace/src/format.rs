@@ -559,7 +559,7 @@ mod tests {
         {"event": {"eventId": "open", "sequence": "2", "acceptedAtMs": "1002", "kind": "signal.received", "payload": null}}
       ],
       "limits": {"maxStateBytes": 4096, "microsteps": 7},
-      "workflow": {"start": "build", "format": "runspore.workflow/0.1"},
+      "workflow": {"start": "build", "format": "runspore.workflow/0.2"},
       "description": "one line",
       "name": "example",
       "format": "runspore.trace/0.1"
@@ -651,7 +651,7 @@ mod tests {
   "format": "runspore.trace/0.1",
   "name": "example",
   "description": "one line",
-  "workflow": {"format": "runspore.workflow/0.1", "start": "build"},
+  "workflow": {"format": "runspore.workflow/0.2", "start": "build"},
   "limits": {"microsteps": 7, "maxStateBytes": 4096},
   "steps": [
     {

@@ -131,12 +131,23 @@ const STUCK_UNDER_0_2: &[&str] = &[
     "retry-exhausted-no-route",
 ];
 
-/// Apart from the rules `spec/kernel.md` keys to 0.2, a 0.2 document runs exactly as
-/// the same document marked 0.1: every trace of a 0.1 document holds unchanged with
-/// its format changed to 0.2, except the ones the stuck rule changes, which must
-/// change.
+/// Traces of a 0.2 document that pin a rule naming 0.2 (`from`, `$get` `default`,
+/// the stuck step): a 0.1 document is refused or runs differently there, by design.
+const RULES_NAMING_0_2: &[&str] = &[
+    "from-arrows",
+    "get-default",
+    "stuck-expiries-exhausted",
+    "stuck-non-retryable-failure",
+    "stuck-retries-exhausted",
+    "stuck-undeclared-outcome",
+];
+
+/// Outside the rules of `spec/kernel.md` that name a format, a document runs exactly
+/// as the same document marked with the other format: every trace holds unchanged
+/// with its format switched between 0.1 and 0.2, except the ones that pin such a
+/// rule, which must change.
 #[test]
-fn every_0_1_trace_holds_as_a_0_2_document() {
+fn every_trace_holds_in_the_other_format() {
     if bless_requested() {
         return;
     }
@@ -148,21 +159,28 @@ fn every_0_1_trace_holds_as_a_0_2_document() {
             continue;
         }
         let mut trace = load(&path).unwrap_or_else(|error| panic!("{error}"));
-        if trace.workflow["format"] != WORKFLOW_FORMAT {
+        let other = if trace.workflow["format"] == WORKFLOW_FORMAT {
+            WORKFLOW_FORMAT_0_2
+        } else if trace.workflow["format"] == WORKFLOW_FORMAT_0_2 {
+            WORKFLOW_FORMAT
+        } else {
             continue;
-        }
-        trace.workflow["format"] = json!(WORKFLOW_FORMAT_0_2);
+        };
+        trace.workflow["format"] = json!(other);
         if run(&NativeReducer, &trace).is_err() {
             differ.insert(trace.name.clone());
         }
         replayed += 1;
     }
-    let expected: BTreeSet<String> = STUCK_UNDER_0_2.iter().map(|n| n.to_string()).collect();
-    assert_eq!(differ, expected, "traces that differ as 0.2 documents");
-    // Every trace of a 0.1 document: all but the eleven of 0.2 documents and the W01
-    // one, whose format no version defines.
+    let expected: BTreeSet<String> = STUCK_UNDER_0_2
+        .iter()
+        .chain(RULES_NAMING_0_2)
+        .map(|n| n.to_string())
+        .collect();
+    assert_eq!(differ, expected, "traces that differ in the other format");
+    // Every trace but the W01 one, whose format no version defines.
     assert!(
-        replayed >= MINIMUM_TRACES - 12,
-        "{replayed} traces replayed as 0.2"
+        replayed >= MINIMUM_TRACES - 1,
+        "{replayed} traces replayed in the other format"
     );
 }

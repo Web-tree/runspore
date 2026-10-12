@@ -4,7 +4,7 @@
   "description": "Keys and strings beyond the basic plane (C15). JCS orders keys by UTF-16 code units, so U+1F600 (D83D DE00) sorts before U+FB33 although it follows it in UTF-8 and code point order; the keys of the RFC 8785 ordering example and strings needing each escape form are carried through input, mapping, command, signal and result. The digests pin the canonical bytes.",
   "workflow": {
     "actions": {"tag": {"argv": ["tag"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "supplementary-plane-keys",
     "nodes": {
       "done": {

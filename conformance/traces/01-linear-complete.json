@@ -3,7 +3,7 @@
   "name": "linear-complete",
   "description": "Two activities in sequence reach complete; inputs and the run output are built with $get (member, array index, run) and $literal.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "linear-complete",
     "start": "fetch",
     "actions": {

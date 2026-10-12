@@ -12,7 +12,7 @@
         "retry": {"backoffMs": "500", "maxAttempts": 3}
       }
     },
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
     "name": "validation-W10-mapping",
     "nodes": {

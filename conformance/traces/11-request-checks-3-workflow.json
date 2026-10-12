@@ -4,7 +4,7 @@
   "description": "Check 3: the graph must decode as a workflow. A node of a kind outside semantics 0.1 makes every transition fail with workflow.invalid, ahead of the later checks: an unknown event kind (check 4) and a missing snapshot (check 5) are not reached.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-3-workflow",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

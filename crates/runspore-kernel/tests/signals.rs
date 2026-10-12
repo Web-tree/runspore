@@ -3,13 +3,13 @@
 mod common;
 
 use common::*;
-use runspore_types::model::{code, command_kind, MAX_BUFFERED_SIGNALS, WORKFLOW_FORMAT};
+use runspore_types::model::{code, command_kind, MAX_BUFFERED_SIGNALS, WORKFLOW_FORMAT_0_2};
 use serde_json::{json, Value};
 
 /// `prep` runs first; then two waiters on the same signal name, then `after`.
 fn gated() -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "gated",
         "start": "prep",
         "actions": {"act": {"effect": "pure"}},

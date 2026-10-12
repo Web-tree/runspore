@@ -1,5 +1,5 @@
 {
-  "format": "runspore.workflow/0.1",
+  "format": "runspore.workflow/0.2",
   "name": "review-loop",
   "start": "check",
   "limits": {"maxVisitsPerNode": 3},

@@ -79,8 +79,8 @@ fn check_2_codec_version() {
 fn check_3_graph_must_be_a_canonical_workflow() {
     let canonical = canon(&review_loop());
     let pretty = serde_json::to_vec_pretty(&review_loop()).unwrap();
-    let unsorted = br#"{"start":"a","format":"runspore.workflow/0.1","name":"n","nodes":{"a":{"kind":"complete"}}}"#;
-    let sorted = br#"{"format":"runspore.workflow/0.1","name":"n","nodes":{"a":{"kind":"complete"}},"start":"a"}"#;
+    let unsorted = br#"{"start":"a","format":"runspore.workflow/0.2","name":"n","nodes":{"a":{"kind":"complete"}}}"#;
+    let sorted = br#"{"format":"runspore.workflow/0.2","name":"n","nodes":{"a":{"kind":"complete"}},"start":"a"}"#;
     assert!(transition(&request(
         sorted,
         None,
@@ -99,8 +99,8 @@ fn check_3_graph_must_be_a_canonical_workflow() {
         truncated,
         pretty,
         unsorted.to_vec(),
-        br#"{"format":"runspore.workflow/0.1","name":"n","nodes":{"a":{"kind":"complete","output":1.5}},"start":"a"}"#.to_vec(),
-        br#"{"format":"runspore.workflow/0.1","name":"n","name":"n","nodes":{"a":{"kind":"complete"}},"start":"a"}"#.to_vec(),
+        br#"{"format":"runspore.workflow/0.2","name":"n","nodes":{"a":{"kind":"complete","output":1.5}},"start":"a"}"#.to_vec(),
+        br#"{"format":"runspore.workflow/0.2","name":"n","name":"n","nodes":{"a":{"kind":"complete"}},"start":"a"}"#.to_vec(),
         canon(&with(review_loop(), "/extra", json!(1))),
         canon(&without(review_loop(), "/nodes")),
     ];

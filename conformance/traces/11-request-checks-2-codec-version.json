@@ -4,7 +4,7 @@
   "description": "Check 2: a request whose identity names another codec version fails with version.codec; with both versions wrong, check 1 wins. The same event under the current versions is accepted.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-2-codec-version",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

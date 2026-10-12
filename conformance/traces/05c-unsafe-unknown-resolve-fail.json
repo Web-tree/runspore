@@ -3,7 +3,7 @@
   "name": "unsafe-unknown-resolve-fail",
   "description": "An expired attempt on an unsafe action pauses the run; the operator resolves it as fail and the failed route carries the operator's error to completion.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "unsafe-unknown-resolve-fail",
     "start": "charge",
     "actions": {

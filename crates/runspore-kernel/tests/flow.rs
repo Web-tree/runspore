@@ -5,13 +5,13 @@ mod common;
 
 use common::*;
 use runspore_types::digest::{self, ids};
-use runspore_types::model::{code, command_kind, event_kind, WORKFLOW_FORMAT};
+use runspore_types::model::{code, command_kind, event_kind, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::Decision;
 use serde_json::{json, Value};
 
 fn linear() -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "linear",
         "start": "a",
         "actions": {"act": {"effect": "idempotent"}},
@@ -32,7 +32,7 @@ fn linear() -> Value {
 /// A self-loop on `again`, an exit on `ok`.
 fn looping(max_visits: u32, max_activations: u32) -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "looping",
         "start": "ping",
         "limits": {"maxVisitsPerNode": max_visits, "maxActivations": max_activations},
@@ -50,7 +50,7 @@ fn looping(max_visits: u32, max_activations: u32) -> Value {
 /// `first` runs, then `second` is entered with `mapping` as its input.
 fn mapped(mapping: Value) -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "mapped",
         "start": "first",
         "actions": {"act": {"effect": "pure"}},
@@ -426,7 +426,7 @@ fn a_fail_node_ends_the_run_with_its_error() {
 #[test]
 fn a_start_node_may_be_terminal() {
     let workflow = json!({
-        "format": WORKFLOW_FORMAT, "name": "instant", "start": "done",
+        "format": WORKFLOW_FORMAT_0_2, "name": "instant", "start": "done",
         "nodes": {"done": {"kind": "complete", "output": {"echo": {"$get": ["input"]}}}}
     });
     let mut run = Run::new(&workflow);

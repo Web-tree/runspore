@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use runspore_kernel::transition;
-use runspore_types::model::{code, event_kind, WORKFLOW_FORMAT};
+use runspore_types::model::{code, event_kind, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::FailureKind::ResourceLimit;
 use runspore_types::reducer::Limits;
 use serde_json::{json, Value};
@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 /// `prep`, then two waiters, then `after`: five microsteps when both signals are buffered.
 fn chain() -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "chain",
         "start": "prep",
         "actions": {"act": {"effect": "pure"}},

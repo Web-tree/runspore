@@ -7,7 +7,7 @@
       "fetch": {"argv": ["fetch"], "effect": "read-only", "kind": "command"},
       "render": {"argv": ["render"], "effect": "pure", "kind": "command"}
     },
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "mapping-missing-path",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "render", "output"]}},

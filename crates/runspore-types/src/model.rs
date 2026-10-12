@@ -540,7 +540,7 @@ mod tests {
     use crate::canonical;
 
     const WORKFLOW: &str = r#"{
-      "format": "runspore.workflow/0.1",
+      "format": "runspore.workflow/0.2",
       "name": "review-loop",
       "start": "build",
       "actions": {

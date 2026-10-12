@@ -35,7 +35,7 @@ fn many_nodes(count: usize) -> Value {
     let nodes: Map<String, Value> = (0..count)
         .map(|i| (format!("n{i:03}"), json!({"kind": "complete"})))
         .collect();
-    json!({"format": WORKFLOW_FORMAT, "name": "wide", "start": "n000", "nodes": nodes})
+    json!({"format": WORKFLOW_FORMAT_0_2, "name": "wide", "start": "n000", "nodes": nodes})
 }
 
 /// The example workflow with its `build` node renamed, references included.
@@ -102,10 +102,10 @@ fn w01_format() {
     assert_invalid(&edited("/format", json!("")));
 }
 
-/// Outside the rules that name 0.2, a 0.2 document is judged by 0.1's rules: the
-/// same documents are refused, with the same code.
+/// Outside the rules that name 0.2, a 0.1 document is still accepted and judged by
+/// the same rules as a 0.2 one: the same documents are refused, with the same code.
 #[test]
-fn a_0_2_document_follows_the_0_1_rules() {
+fn a_0_1_document_follows_the_0_2_rules() {
     let refused = [
         edited("/name", json!("has space")),
         edited("/start", json!("missing")),
@@ -117,9 +117,9 @@ fn a_0_2_document_follows_the_0_1_rules() {
         with_input(json!({"$get": ["input"], "other": 1})),
     ];
     for workflow in refused {
-        let expected = check(&workflow).expect_err("refused as 0.1");
-        let actual = check(&with(workflow, "/format", json!(WORKFLOW_FORMAT_0_2)))
-            .expect_err("refused as 0.2");
+        let expected = check(&workflow).expect_err("refused as 0.2");
+        let actual =
+            check(&with(workflow, "/format", json!(WORKFLOW_FORMAT))).expect_err("refused as 0.1");
         assert_eq!((actual.kind, actual.code), (expected.kind, expected.code));
     }
 }

@@ -4,7 +4,7 @@
   "description": "Budget of 706 state bytes: the first snapshot is 556 bytes. A signal carrying 200 bytes of data would push the snapshot over the budget, so the transition fails with budget.state-bytes and commits nothing; a small signal reusing sequence 2 is accepted and the large one is absent from the buffer.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "budget-state-bytes",
     "nodes": {
       "done": {"kind": "complete"},
