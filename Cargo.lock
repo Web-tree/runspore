@@ -958,7 +958,7 @@ dependencies = [
  "runspore-wasmtime",
  "rusqlite",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tokio",
 ]
 
@@ -982,7 +982,7 @@ dependencies = [
  "runspore-types",
  "runspore-wasmtime",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -1054,7 +1054,7 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror",
 ]
 
@@ -1189,9 +1189,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
