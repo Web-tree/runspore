@@ -72,7 +72,6 @@ its own acceptance criteria, so the build uses each fix from the next upgrade on
 
 | Workaround here | Gap | Where it is fixed |
 | --- | --- | --- |
-| `fix` and `fix_ci` are separate nodes, so each can read the output of the step before it | A step can't read why it was entered | R12 (`from`, `$get` default) |
 | The step scripts `cd` into the worktree from their input | `cwd` is fixed per action | R25 |
 | Over the visit limit the ticket run fails; the wave tries once more, then asks you | No limit arrow, no stuck step | R10, R11 |
 | A wave step starts ticket runs and polls them | No child runs or parallel steps | later map (Temporal child workflows, n8n Execute Workflow) |

@@ -6,9 +6,8 @@ digraph "ticket" {
   setup     [label="Set up\nworktree and branch", shape=box];
   implement [label="Implement\n/implement <issue>", shape=box];
   test      [label="Test\nthe repo's checks", shape=box];
-  fix       [label="Fix\nthe failing checks", shape=box];
+  fix       [label="Fix\nchecks, CI or rebase", shape=box];
   ship      [label="Ship\nrebase, PR, CI, merge", shape=box];
-  fix_ci    [label="Fix\nCI or rebase", shape=box];
   done      [kind="complete", label="Merged", shape=doublecircle];
 
   setup -> implement;
@@ -17,6 +16,5 @@ digraph "ticket" {
   test -> fix [on="red"];
   fix -> test;
   ship -> done;
-  ship -> fix_ci [on="red"];
-  fix_ci -> test;
+  ship -> fix [on="red"];
 }
