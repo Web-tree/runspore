@@ -66,20 +66,29 @@ def path_of(dot):
 def ticket_states(settings):
     """issue -> done (closed as completed), dropped (closed as not planned),
     in-progress (an open PR closes it), or open."""
-    repos = {t["issue"].split("#")[0] for n in settings["nodes"].values()
-             for t in n.get("input", {}).get("tickets", {}).get("$literal", [])}
-    closed, in_pr = {}, set()
+    configured = {t["issue"] for n in settings["nodes"].values()
+                  for t in n.get("input", {}).get("tickets", {}).get("$literal", [])}
+    repos = {issue.split("#")[0] for issue in configured}
+    closed, seen, in_pr = {}, set(), set()
+
+    def note(issue, i):
+        seen.add(issue)
+        if i["state"] == "CLOSED":
+            closed[issue] = "dropped" if i.get("stateReason") == "NOT_PLANNED" else "done"
     for repo in repos:
         for i in gh_json("issue", "list", "-R", repo, "--state", "all", "--limit", "300",
                          "--json", "number,state,stateReason"):
-            if i["state"] == "CLOSED":
-                closed[f"{repo}#{i['number']}"] = "dropped" if i.get("stateReason") == "NOT_PLANNED" else "done"
+            note(f"{repo}#{i['number']}", i)
         # Only GitHub's closing links count: a PR that merely mentions a ticket is not building it.
         for pr in gh_json("pr", "list", "-R", repo, "--state", "open", "--limit", "100",
                           "--json", "closingIssuesReferences"):
             for ref in pr.get("closingIssuesReferences") or []:
                 m = re.search(r"github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)", ref.get("url", ""))
                 in_pr.add(f"{m.group(1)}#{m.group(2)}" if m else f"{repo}#{ref['number']}")
+    for issue in configured - seen:  # older than the latest 300: ask for it by number
+        repo, num = issue.split("#")
+        note(issue, gh_json("issue", "view", num, "-R", repo, "--json", "state,stateReason"))
+
     def state(issue):
         return closed.get(issue) or ("in-progress" if issue in in_pr else "open")
     return state
@@ -123,7 +132,9 @@ def status():
         s = state(t["issue"])
         if s not in ("done", "dropped") and t["issue"] in ticket_runs:
             r = ticket_runs[t["issue"]][1]
-            s = r["status"] if r["status"] in ("failed",) else spore("status", r["runId"])["position"]["nodeId"] or r["status"]
+            active = r["status"] in ("running", "waiting")
+            s = (spore("status", r["runId"])["position"] or {}).get("nodeId") if active else None
+            s = s or r["status"]
         return {**t, "state": s}
 
     pos = run["position"]["nodeId"] if run["status"] in ("running", "waiting") else None

@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -62,10 +63,12 @@ def setup(inp):
 def implement(inp, raw):
     os.chdir(inp["worktree"]["dir"])
     step = ROOT / ".spore/workflows/ticket/steps"
-    r, w = os.pipe()
-    os.write(w, raw.encode())  # the input is small; it fits the pipe buffer
-    os.close(w)
-    os.dup2(r, 0)
+    # A file, not a pipe: a fix input with long failures can outgrow a pipe's buffer,
+    # and nothing reads the pipe until the exec below.
+    f = tempfile.TemporaryFile()
+    f.write(raw.encode())
+    f.seek(0)
+    os.dup2(f.fileno(), 0)
     # exec, not a child: the wrapper watches its parent to notice a dead worker.
     os.execvp("python3", ["python3", str(ROOT / "examples/headless-agent/claude-step"),
                           str(step / "implement.md"), "--schema", str(step / "implement.schema.json")])
@@ -93,12 +96,17 @@ def test(inp):
     ahead = sh("git", "rev-list", "--count", "origin/main..HEAD").strip()
     if ahead == "0":
         red("The branch has no commits beyond origin/main: nothing was built yet.")
+    run_checks(wt, d)
+    print(f"checks pass on {ahead} commit(s)")
+
+
+def run_checks(wt, d):
+    """The repo's checks in the worktree; outcome `red` with the output of the first that fails."""
     for cmd in checks(wt["repo"], d):
         log("running " + " ".join(cmd))
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if p.returncode != 0:
             red(f"$ {' '.join(cmd)}\nexited {p.returncode}\n\n{p.stdout}")
-    print(f"checks pass on {ahead} commit(s)")
 
 
 def pr_body(inp):
@@ -152,6 +160,8 @@ def ship(inp):
             files = sh("git", "diff", "--name-only", "--diff-filter=U", check=False)
             subprocess.run(["git", "rebase", "--abort"], capture_output=True)
             red(f"Rebasing onto origin/main conflicts in:\n{files}\n{r.stdout}{r.stderr}")
+        # The tree changed since `test`: check it again before it goes anywhere.
+        run_checks(wt, Path(wt["dir"]))
     sh("git", "push", "--quiet", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{branch}")
     head = sh("git", "rev-parse", "HEAD").strip()
     open_ = [p for p in prs if p["state"] == "OPEN"]
@@ -188,7 +198,7 @@ def ship(inp):
             elif not pending and v["mergeable"] == "MERGEABLE":
                 if dropped(inp):
                     stop_dropped(inp, num)
-                sh("gh", "pr", "merge", str(num), "--repo", REPO, "--squash")
+                sh("gh", "pr", "merge", str(num), "--repo", REPO, "--squash", "--match-head-commit", head)
                 log(f"merged {url}")
                 continue
         time.sleep(POLL_S)
