@@ -4,7 +4,7 @@
   "description": "Check 7: RunStarted.tenant and runId match [A-Za-z0-9_.-]{1,128}; a space, an empty string, a slash, or 129 characters fails with event.invalid. A sequence error (check 6) is reported first. The widest legal names are accepted.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-7-tenant-and-run-id",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

@@ -4,7 +4,7 @@
   "description": "A signal accepted while the activity before its waiter is still running is buffered; entering the await-signal node consumes it in the same transition and the run completes.",
   "workflow": {
     "actions": {"prepare": {"argv": ["prepare"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "signal-before-waiter",
     "nodes": {
       "approve": {

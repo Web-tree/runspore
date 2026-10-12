@@ -4,7 +4,7 @@
   "description": "Signals accepted while an activity runs are only buffered: no command, no diagnostic, the invocation untouched. Absent outcome and data are stored as null. Nothing waits for them, so they are still buffered when the run completes.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "signal-while-running",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

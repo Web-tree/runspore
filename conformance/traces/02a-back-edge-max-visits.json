@@ -11,7 +11,7 @@
         "outcomes": ["ready", "pending"]
       }
     },
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "limits": {"maxVisitsPerNode": 3},
     "name": "back-edge-max-visits",
     "nodes": {

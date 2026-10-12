@@ -4,7 +4,7 @@
   "description": "Check 6: run.started has sequence 1 and every later event has lastSequence + 1; a gap, a repeat, or zero fails with event.out-of-order and the next in-order event is still accepted.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-6-sequence",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

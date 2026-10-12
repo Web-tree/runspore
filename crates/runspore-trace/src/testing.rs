@@ -413,7 +413,7 @@ pub(crate) const RUN_ID: &str = "run_toy";
 /// A build that may loop, an approval, and an unsafe shipment.
 pub(crate) fn workflow() -> Value {
     json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "toy",
         "start": "build",
         "actions": {

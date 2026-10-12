@@ -4,7 +4,7 @@
   "description": "Canonical JSON nests at most 32 levels. An activity output 30 levels deep is a canonical payload, but a node result sits three levels down in the snapshot, so recording it fails (resource-limit / budget.value-depth, a code the kernel defines because spec/kernel.md names none) and commits nothing; the same result with 29 levels reuses sequence 2 and is accepted.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "budget-value-depth",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

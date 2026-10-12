@@ -168,7 +168,7 @@ mod tests {
     /// signals before it returns to `work` or finishes.
     fn gates() -> Value {
         json!({
-            "format": "runspore.workflow/0.1", "name": "gates", "start": "work",
+            "format": "runspore.workflow/0.2", "name": "gates", "start": "work",
             "actions": {"act": {"effect": "pure", "outcomes": ["ok", "red"]}},
             "nodes": {
                 "work": {"kind": "activity", "action": "act",

@@ -4,7 +4,7 @@
   "description": "The buffer holds 64 signals. snapshotRaw supplies the snapshot the kernel produces after 64 `noise` signals (sequences 2 to 65); the 65th signal is dropped with signal.buffer-overflow, and a later `go` signal is still taken by the parked waiter, because a signal the waiter wants never enters the buffer, so a full buffer cannot starve it.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "signal-buffer-overflow",
     "nodes": {
       "done": {"kind": "complete"},

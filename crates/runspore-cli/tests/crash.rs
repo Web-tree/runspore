@@ -60,7 +60,7 @@ const FAILPOINTS: [&str; 21] = [
 /// Four effectful steps: two idempotent (retryable), an approval, an unsafe deploy.
 fn workflow() -> Value {
     json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "crash",
         "start": "prep",
         "actions": {

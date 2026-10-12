@@ -4,7 +4,7 @@
   "description": "Check 4: the event kind must be known (event.unknown-kind) and the payload must be the canonical encoding of that kind's type (event.invalid). payloadRaw feeds bytes that are valid JSON but not canonical: whitespace, unsorted keys, a duplicate key, a non-integer number. Each failure leaves the run untouched.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-4-event",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

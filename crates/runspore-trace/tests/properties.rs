@@ -403,9 +403,13 @@ fn check_step(
     } else if event.kind == event_kind::INVOCATION_RESOLVED {
         let resolved: InvocationResolved =
             canonical::decode(&event.payload).map_err(|e| e.to_string())?;
+        // An outcome that is unknown, or (0.2) a stuck step, waits for a person.
         let unknown = outstanding.filter(|invocation| {
             invocation.invocation_id == resolved.invocation_id
-                && invocation.state == InvocationPhase::Unknown
+                && matches!(
+                    invocation.state,
+                    InvocationPhase::Unknown | InvocationPhase::Stuck
+                )
         });
         let applies = unknown.is_some_and(|invocation| match &resolved.resolution {
             Resolution::Complete { outcome, .. } => workflow

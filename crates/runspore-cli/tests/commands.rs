@@ -20,7 +20,7 @@ const FAST: [&str; 7] = [
 
 fn flow(sleep: &str, effect: &str) -> Value {
     json!({
-        "format": "runspore.workflow/0.1", "name": "surface", "start": "work",
+        "format": "runspore.workflow/0.2", "name": "surface", "start": "work",
         "actions": {"work": {"kind": "command", "effect": effect, "retry": {"maxAttempts": 3, "backoffMs": "10"},
                              "argv": effect_argv("work", &format!("sleep {sleep}"))}},
         "nodes": {
@@ -224,7 +224,7 @@ fn oversized() -> Value {
             json!({"kind": "activity", "action": "fetch", "outcomes": {"ok": pair[1]}});
     }
     json!({
-        "format": "runspore.workflow/0.1", "name": "oversized", "start": "a",
+        "format": "runspore.workflow/0.2", "name": "oversized", "start": "a",
         "actions": {"fetch": {"kind": "command", "effect": "read-only", "output": "json", "argv": argv}},
         "nodes": nodes
     })

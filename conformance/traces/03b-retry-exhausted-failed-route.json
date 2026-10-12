@@ -3,7 +3,7 @@
   "name": "retry-exhausted-failed-route",
   "description": "The second of two allowed attempts fails retryably; the invocation fails with the reported error and the failed route completes the run.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "retry-exhausted-failed-route",
     "start": "work",
     "actions": {

@@ -11,7 +11,7 @@
         "outcomes": ["spam", "ham"]
       }
     },
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "undeclared-outcome",
     "nodes": {
       "classify": {

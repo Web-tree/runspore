@@ -7,7 +7,7 @@ use common::*;
 use runspore_kernel::transition;
 use runspore_types::canonical;
 use runspore_types::digest;
-use runspore_types::model::{code, event_kind, WORKFLOW_FORMAT};
+use runspore_types::model::{code, event_kind, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::{Decision, FailureKind};
 use serde_json::{json, Value};
 
@@ -288,7 +288,7 @@ fn supplementary_plane_keys_keep_jcs_order() {
     let astral = "\u{1f600}";
     let high = "\u{fb33}";
     let workflow = json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "unicode",
         "start": "work",
         "actions": {"act": {"effect": "pure"}},

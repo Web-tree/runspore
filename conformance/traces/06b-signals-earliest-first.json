@@ -4,7 +4,7 @@
   "description": "Five signals are buffered before any waiter exists. Two waiters on the same name then consume in acceptance order: an unrouted outcome is dropped with a diagnostic, each waiter takes the earliest remaining match, and unrelated or surplus signals stay buffered.",
   "workflow": {
     "actions": {"open": {"argv": ["open"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "signals-earliest-first",
     "nodes": {
       "done": {

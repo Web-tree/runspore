@@ -29,7 +29,7 @@ const T0: u64 = 1_000_000;
 /// `publish`; the run's output is `publish`'s output.
 fn flow() -> Vec<u8> {
     serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "flow",
         "start": "fetch",
         "actions": {
@@ -59,7 +59,7 @@ fn flow() -> Vec<u8> {
 /// One activity `work` with the given effect and attempt budget, then `complete`.
 fn single(effect: &str, max_attempts: u32) -> Vec<u8> {
     serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "single",
         "start": "work",
         "actions": {
@@ -579,7 +579,7 @@ async fn a_loop_ends_failed_at_its_visit_limit_without_spinning() {
         }
     });
     let workflow = serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "loop",
         "start": "poll",
         "limits": {"maxVisitsPerNode": 3},
@@ -613,7 +613,7 @@ async fn a_loop_ends_failed_at_its_visit_limit_without_spinning() {
 async fn two_command_activities_pass_output_through_a_mapping() {
     let path = temp_db("commands");
     let workflow = serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "commands",
         "start": "make",
         "actions": {
@@ -658,7 +658,7 @@ async fn a_command_gets_the_visit_of_its_activation() {
     let script = r#"if [ "$RUNSPORE_VISIT" = 1 ]; then o=again; else o=ok; fi
                     printf '{"outcome":"%s","output":%s}' "$o" "$RUNSPORE_VISIT""#;
     let workflow = serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "visit",
         "start": "check",
         "actions": {
@@ -731,7 +731,7 @@ async fn validate_workflow_checks_what_start_checks_without_a_store() {
 async fn a_command_stopped_by_shutdown_is_finished_and_an_unsafe_run_parks_at_once() {
     let path = temp_db("stopped-command");
     let workflow = serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "hang",
         "start": "hang",
         "actions": {
@@ -773,7 +773,7 @@ async fn a_command_stopped_by_shutdown_is_finished_and_an_unsafe_run_parks_at_on
 async fn shutdown_applies_the_drained_result_and_claims_nothing_new() {
     let path = temp_db("shutdown");
     let workflow = serde_json::to_vec(&json!({
-        "format": "runspore.workflow/0.1",
+        "format": "runspore.workflow/0.2",
         "name": "two-steps",
         "start": "slow",
         "actions": {

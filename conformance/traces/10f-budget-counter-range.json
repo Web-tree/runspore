@@ -11,7 +11,7 @@
         "retry": {"backoffMs": "200", "maxAttempts": 3}
       }
     },
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "budget-counter-range",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "upload", "output"]}},

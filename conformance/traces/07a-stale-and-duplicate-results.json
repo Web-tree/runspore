@@ -12,7 +12,7 @@
       },
       "ship": {"argv": ["ship"], "effect": "idempotent", "kind": "command"}
     },
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "stale-and-duplicate-results",
     "nodes": {
       "build": {"action": "build", "kind": "activity", "outcomes": {"ok": "ship"}},

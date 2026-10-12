@@ -4,7 +4,7 @@
   "description": "Budget of 4 microsteps (C16). With two signals buffered, the result would enter gate1, consume, enter gate2, consume and enter finish: five microsteps, so the transition fails with budget.microsteps and commits nothing. The next event reuses sequence 4 and its snapshot shows the invocation still scheduled and both signals still buffered; the result then fails again.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "budget-microsteps",
     "nodes": {
       "done": {"kind": "complete"},

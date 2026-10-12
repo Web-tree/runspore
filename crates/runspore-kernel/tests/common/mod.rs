@@ -4,7 +4,7 @@
 use runspore_kernel::transition;
 use runspore_types::canonical;
 use runspore_types::digest::{self, ids};
-use runspore_types::model::{event_kind, CODEC_VERSION, SEMANTICS_VERSION, WORKFLOW_FORMAT};
+use runspore_types::model::{event_kind, CODEC_VERSION, SEMANTICS_VERSION, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::{
     Decision, Diagnostic, Envelope, Failure, FailureKind, Identity, Limits, TransitionRequest,
 };
@@ -137,7 +137,7 @@ pub fn without(mut doc: Value, pointer: &str) -> Value {
 /// The example workflow of `spec/kernel.md` section 2.
 pub fn review_loop() -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "review-loop",
         "start": "build",
         "limits": {"maxVisitsPerNode": 16, "maxActivations": 256},
@@ -167,7 +167,7 @@ pub fn single_activity(effect: &str, retry: Value, failed_route: bool) -> Value 
         set(&mut outcomes, "/failed", json!("recover"));
     }
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "single-activity",
         "start": "work",
         "actions": {"act": {"effect": effect, "retry": retry}},

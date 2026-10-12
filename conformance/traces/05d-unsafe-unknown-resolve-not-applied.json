@@ -3,7 +3,7 @@
   "name": "unsafe-unknown-resolve-not-applied",
   "description": "Resolutions that arrive before the outcome is unknown, name another invocation, or complete with an undeclared outcome change nothing; a valid one still applies afterwards.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "unsafe-unknown-resolve-not-applied",
     "start": "charge",
     "actions": {

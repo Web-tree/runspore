@@ -3,7 +3,7 @@
   "name": "retry-backoff-then-success",
   "description": "Three retryable attempts (failure, expired, failure) back off 500, 1000, then the 1500 cap from logical time; attempt 4 succeeds.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "retry-backoff-then-success",
     "start": "work",
     "actions": {

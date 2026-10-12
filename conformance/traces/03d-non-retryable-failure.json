@@ -3,7 +3,7 @@
   "name": "non-retryable-failure",
   "description": "A failure with retryable false on attempt 1 of 3 skips the retry budget; the failed route enters a fail node that ends the run.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "non-retryable-failure",
     "start": "work",
     "actions": {

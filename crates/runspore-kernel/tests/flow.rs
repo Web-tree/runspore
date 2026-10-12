@@ -5,13 +5,13 @@ mod common;
 
 use common::*;
 use runspore_types::digest::{self, ids};
-use runspore_types::model::{code, command_kind, event_kind, WORKFLOW_FORMAT};
+use runspore_types::model::{code, command_kind, event_kind, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::Decision;
 use serde_json::{json, Value};
 
 fn linear() -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "linear",
         "start": "a",
         "actions": {"act": {"effect": "idempotent"}},
@@ -32,7 +32,7 @@ fn linear() -> Value {
 /// A self-loop on `again`, an exit on `ok`.
 fn looping(max_visits: u32, max_activations: u32) -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "looping",
         "start": "ping",
         "limits": {"maxVisitsPerNode": max_visits, "maxActivations": max_activations},
@@ -50,7 +50,7 @@ fn looping(max_visits: u32, max_activations: u32) -> Value {
 /// `first` runs, then `second` is entered with `mapping` as its input.
 fn mapped(mapping: Value) -> Value {
     json!({
-        "format": WORKFLOW_FORMAT,
+        "format": WORKFLOW_FORMAT_0_2,
         "name": "mapped",
         "start": "first",
         "actions": {"act": {"effect": "pure"}},
@@ -302,9 +302,15 @@ fn an_undeclared_outcome_fails_the_invocation() {
     }
 }
 
+/// A 0.1 document: under 0.2 the step is stuck instead (the `14d` trace).
 #[test]
 fn an_undeclared_outcome_without_a_failed_route_ends_the_run() {
-    let mut run = Run::started(&single_activity("pure", json!({}), false), json!(null));
+    let workflow = with(
+        single_activity("pure", json!({}), false),
+        "/format",
+        json!(WORKFLOW_FORMAT),
+    );
+    let mut run = Run::started(&workflow, json!(null));
     run.succeed("blue", json!("ignored"), 2_000);
     let state = run.state();
     assert_eq!(state["status"], json!("failed"));
@@ -426,7 +432,7 @@ fn a_fail_node_ends_the_run_with_its_error() {
 #[test]
 fn a_start_node_may_be_terminal() {
     let workflow = json!({
-        "format": WORKFLOW_FORMAT, "name": "instant", "start": "done",
+        "format": WORKFLOW_FORMAT_0_2, "name": "instant", "start": "done",
         "nodes": {"done": {"kind": "complete", "output": {"echo": {"$get": ["input"]}}}}
     });
     let mut run = Run::new(&workflow);
@@ -438,11 +444,17 @@ fn a_start_node_may_be_terminal() {
     assert_eq!(state["visits"], json!({"done": 1}));
 }
 
-/// K3: a terminal state consumes every event and never changes status.
+/// K3: a terminal state consumes every event and never changes status. A 0.1
+/// document, so the undeclared outcome ends the run instead of leaving it stuck.
 #[test]
 fn events_after_a_terminal_state_are_ignored() {
+    let workflow = with(
+        single_activity("pure", json!({}), false),
+        "/format",
+        json!(WORKFLOW_FORMAT),
+    );
     for terminal in ["ok", "blue"] {
-        let mut run = Run::started(&single_activity("pure", json!({}), false), json!(null));
+        let mut run = Run::started(&workflow, json!(null));
         let invocation = run.invocation_id();
         run.succeed(terminal, json!(1), 2_000);
         let before = run.state();

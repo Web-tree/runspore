@@ -4,7 +4,7 @@
   "description": "Check 1: a request whose identity names another semantics version fails with version.semantics; the same event under the current version is accepted.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "request-checks-1-semantics-version",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

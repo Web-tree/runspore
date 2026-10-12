@@ -4,7 +4,7 @@
   "description": "Budget of 7 expression operations. The first node has no input mapping (null: one operation). The second node's mapping costs 8: the object, a, the array, true, the $get object plus two path steps, and the $literal object. Entering it fails with budget.expression-operations and commits nothing; a signal reusing sequence 2 shows the run still at the first node.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "budget-expression-operations",
     "nodes": {
       "done": {"kind": "complete"},

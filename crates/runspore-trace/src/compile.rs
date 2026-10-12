@@ -13,7 +13,7 @@
 //!                "semanticsVersion": "0.1", "codecVersion": "jcs-int53/1"},
 //!   "limits": {"microsteps": 1000, "expressionOperations": 10000,
 //!              "maxStateBytes": 262144, "maxCommandCount": 128},
-//!   "workflow": "{\"format\":\"runspore.workflow/0.1\",…}",
+//!   "workflow": "{\"format\":\"runspore.workflow/0.2\",…}",
 //!   "steps": [
 //!     {"event": {"eventId": "start", "sequence": "1", "acceptedAtMs": "1000",
 //!                "kind": "run.started", "payload": "{\"input\":…}"},

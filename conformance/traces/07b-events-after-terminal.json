@@ -4,7 +4,7 @@
   "description": "Once the run is completed every event kind is consumed with event.ignored-terminal: the status, result and buffer never change, only lastSequence and lastAcceptedAtMs advance.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "unsafe", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "events-after-terminal",
     "nodes": {
       "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},

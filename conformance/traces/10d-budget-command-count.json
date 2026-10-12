@@ -4,7 +4,7 @@
   "description": "Budget of 0 commands. Parking at the await-signal start node emits none and is accepted; the signal that would route to the activity emits one schedule command, so the transition fails with budget.command-count and commits nothing. An unrelated signal reusing sequence 2 shows the waiter still parked.",
   "workflow": {
     "actions": {"work": {"argv": ["work"], "effect": "pure", "kind": "command"}},
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "budget-command-count",
     "nodes": {
       "done": {"kind": "complete"},

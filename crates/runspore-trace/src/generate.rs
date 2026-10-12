@@ -58,7 +58,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use runspore_types::canonical;
 use runspore_types::digest::ids;
-use runspore_types::model::{event_kind, InvocationPhase, RunStatus, State, WORKFLOW_FORMAT};
+use runspore_types::model::{event_kind, InvocationPhase, RunStatus, State, WORKFLOW_FORMAT_0_2};
 use runspore_types::reducer::Reducer;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -394,7 +394,7 @@ impl Plan {
         }
 
         let mut document = Map::new();
-        document.insert("format".to_string(), json!(WORKFLOW_FORMAT));
+        document.insert("format".to_string(), json!(WORKFLOW_FORMAT_0_2));
         document.insert("name".to_string(), json!(name));
         document.insert("start".to_string(), json!(start));
         if rng.chance(40) {
@@ -1077,7 +1077,7 @@ mod tests {
     /// Rules W01 to W09 and W11 of `spec/kernel.md`.
     fn assert_well_formed(document: &Value) {
         let workflow: Workflow = serde_json::from_value(document.clone()).unwrap();
-        assert_eq!(workflow.format, WORKFLOW_FORMAT);
+        assert_eq!(workflow.format, WORKFLOW_FORMAT_0_2);
         assert!(identifier(&workflow.name, 128, "_.-"));
         assert!((1..=256).contains(&workflow.nodes.len()));
         assert!(workflow.nodes.contains_key(&workflow.start));

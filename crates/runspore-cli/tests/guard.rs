@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 fn flow(body: &str) -> Value {
     let script = format!("echo \"$RUNSPORE_ATTEMPT $$ $PPID\" >> tries.log; {body}");
     json!({
-        "format": "runspore.workflow/0.1", "name": "guarded", "start": "work",
+        "format": "runspore.workflow/0.2", "name": "guarded", "start": "work",
         "actions": {"work": {"kind": "command", "effect": "idempotent",
                              "retry": {"maxAttempts": 3, "backoffMs": "10"},
                              "argv": ["/bin/sh", "-c", script]}},

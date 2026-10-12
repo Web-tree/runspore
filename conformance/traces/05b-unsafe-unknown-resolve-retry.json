@@ -3,7 +3,7 @@
   "name": "unsafe-unknown-resolve-retry",
   "description": "Unknown, then expired, on an unsafe single-attempt action each pause the run; each resolve retry authorizes the next attempt at once, beyond maxAttempts.",
   "workflow": {
-    "format": "runspore.workflow/0.1",
+    "format": "runspore.workflow/0.2",
     "name": "unsafe-unknown-resolve-retry",
     "start": "charge",
     "actions": {
