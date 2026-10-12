@@ -132,7 +132,11 @@ never claims again.
 
 1. `claim_attempt`. If the receipt is `duplicate`, heartbeat once and proceed only if
    that heartbeat is `applied`. A historical claim is not ownership.
-2. Resolve the action from the package by `action_id`; pick the runner by `kind`.
+2. Resolve the action from the package by `action_id`; pick the runner by `kind`. Find
+   the visit number in the run's snapshot: the visit `v` of the claimed node, at most
+   `visits[nodeId]`, whose `ids::invocation(tenant, runId, "<nodeId>/<v>")` is the
+   claimed invocation. If there is none, report `Failure`, `host.invocation-unknown`,
+   not retryable.
 3. Start a heartbeat every `heartbeat_ms`. If a heartbeat returns `lease.lost`, the
    lease is gone: signal the runner to stop, do not call `finish_attempt`, and store
    what is known through `record_late_evidence`.
@@ -171,7 +175,7 @@ pub trait ActivityRunner: Send + Sync {
 ```
 
 `ActivityContext` carries the run key, node ID, action ID, invocation ID, attempt
-number, effect key, and a stop signal that fires when the lease is lost or the engine
+number, visit number, effect key, and a stop signal that fires when the lease is lost or the engine
 shuts down. The registry maps an action's `kind` to a runner.
 
 ### `command`
@@ -186,27 +190,65 @@ shuts down. The registry maps an action's `kind` to a runner.
   `base_dir`. The child inherits the engine's environment plus `env`.
 - Stdin receives the canonical input JSON, then EOF.
 - The child also gets `RUNSPORE_RUN_ID`, `RUNSPORE_NODE_ID`, `RUNSPORE_INVOCATION_ID`,
-  `RUNSPORE_ATTEMPT`, and `RUNSPORE_EFFECT_KEY`. The effect key is identical on every
-  attempt of one invocation; an idempotent command passes it to whatever it calls.
+  `RUNSPORE_ATTEMPT`, `RUNSPORE_VISIT`, and `RUNSPORE_EFFECT_KEY`. The effect key is
+  identical on every attempt of one invocation; an idempotent command passes it to
+  whatever it calls. `RUNSPORE_VISIT` is the visit number of the invocation's
+  activation (`<nodeId>/<visit>`, kernel §1), so a command can tell a first visit of
+  its node from a return to it.
 - **0.2** (replaces 0.1's "It runs in its own process group. On timeout or stop the
   whole group is killed."): it runs under a guard, below.
+- A command never learns the action's outcome names. The workflow maps its result to
+  an outcome (`exitOutcomes`, or result mode below).
 
-Result mapping:
+Result mapping, in order:
 
 | What happened | Runner output |
 | --- | --- |
 | Could not be spawned, or its program could not be run | `Failure`, `command.spawn`, retryable |
-| Exit 0, or an exit code listed in `exitOutcomes` | `Success` with outcome `ok` or the mapped name |
-| Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stderrTail}` |
 | Killed by a signal it did not get from the engine, or its guard ended without reporting | `Unknown`, `command.signaled` |
 | Timed out, or stopped by the engine | `Unknown`, `command.timeout` or `command.stopped` |
-| Stdout over 64 KiB | `Failure`, `command.output-too-large`, not retryable |
+| An exit code listed in `exitOutcomes` | `Success` with the mapped outcome |
+| Exit 0, `output` other than `result` | `Success` with outcome `ok` |
+| Exit 0, `output: "result"` | What stdout says (below) |
+| Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stderrTail}` (the last 4 KiB of stderr) |
+| Stdout over 64 KiB, `output` other than `text` | `Failure`, `command.output-too-large`, not retryable |
 | `output: "json"` and stdout is not JSON in the canonical domain | `Failure`, `command.malformed-output`, not retryable |
+| `Success` whose outcome the action does not declare | `Failure`, `command.undeclared-outcome`, not retryable, details `{outcome}` |
 
-Success output by `output` mode: `text` (default) gives `{"exitCode": n, "stdout":
-"<utf-8, lossy>"}`; `json` gives the parsed stdout value; `none` gives `null`.
-`validate` checks the shape of every field above and that every `exitOutcomes` value
-is a declared outcome.
+The last row holds for every `command` in every output mode, so an undeclared outcome
+never reaches the kernel. An action that declares no `outcomes` declares `["ok"]`
+(kernel §2).
+
+Success output by `output` mode:
+
+- `text` (default): `{"exitCode": n, "stdout": "…", "stderr": "…", "truncated": b}`,
+  each stream decoded as UTF-8, lossy. When the two streams together exceed 64 KiB,
+  each keeps its end: stderr its last 16 KiB at most, stdout the last bytes that fit in
+  the 64 KiB left beside it. A cut falls on a UTF-8 character boundary. `truncated` is
+  `true` when either stream was cut. Text mode never fails with
+  `command.output-too-large`: a long log reaches the next step as its end, where test
+  runners and compilers print their failures.
+- `json`: the parsed stdout value.
+- `result`: the output stdout names (below). An exit code listed in `exitOutcomes`
+  gives `null`.
+- `none`: `null`.
+
+**Result mode.** With `"output": "result"`, a command names its own result. On exit 0,
+stdout must be canonical-domain JSON of one of two shapes:
+
+| Stdout | Runner output |
+| --- | --- |
+| `{"outcome": "<o>", "output": <json>}` | `Success { outcome, output }` |
+| `{"error": {"code": "<c>", "message": "<m>"}, "retryable": <bool>}` | `Failure { error, retryable }` |
+
+`error` may also carry `details`, any JSON. Any other stdout on exit 0 (other keys,
+wrong types, not JSON) is `Failure`, `command.malformed-output`, not retryable. A
+non-zero exit maps through the table above as in every mode, so `exitOutcomes` still
+applies to it; a crash that exits 1 is then `command.exit`, never an outcome. These are
+the shapes an async `watch` prints.
+
+`validate` checks the shape of every field above, that every `exitOutcomes` value is a
+declared outcome, and, in result mode, that `exitOutcomes` does not map 0.
 
 ### The guard (0.2)
 
@@ -265,7 +307,8 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H2 | A commit is lost to a competing coordinator | The loser dispatches nothing from its decision |
 | H3 | Lease lost mid-activity | No `finish_attempt`; late evidence stored; the runner was told to stop |
 | H4 | Kernel failure (budget exceeded) | Run quarantined, event still pending, no hot loop; `release` resumes |
-| H5 | Command runner result table | Every row above, including process-group kill on timeout |
+| H5 | Command runner result table | Every row above, including process-group kill on timeout; both result-mode shapes and a malformed one; a 200 KiB log in text mode arrives as its end with stderr ≤ 16 KiB, cut at UTF-8 boundaries, `truncated: true`; an undeclared outcome in every mode |
+| H7 | A node visited twice runs a command each time | `RUNSPORE_VISIT` is 1, then 2: the visit of the invocation's activation |
 | H6 | Crash at every host and store failpoint during a multi-step run, then restart | Final state equals the uninterrupted run's; idempotent steps ran at most `maxAttempts` times; an `unsafe` step interrupted after its effect leaves the run in `needs-intervention`, and resolving it completes the run with the effect performed once |
 | H12 | **0.2.** SIGKILL the worker while a command runs | The command's group is gone within `stop_grace_ms` + 1 s; the next try starts only after it |
 | H14 | **0.2.** SIGKILL the worker while a command that ignores SIGTERM runs | The guard survives its own SIGTERM to the group and sends SIGKILL after `stop_grace_ms` |
