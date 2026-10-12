@@ -118,6 +118,20 @@ def failed_logs(checks_):
     return "\n".join(out)
 
 
+def dropped(inp):
+    """The ticket's issue was closed without this run merging: not planned, or done by hand."""
+    repo, num = split_issue(inp["ticket"]["issue"])
+    return gh_json("issue", "view", str(num), "--repo", repo, "--json", "state")["state"] == "CLOSED"
+
+
+def stop_dropped(inp, num=None):
+    if num is not None:
+        sh("gh", "pr", "close", str(num), "--repo", REPO, "--comment",
+           "The ticket's issue was closed without this PR, so the build run does not merge it.", check=False)
+    print(f"{inp['ticket']['issue']} was closed without this run; nothing merged")
+    sys.exit(0)
+
+
 def ship(inp):
     global REPO
     wt = inp["worktree"]
@@ -129,6 +143,8 @@ def ship(inp):
     merged = [p for p in prs if p["state"] == "MERGED"]
     if merged:
         return finish(inp, merged[0]["url"])
+    if dropped(inp):
+        stop_dropped(inp, next((p["number"] for p in prs if p["state"] == "OPEN"), None))
     sh("git", "fetch", "--quiet", "origin", "main")
     if subprocess.run(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"]).returncode != 0:
         r = subprocess.run(["git", "rebase", "origin/main"], capture_output=True, text=True)
@@ -170,6 +186,8 @@ def ship(inp):
             if not rollup and time.monotonic() - pushed < CI_GRACE_S:
                 log("no checks registered yet")
             elif not pending and v["mergeable"] == "MERGEABLE":
+                if dropped(inp):
+                    stop_dropped(inp, num)
                 sh("gh", "pr", "merge", str(num), "--repo", REPO, "--squash")
                 log(f"merged {url}")
                 continue

@@ -211,10 +211,12 @@ def page(out_path):
         now = f"{pos.replace('_', ' ').capitalize()}: {n} of {len(cur['tickets'])} tickets finished"
     elif cur.get("kind") == "checkpoint":
         now = f"Checkpoint {pos[-1].upper()}: waiting for your answer"
+    elif st["status"] == "completed":
+        now = "0.2 shipped"
     elif st["status"] == "failed":
         now = "The build run failed: start a new try with work/build-0-2/bin/build --restart"
     else:
-        now = "0.2 shipped"
+        now = f"The build run is {st['status']}: see spore status {st['runId']}"
     waves = []
     for node in st["path"]:
         v = st["nodes"][node]

@@ -13,7 +13,9 @@
 # the build waits at a checkpoint, with the build stopped.
 #
 # When the spore reads workflow folders (R3), they are started as they are;
-# before that, both are converted to 0.1 documents. Then the build run is made
+# before that, both are converted to 0.1 documents. A spore that validates the
+# probe folder reads folders, so a build folder it rejects is an error, never a
+# reason to fall back to 0.1. Then the build run is made
 # sure to exist (start keys make this safe to repeat), and one worker runs every
 # run in the database. Stopping and running this again picks up where it was.
 set -euo pipefail
@@ -43,8 +45,9 @@ fi
 
 eval "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b, shlex
 print(f"export SPORE={shlex.quote(b.SPORE)} RUNSPORE_DB={shlex.quote(b.DB)}")' "$bin")"
-if "$SPORE" validate .spore/workflows/build-0-2 >/dev/null 2>&1; then
+if "$SPORE" validate work/build-0-2/probe >/dev/null 2>&1; then
   export BUILD_WORKFLOWS="$PWD/.spore/workflows"
+  "$SPORE" validate .spore/workflows/build-0-2 >/dev/null
   "$SPORE" validate .spore/workflows/ticket >/dev/null
 else
   export BUILD_WORKFLOWS="$PWD/.spore/gen"

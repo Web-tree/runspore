@@ -51,6 +51,8 @@ elif cmd == ("pr", "merge"):
     import re
     m = re.search(r"Closes #(\d+)", p["body"])
     if m: issue(repo, m.group(1))["state"] = "CLOSED"
+elif cmd == ("pr", "close"):
+    st["prs"][f"{repo}#{a[2]}"]["state"] = "CLOSED"
 elif cmd == ("label", "create"):
     pass
 else:

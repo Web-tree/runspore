@@ -89,12 +89,13 @@ def tick(tickets, all_runs, st):
             sh(SPORE, "--db", DB, "--json", "start", workflow("ticket"), "--key", key,
                "--input", json.dumps({"ticket": t}))
             log(f"started {key}")
-        elif last["status"] == "failed" and t["issue"] not in st["asked"]:
+        elif last["status"] not in ("running", "waiting") and t["issue"] not in st["asked"]:
+            # failed after its last try, or any state a person has to resolve
             repo, num = split_issue(t["issue"])
             sh("gh", "issue", "comment", str(num), "--repo", repo, "--body",
-               f"The build run tried this ticket {TRIES} times and stopped (run `{last['runId']}`; "
-               f"see `spore status {last['runId']}`). It needs you: finish it by hand and close this "
-               "issue, and the wave goes on.")
+               f"The build run's ticket run for this ticket is {last['status']} after {last_try} "
+               f"tries (run `{last['runId']}`; see `spore status {last['runId']}`). It needs you: "
+               "finish it by hand and close this issue, and the wave goes on.")
             st["asked"].append(t["issue"])
         left.append(t)
     return left
