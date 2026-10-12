@@ -326,6 +326,33 @@ pub struct LeaseExtended {
     pub lease_until_ms: u64,
 }
 
+/// What an attempt keeps about the process group doing its work: the machine, its
+/// boot, the group, and the start time of the process that leads it, in the operating
+/// system's own unit. Written by the host before the program runs (`spec/host.md` §3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessRecord {
+    pub host: String,
+    pub boot: String,
+    pub pgid: i32,
+    pub started: String,
+}
+
+/// Stores or, with `None`, clears the attempt's process record. Same predicates as
+/// `Heartbeat`; extends nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetProcess {
+    pub mutation: Mutation,
+    pub attempt: AttemptRef,
+    pub process: Option<ProcessRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessSet {
+    pub process: Option<ProcessRecord>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinishAttempt {
     pub mutation: Mutation,
@@ -338,6 +365,9 @@ pub struct FinishAttempt {
 pub struct ExpireAttempt {
     pub mutation: Mutation,
     pub attempt: AttemptRef,
+    /// The expiring host could not check the attempt's process record; the expiry's
+    /// audit record notes `process.unchecked`.
+    pub process_unchecked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,8 +419,13 @@ pub struct QuarantineChanged {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum DueItem {
-    /// A running attempt whose lease deadline has passed; expire it.
-    Lease { attempt: AttemptRef },
+    /// A running attempt whose lease deadline has passed; expire it once its process
+    /// record, if any, is settled.
+    Lease {
+        attempt: AttemptRef,
+        #[serde(default)]
+        process: Option<ProcessRecord>,
+    },
     /// An invocation that may be claimed now.
     Outbox { key: RunKey, invocation_id: String },
 }
@@ -451,6 +486,8 @@ pub struct InvocationView {
     pub not_before_ms: u64,
     pub lease_until_ms: Option<u64>,
     pub owner: Option<String>,
+    /// The process record of the latest attempt.
+    pub process: Option<ProcessRecord>,
 }
 
 #[async_trait]
@@ -474,6 +511,7 @@ pub trait Store: Send + Sync {
 
     async fn claim_attempt(&self, request: ClaimAttempt) -> StoreResult<Receipt<Claim>>;
     async fn heartbeat(&self, request: Heartbeat) -> StoreResult<Receipt<LeaseExtended>>;
+    async fn set_process(&self, request: SetProcess) -> StoreResult<Receipt<ProcessSet>>;
     async fn finish_attempt(&self, request: FinishAttempt) -> StoreResult<Receipt<ResultAccepted>>;
     async fn expire_attempt(&self, request: ExpireAttempt) -> StoreResult<Receipt<ResultAccepted>>;
     async fn record_late_evidence(

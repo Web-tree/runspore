@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runspore_types::model::ErrorInfo;
-use runspore_types::store::RunKey;
+use runspore_types::store::{ProcessRecord, RunKey};
 use serde_json::Value;
 use tokio::sync::watch;
 
@@ -43,8 +43,15 @@ impl ActivityOutput {
     }
 }
 
+/// Stores an attempt's process record, or clears it with `None` (spec/host.md §3).
+pub type RecordProcess = Arc<
+    dyn Fn(Option<ProcessRecord>) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Everything an attempt knows about itself, plus its stop signal.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ActivityContext {
     pub key: RunKey,
     pub node_id: String,
@@ -62,7 +69,27 @@ pub struct ActivityContext {
     pub guard: PathBuf,
     /// How long a stopped process group gets between SIGTERM and SIGKILL.
     pub stop_grace: Duration,
+    /// Where the attempt's process record goes. The engine stores it with
+    /// `set_process`; by default it goes nowhere.
+    pub process: RecordProcess,
     stop: watch::Receiver<bool>,
+}
+
+impl std::fmt::Debug for ActivityContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActivityContext")
+            .field("key", &self.key)
+            .field("node_id", &self.node_id)
+            .field("action_id", &self.action_id)
+            .field("invocation_id", &self.invocation_id)
+            .field("attempt", &self.attempt)
+            .field("visit", &self.visit)
+            .field("effect_key", &self.effect_key)
+            .field("base_dir", &self.base_dir)
+            .field("guard", &self.guard)
+            .field("stop_grace", &self.stop_grace)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ActivityContext {
@@ -90,8 +117,15 @@ impl ActivityContext {
             base_dir,
             guard: crate::guard::own_executable(),
             stop_grace: Duration::from_millis(DEFAULT_STOP_GRACE_MS),
+            process: Arc::new(|_| Box::pin(async { Ok(()) })),
             stop,
         }
+    }
+
+    /// Records the attempt's process record before its program runs, or clears it
+    /// with `None` once the program's group has been stopped.
+    pub async fn record_process(&self, process: Option<ProcessRecord>) -> Result<(), String> {
+        (self.process)(process).await
     }
 
     /// Whether the stop signal has fired.

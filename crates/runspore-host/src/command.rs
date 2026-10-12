@@ -9,6 +9,7 @@ use tokio::process::Command;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRunner};
 use crate::guard::{Ending, Guarded};
+use crate::process;
 
 /// Largest stdout a command may produce, and the most of both streams text mode keeps.
 pub const MAX_STDOUT: usize = 64 * 1024;
@@ -272,7 +273,17 @@ impl ActivityRunner for CommandRunner {
             Ok(guarded) => guarded,
             Err(e) => return failure("command.spawn", e, Value::Null, true),
         };
+        // Dropping `guarded` on these failures makes the guard kill the waiting process.
+        let recorded = match process::record(guarded.pid()) {
+            Ok(record) => ctx.record_process(Some(record)).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = recorded {
+            let message = format!("the process record was not stored: {e}");
+            return failure("command.spawn", message, Value::Null, true);
+        }
         if let Err(e) = guarded.go().await {
+            let _ = ctx.record_process(None).await;
             return failure("command.spawn", e, Value::Null, true);
         }
         let (stdin, stdout, stderr) = guarded.stdio();
@@ -302,6 +313,10 @@ impl ActivityRunner for CommandRunner {
         };
         if !matches!(ending, Stop::Ended(_)) {
             guarded.stop().await;
+        }
+        // The guard has stopped the group unless it ended without reporting.
+        if !matches!(ending, Stop::Ended(Ending::Lost)) {
+            let _ = ctx.record_process(None).await;
         }
         feed.abort();
         let (stdout, stdout_total) = stdout.await.unwrap_or_default();

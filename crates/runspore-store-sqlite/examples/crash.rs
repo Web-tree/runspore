@@ -3,18 +3,20 @@
 //! second run resubmits identical requests. Run it with `RUNSPORE_FAILPOINTS` set.
 
 use runspore_store_conformance::{
-    append, claim, commit, create_run, expire, finish, heartbeat, schedule, ManualClock,
+    append, claim, commit, create_run, expire, finish, heartbeat, process_record, schedule,
+    set_process, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{Disposition, RunKey, Store, Turn, DEFAULT_TENANT};
 
 /// The operations in the order a scenario performs them.
-const STEPS: [&str; 7] = [
+const STEPS: [&str; 8] = [
     "create-run",
     "append-event",
     "commit-turn",
     "claim-attempt",
     "heartbeat",
+    "set-process",
     "finish-attempt",
     "expire-attempt",
 ];
@@ -26,10 +28,16 @@ async fn main() {
     let store = SqliteStore::open_with_clock(path, ManualClock::new(1_000)).expect("open");
     let key = RunKey::new(DEFAULT_TENANT, "crash");
     let mut last = Disposition::Applied;
-    for step in STEPS
-        .iter()
-        .filter(|s| !["heartbeat", "finish-attempt", "expire-attempt"].contains(s) || **s == op)
-    {
+    for step in STEPS.iter().filter(|s| {
+        ![
+            "heartbeat",
+            "set-process",
+            "finish-attempt",
+            "expire-attempt",
+        ]
+        .contains(s)
+            || **s == op
+    }) {
         last = match *step {
             "create-run" => {
                 store
@@ -91,6 +99,17 @@ async fn main() {
                             .heartbeat(heartbeat(&attempt, "hb", 200))
                             .await
                             .expect("heartbeat")
+                            .disposition
+                    }
+                    "set-process" => {
+                        store
+                            .set_process(set_process(
+                                &attempt,
+                                "process",
+                                Some(process_record("here", 4242)),
+                            ))
+                            .await
+                            .expect("set_process")
                             .disposition
                     }
                     "finish-attempt" => {

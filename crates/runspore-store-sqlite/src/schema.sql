@@ -90,6 +90,7 @@ CREATE TABLE attempts (
     lease_until_ms INTEGER NOT NULL,
     status TEXT NOT NULL,
     result BLOB,
+    process BLOB,
     PRIMARY KEY (tenant, run_id, attempt_id),
     UNIQUE (tenant, run_id, invocation_id, attempt_number),
     UNIQUE (tenant, run_id, fence),
@@ -112,5 +113,6 @@ CREATE TABLE audit (
     attempt_id TEXT NOT NULL,
     evidence_digest TEXT NOT NULL,
     evidence BLOB NOT NULL,
-    at_ms INTEGER NOT NULL
+    at_ms INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'late-evidence'
 );

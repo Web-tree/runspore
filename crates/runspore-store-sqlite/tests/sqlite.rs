@@ -1,18 +1,25 @@
-//! SQLite-specific scenarios Q01, Q03 and Q04 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q06 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use runspore_store_conformance::{
+    claim, create_run, expire, process_record, schedule, set_process, ManualClock,
+};
 use runspore_store_sqlite::SqliteStore;
-use runspore_types::store::{InvocationStatus, RunKey, Store, StoreFailureKind, DEFAULT_TENANT};
+use runspore_types::store::{
+    InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, Turn, DEFAULT_TENANT,
+};
+use serde_json::{json, Value};
 
-const OPS: [(&str, &str); 7] = [
+const OPS: [(&str, &str); 8] = [
     ("create-run", "create"),
     ("append-event", "append"),
     ("commit-turn", "commit"),
     ("claim-attempt", "claim"),
     ("heartbeat", "hb"),
+    ("set-process", "process"),
     ("finish-attempt", "finish"),
     ("expire-attempt", "expire"),
 ];
@@ -73,6 +80,7 @@ async fn effect(store: &SqliteStore, op: &str) -> bool {
         }
         "claim-attempt" => status == Some(InvocationStatus::Running),
         "heartbeat" => invocations[0].lease_until_ms == Some(1_200),
+        "set-process" => invocations[0].process.is_some(),
         _ => {
             status == Some(InvocationStatus::Settled)
                 && events
@@ -94,7 +102,7 @@ async fn q01_records_survive_reopen() {
     assert_eq!(store.list_events(&key, 0, 10).await.unwrap().items.len(), 3);
     for (_, request) in OPS
         .iter()
-        .filter(|(op, _)| !["heartbeat", "expire-attempt"].contains(op))
+        .filter(|(op, _)| !["heartbeat", "set-process", "expire-attempt"].contains(op))
     {
         assert!(
             store.get_receipt(&key, request).await.unwrap().is_some(),
@@ -156,5 +164,130 @@ async fn q04_newer_schema_is_refused() {
     assert_eq!(
         (error.kind, error.code.as_str()),
         (StoreFailureKind::Incompatible, "schema.too-new")
+    );
+}
+
+/// The audit records of `kind`, oldest first, as JSON.
+fn audits(path: &Path, kind: &str) -> Vec<Value> {
+    let db = rusqlite::Connection::open(path).unwrap();
+    let mut stmt = db
+        .prepare("SELECT evidence FROM audit WHERE kind = ?1 ORDER BY audit_id")
+        .unwrap();
+    stmt.query_map([kind], |r| r.get::<_, Vec<u8>>(0))
+        .unwrap()
+        .map(|bytes| serde_json::from_slice(&bytes.unwrap()).unwrap())
+        .collect()
+}
+
+/// A store at `path` with run `run`, one invocation of node `a` claimed with a lease of
+/// 100 ms at time 1000, and the clock past that lease.
+async fn expired_lease(path: &Path, run: &str) -> (SqliteStore, runspore_types::store::AttemptRef) {
+    let clock = ManualClock::new(1_000);
+    let store = SqliteStore::open_with_clock(path, clock.clone()).unwrap();
+    let key = RunKey::new(DEFAULT_TENANT, run);
+    store
+        .create_run(create_run(&key, "create", 0))
+        .await
+        .unwrap();
+    let event = store
+        .list_events(&key, 0, 1)
+        .await
+        .unwrap()
+        .items
+        .remove(0)
+        .event;
+    let turn = Turn {
+        key: key.clone(),
+        revision: 0,
+        applied_sequence: 0,
+        package_digest: String::new(),
+        snapshot: None,
+        snapshot_digest: None,
+        next_event: event,
+    };
+    let (command, invocation) = schedule(&key, "a", 0);
+    store
+        .commit_turn(runspore_store_conformance::commit(
+            &turn,
+            "commit",
+            0,
+            vec![command],
+        ))
+        .await
+        .unwrap();
+    let attempt = store
+        .claim_attempt(claim(&key, "claim", &invocation, "w1", 100))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    clock.set(1_100);
+    (store, attempt)
+}
+
+#[tokio::test]
+async fn q05_an_expiry_writes_its_audit_record() {
+    let path = fresh_path();
+    let (store, plain) = expired_lease(&path, "plain").await;
+    store
+        .expire_attempt(expire(&plain, "expire"))
+        .await
+        .unwrap();
+    drop(store);
+    let (store, attempt) = expired_lease(&path, "unchecked").await;
+    let mut unchecked = expire(&attempt, "expire");
+    unchecked.process_unchecked = true;
+    unchecked.mutation =
+        Mutation::new("expire_attempt", "expire", &json!([attempt, true])).unwrap();
+    store.expire_attempt(unchecked).await.unwrap();
+    assert_eq!(
+        audits(&path, "attempt.expired"),
+        [
+            json!({"reason": "lease"}),
+            json!({"reason": "lease", "notes": ["process.unchecked"]})
+        ]
+    );
+    assert!(audits(&path, "late-evidence").is_empty());
+}
+
+#[tokio::test]
+async fn q06_a_version_1_file_is_upgraded() {
+    let path = fresh_path();
+    let (store, attempt) = expired_lease(&path, "old").await;
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE attempts DROP COLUMN process;
+         ALTER TABLE audit DROP COLUMN kind;
+         PRAGMA user_version = 1;",
+    )
+    .unwrap();
+    drop(conn);
+    let clock = ManualClock::new(1_050);
+    let store = SqliteStore::open_with_clock(&path, clock.clone()).unwrap();
+    let version: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, runspore_store_sqlite::SCHEMA_VERSION);
+    let key = RunKey::new(DEFAULT_TENANT, "old");
+    assert_eq!(store.list_invocations(&key).await.unwrap()[0].process, None);
+    let record = process_record("here", 4242);
+    store
+        .set_process(set_process(&attempt, "process", Some(record.clone())))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.list_invocations(&key).await.unwrap()[0].process,
+        Some(record)
+    );
+    clock.set(1_100);
+    store
+        .expire_attempt(expire(&attempt, "expire"))
+        .await
+        .unwrap();
+    assert_eq!(
+        audits(&path, "attempt.expired"),
+        [json!({"reason": "lease"})]
     );
 }

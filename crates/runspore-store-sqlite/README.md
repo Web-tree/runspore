@@ -12,12 +12,13 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
   clock after `BEGIN IMMEDIATE` has taken the write lock.
 - `SQLITE_BUSY` after the timeout is `unavailable` / `store.busy`.
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
-  of the seven operations named in spec section 3.
+  of the eight operations named in spec section 3.
 
-## Schema (version 1, in `PRAGMA user_version`)
+## Schema (version 2, in `PRAGMA user_version`)
 
-An empty file is initialized from `src/schema.sql`. A file with a newer version is
-refused with `incompatible` / `schema.too-new`.
+An empty file is initialized from `src/schema.sql`. A version 1 file is upgraded in
+place, in one transaction: `attempts.process` and `audit.kind` are added. A file with a
+newer version is refused with `incompatible` / `schema.too-new`.
 
 | Table | Key | Invariant the constraints enforce |
 | --- | --- | --- |
@@ -27,9 +28,9 @@ refused with `incompatible` / `schema.too-new`.
 | `transitions` | `(tenant, run_id, revision)`; unique `(tenant, run_id, consumed_sequence)` | one commit per revision and per consumed event |
 | `commands` | `(tenant, run_id, command_id)` | a command ID exists once per run (I3) |
 | `invocations` | `(tenant, run_id, invocation_id)` | an invocation is scheduled once |
-| `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run |
+| `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null |
 | `receipts` | `(tenant, run_id, request_id)` | one applied mutation per request ID |
-| `audit` | `audit_id` | late evidence, append-only |
+| `audit` | `audit_id` | append-only; `kind` is `late-evidence` or `attempt.expired` |
 
 A receipt stores the operation name, request digest, and the canonical JSON
 (`canonical::encode`) of the returned value. A replay decodes those bytes, so it returns
@@ -59,6 +60,6 @@ may share a file; SQLite's file locks serialize their writers.
 
 ## Tests
 
-`tests/conformance.rs` runs S01–S15 from `runspore-store-conformance`. S01, S03 and S15
-race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01, Q03
-and Q04. Q03 runs `examples/crash.rs` as a child process at every failpoint.
+`tests/conformance.rs` runs S01–S16 from `runspore-store-conformance`. S01, S03 and S15
+race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01 and
+Q03–Q06. Q03 runs `examples/crash.rs` as a child process at every failpoint.

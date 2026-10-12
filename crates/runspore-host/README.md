@@ -12,7 +12,11 @@ against the runner its `kind` names, and a dry `run.started` transition (null in
 `tick()` is one bounded pass and never waits for an activity:
 
 1. **Sweep**: `expire_attempt` for each due lease. `lease.lost` / `lease.not-due` mean
-   someone else got there first.
+   someone else got there first. A lease with a process record is settled first (the
+   `process` module): a live group of ours on this machine is stopped and the expiry
+   waits until it is gone; a record from another host, or a group the host may not
+   signal, is expired with `processUnchecked`; a group still there after SIGKILL leaves
+   the attempt for the next pass.
 2. **Coordinate**: for each ready run, up to `turns_per_run` times: `load_turn`, call
    the reducer, `commit_turn`. A turn counts only when the receipt is `applied`. A
    `stale` failure or a `duplicate` receipt means another coordinator won; the
@@ -67,7 +71,7 @@ lease skips `finish_attempt`.
 | `commit_turn` | `ids::commit_request(revision + 1, eventId)` |
 | `expire_attempt` | `expire/<attemptId>` |
 | `finish_attempt` | `finish/<attemptId>` |
-| `claim_attempt`, `heartbeat`, `quarantine_run` | `<op>/<subject>/<engine nonce>/<counter>` |
+| `claim_attempt`, `heartbeat`, `set_process`, `quarantine_run` | `<op>/<subject>/<engine nonce>/<counter>` |
 | `record_late_evidence` | `late/<attemptId>/<engine nonce>` |
 
 Client operations derive their IDs from the client's idempotency key, so a retry is a
@@ -85,6 +89,10 @@ unchanged on `unavailable` and, where the store may have committed, `unknown-com
   binary that embeds the engine calls `guard::main_if_requested()` first thing in
   `main`, or sets `EngineConfig::guard` to an executable that does, such as the
   `runspore-guard` binary of this crate.
+- Before a command runs, its process record (host name, boot, process group, start
+  time) is stored with `set_process`; it is cleared once the group has been stopped.
+  Reading start times and group members needs Linux (`/proc`) or macOS (libproc);
+  elsewhere a command cannot be recorded and fails with `command.spawn`.
 - The reducer is called inline on the tick's task; use a multi-thread runtime when a
   transition may be slow.
 - A release that follows two quarantines in the same millisecond at the same revision

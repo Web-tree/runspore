@@ -16,8 +16,12 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-nix = { version = "0.31.3", features = ["signal", "process", "fs"] }
+nix = { version = "0.31.3", features = ["signal", "process", "fs", "hostname"] }
 getrandom = "0.4.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "0.14.11"
+sysctl = "0.7.1"
 
 [dev-dependencies]
 runspore-store-sqlite = { path = "../runspore-store-sqlite" }

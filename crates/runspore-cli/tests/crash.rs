@@ -33,7 +33,7 @@ const WASMTIME: &[&str] = &[
     "--poll-ms",
     "20",
 ];
-const FAILPOINTS: [&str; 19] = [
+const FAILPOINTS: [&str; 21] = [
     "host.turn.after-reduce",
     "host.turn.after-commit",
     "host.attempt.after-claim",
@@ -49,6 +49,8 @@ const FAILPOINTS: [&str; 19] = [
     "store.claim-attempt.after-commit",
     "store.heartbeat.before-commit",
     "store.heartbeat.after-commit",
+    "store.set-process.before-commit",
+    "store.set-process.after-commit",
     "store.finish-attempt.before-commit",
     "store.finish-attempt.after-commit",
     "store.expire-attempt.before-commit",
