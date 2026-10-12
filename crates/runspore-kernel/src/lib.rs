@@ -13,7 +13,8 @@ mod pattern;
 mod snapshot;
 
 use runspore_types::model::{
-    code as wire, ABI_VERSION, CODEC_VERSION, SEMANTICS_VERSION, WORKFLOW_FORMAT,
+    code as wire, ABI_VERSION, CODEC_VERSION, SEMANTICS_VERSION, SEMANTICS_VERSIONS,
+    WORKFLOW_FORMAT,
 };
 use runspore_types::reducer::{Decision, Descriptor, Failure, Reducer, TransitionRequest};
 
@@ -46,11 +47,11 @@ pub fn describe() -> Descriptor {
 /// the first failing check is the result; a failure carries no partial decision.
 pub fn transition(request: &TransitionRequest) -> Result<Decision, Failure> {
     let identity = &request.identity;
-    if identity.semantics_version != SEMANTICS_VERSION {
+    if !SEMANTICS_VERSIONS.contains(&identity.semantics_version.as_str()) {
         return Err(failure::incompatible(
             wire::VERSION_SEMANTICS,
             format!(
-                "semantics version {:?} is not {SEMANTICS_VERSION:?}",
+                "semantics version {:?} is not one of {SEMANTICS_VERSIONS:?}",
                 identity.semantics_version
             ),
         ));
@@ -80,7 +81,7 @@ pub fn transition(request: &TransitionRequest) -> Result<Decision, Failure> {
                     "tenant and runId must match [A-Za-z0-9_.-]{1,128}",
                 ));
             }
-            snapshot::initial(started)
+            snapshot::initial(started, &identity.semantics_version)
         }
         (None, _) => {
             return Err(failure::invalid(
@@ -95,7 +96,7 @@ pub fn transition(request: &TransitionRequest) -> Result<Decision, Failure> {
             ));
         }
         (Some(bytes), _) => {
-            let state = snapshot::load(bytes, &graph)?;
+            let state = snapshot::load(bytes, &identity.semantics_version, &graph)?;
             if state.last_sequence.checked_add(1) != Some(envelope.sequence) {
                 return Err(out_of_order(envelope.sequence));
             }

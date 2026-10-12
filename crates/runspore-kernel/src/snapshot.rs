@@ -6,7 +6,7 @@ use runspore_types::canonical;
 use runspore_types::digest::ids;
 use runspore_types::model::{
     code, InvocationPhase, InvocationState, Node, Position, RunResult, RunStarted, RunStatus,
-    State, MAX_BUFFERED_SIGNALS, SEMANTICS_VERSION, STATE_FORMAT,
+    State, MAX_BUFFERED_SIGNALS, STATE_FORMAT,
 };
 use runspore_types::reducer::Failure;
 use serde::Deserialize;
@@ -15,11 +15,12 @@ use serde_json::Value;
 use crate::failure;
 use crate::graph::Graph;
 
-/// The state a `run.started` event creates, before its start node is entered.
-pub(crate) fn initial(started: &RunStarted) -> State {
+/// The state a `run.started` event creates under `semantics`, before its start node
+/// is entered.
+pub(crate) fn initial(started: &RunStarted, semantics: &str) -> State {
     State {
         format: STATE_FORMAT.to_string(),
-        semantics: SEMANTICS_VERSION.to_string(),
+        semantics: semantics.to_string(),
         tenant: started.tenant.clone(),
         run_id: started.run_id.clone(),
         status: RunStatus::Running,
@@ -36,14 +37,15 @@ pub(crate) fn initial(started: &RunStarted) -> State {
     }
 }
 
-/// Decodes a canonical snapshot. A `format` or `semantics` of another version is
-/// reported before the shape is judged, because a later format need not decode as
-/// this one. A snapshot that decodes but contradicts itself or the graph is not a
-/// state this kernel wrote, and is rejected like an undecodable one.
-pub(crate) fn load(bytes: &[u8], graph: &Graph) -> Result<State, Failure> {
+/// Decodes a canonical snapshot of a run under `semantics`. A `format` of another
+/// version, or a run under other semantics, is reported before the shape is judged,
+/// because a later format need not decode as this one. A snapshot that decodes but
+/// contradicts itself or the graph is not a state this kernel wrote, and is rejected
+/// like an undecodable one.
+pub(crate) fn load(bytes: &[u8], semantics: &str, graph: &Graph) -> Result<State, Failure> {
     let value = canonical::parse_canonical(bytes)
         .map_err(|error| failure::invalid(code::STATE_INVALID, format!("snapshot: {error}")))?;
-    for (field, expected) in [("format", STATE_FORMAT), ("semantics", SEMANTICS_VERSION)] {
+    for (field, expected) in [("format", STATE_FORMAT), ("semantics", semantics)] {
         if let Some(found) = value.get(field).and_then(Value::as_str) {
             if found != expected {
                 return Err(failure::incompatible(

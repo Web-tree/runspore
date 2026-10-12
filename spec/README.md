@@ -1,8 +1,9 @@
 # MVP specification
 
-Semantics 0.1 — frozen 2026-10-06. This directory is normative for the first
-implementation. Where it is narrower than `docs/`, this directory wins for the MVP;
-`docs/` remains the target architecture.
+Semantics 0.1 — frozen 2026-10-06. Semantics 0.2 is being added beside it, rule by
+rule; [kernel.md](kernel.md) says which rules each version follows. This directory is
+normative for the first implementation. Where it is narrower than `docs/`, this
+directory wins for the MVP; `docs/` remains the target architecture.
 
 ## What the MVP is
 

@@ -32,7 +32,7 @@
         "kind": "run.started",
         "payload": {"input": null, "runId": "run_check_2", "tenant": "default"}
       },
-      "identity": {"semanticsVersion": "0.2", "codecVersion": "jcs-int53/2"},
+      "identity": {"semanticsVersion": "0.3", "codecVersion": "jcs-int53/2"},
       "expect": {"failure": {"kind": "incompatible-version", "code": "version.semantics"}}
     },
     {

@@ -9,9 +9,18 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The format a host writes when it does not choose; see [`WORKFLOW_FORMATS`].
 pub const WORKFLOW_FORMAT: &str = "runspore.workflow/0.1";
+pub const WORKFLOW_FORMAT_0_2: &str = "runspore.workflow/0.2";
+/// Every format the kernel accepts. A 0.2 document follows 0.1's rules until a rule
+/// of `spec/kernel.md` names 0.2.
+pub const WORKFLOW_FORMATS: [&str; 2] = [WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2];
 pub const STATE_FORMAT: &str = "runspore.state/0.1";
+/// The semantics a host requests when it does not choose; see [`SEMANTICS_VERSIONS`].
 pub const SEMANTICS_VERSION: &str = "0.1";
+pub const SEMANTICS_VERSION_0_2: &str = "0.2";
+/// Every semantics version the kernel accepts in a request and a snapshot.
+pub const SEMANTICS_VERSIONS: [&str; 2] = [SEMANTICS_VERSION, SEMANTICS_VERSION_0_2];
 pub const CODEC_VERSION: &str = "jcs-int53/1";
 pub const ABI_VERSION: &str = "runspore:machine@0.1.0";
 
