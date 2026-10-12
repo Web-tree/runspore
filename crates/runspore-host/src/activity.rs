@@ -3,12 +3,16 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use runspore_types::model::ErrorInfo;
 use runspore_types::store::RunKey;
 use serde_json::Value;
 use tokio::sync::watch;
+
+/// Default `stop_grace_ms`: SIGTERM to SIGKILL when a process group is stopped.
+pub const DEFAULT_STOP_GRACE_MS: u64 = 5_000;
 
 /// What an activity reports. The engine maps it to an `ActivityResult` unchanged.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +55,11 @@ pub struct ActivityContext {
     pub effect_key: String,
     /// Base for relative working directories.
     pub base_dir: PathBuf,
+    /// The executable whose guard mode runs in front of every process an attempt
+    /// starts. Defaults to this process's own executable.
+    pub guard: PathBuf,
+    /// How long a stopped process group gets between SIGTERM and SIGKILL.
+    pub stop_grace: Duration,
     stop: watch::Receiver<bool>,
 }
 
@@ -75,6 +84,8 @@ impl ActivityContext {
             attempt,
             effect_key,
             base_dir,
+            guard: crate::guard::own_executable(),
+            stop_grace: Duration::from_millis(DEFAULT_STOP_GRACE_MS),
             stop,
         }
     }

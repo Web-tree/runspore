@@ -319,15 +319,22 @@ fn a_worker_and_a_separate_signal_process_share_one_database() {
     assert_eq!(worker.wait().unwrap().code(), Some(130));
 }
 
-/// SIGINT to `run` and to `worker` while a 30-second idempotent step is in flight:
+/// SIGINT to `run` and to `worker`, and SIGHUP (a closed terminal) to `worker`, while
+/// a 30-second idempotent step is in flight:
 /// the process stops the command, exits 130 within twice the grace period plus a
 /// margin, and has already applied the stopped attempt, so attempt 2 is authorized
 /// before any other worker starts. A second worker then performs it.
 #[test]
-fn sigint_stops_a_worker_within_the_grace_period_and_another_finishes() {
-    for (name, command) in [
-        ("sigint-run", &["run", "flow.json", "--key", "s"][..]),
-        ("sigint-worker", &["worker"][..]),
+fn an_interrupt_stops_a_worker_within_the_grace_period_and_another_finishes() {
+    use nix::sys::signal::{SIGHUP, SIGINT};
+    for (name, command, interrupt) in [
+        (
+            "sigint-run",
+            &["run", "flow.json", "--key", "s"][..],
+            SIGINT,
+        ),
+        ("sigint-worker", &["worker"][..], SIGINT),
+        ("sighup-worker", &["worker"][..], SIGHUP),
     ] {
         let dir = Dir::new(name);
         dir.write("flow.json", &flow("30", "idempotent"));
@@ -344,11 +351,7 @@ fn sigint_stops_a_worker_within_the_grace_period_and_another_finishes() {
             std::thread::sleep(Duration::from_millis(20));
         }
         let sent = Instant::now();
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(worker.id() as i32),
-            nix::sys::signal::SIGINT,
-        )
-        .unwrap();
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(worker.id() as i32), interrupt).unwrap();
         let exit = worker.wait().unwrap();
         assert!(
             sent.elapsed() < Duration::from_millis(300 * 2 + 1500),

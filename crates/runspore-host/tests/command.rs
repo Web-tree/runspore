@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use tokio::sync::watch;
 
 fn ctx(stop: watch::Receiver<bool>) -> ActivityContext {
-    ActivityContext::new(
+    let mut ctx = ActivityContext::new(
         RunKey::new("default", "run-1"),
         "node-a".into(),
         "act".into(),
@@ -15,7 +15,9 @@ fn ctx(stop: watch::Receiver<bool>) -> ActivityContext {
         "effect-1".into(),
         std::env::temp_dir(),
         stop,
-    )
+    );
+    ctx.guard = env!("CARGO_BIN_EXE_runspore-guard").into();
+    ctx
 }
 
 async fn run(action: Value, input: Value) -> ActivityOutput {
