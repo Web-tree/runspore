@@ -133,10 +133,11 @@ never claims again.
 1. `claim_attempt`. If the receipt is `duplicate`, heartbeat once and proceed only if
    that heartbeat is `applied`. A historical claim is not ownership.
 2. Resolve the action from the package by `action_id`; pick the runner by `kind`. Find
-   the visit number in the run's snapshot: the visit `v` of the claimed node, at most
-   `visits[nodeId]`, whose `ids::invocation(tenant, runId, "<nodeId>/<v>")` is the
-   claimed invocation. If there is none, report `Failure`, `host.invocation-unknown`,
-   not retryable.
+   the visit number from the invocation's identity (kernel §1): the visit `v` of the
+   claimed node, at most the workflow's `limits.maxVisitsPerNode`, for which
+   `ids::invocation(tenant, runId, "<nodeId>/<v>")` is the claimed invocation ID. The
+   host never reads the kernel's snapshot. If there is none, report `Failure`,
+   `host.invocation-unknown`, not retryable.
 3. Start a heartbeat every `heartbeat_ms`. If a heartbeat returns `lease.lost`, the
    lease is gone: signal the runner to stop, do not call `finish_attempt`, and store
    what is known through `record_late_evidence`.
