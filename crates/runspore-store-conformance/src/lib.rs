@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S15 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S16 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::fmt::Debug;
@@ -234,8 +234,31 @@ pub fn finish(attempt: &AttemptRef, request_id: &str, number: u32) -> FinishAtte
 
 pub fn expire(attempt: &AttemptRef, request_id: &str) -> ExpireAttempt {
     ExpireAttempt {
-        mutation: mutation("expire_attempt", request_id, json!([attempt])),
+        mutation: mutation("expire_attempt", request_id, json!([attempt, false])),
         attempt: attempt.clone(),
+        process_unchecked: false,
+    }
+}
+
+/// A process record on host `host` for group `pgid`.
+pub fn process_record(host: &str, pgid: i32) -> ProcessRecord {
+    ProcessRecord {
+        host: host.to_string(),
+        boot: "boot-1".to_string(),
+        pgid,
+        started: "1700000000000000".to_string(),
+    }
+}
+
+pub fn set_process(
+    attempt: &AttemptRef,
+    request_id: &str,
+    process: Option<ProcessRecord>,
+) -> SetProcess {
+    SetProcess {
+        mutation: mutation("set_process", request_id, json!([attempt, process])),
+        attempt: attempt.clone(),
+        process,
     }
 }
 
@@ -524,7 +547,8 @@ pub async fn s04_result_after_expiry(factory: &dyn StoreFactory) {
     assert_eq!(
         w.due().await,
         vec![DueItem::Lease {
-            attempt: attempt.clone()
+            attempt: attempt.clone(),
+            process: None,
         }]
     );
     w.store()
@@ -1084,6 +1108,111 @@ pub async fn s15_start_key_race(factory: &dyn StoreFactory) {
     }
 }
 
+/// S16: `set_process` holds `heartbeat`'s predicates, extends nothing, and its record
+/// shows in `list_invocations` and in the `Lease` item of `scan_due`.
+pub async fn s16_process_record(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s16").await;
+    let invocation = w.scheduled(0).await;
+    let attempt = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim", &invocation, "w1", 100))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    assert_eq!(w.invocations().await[0].process, None);
+    let record = process_record("here", 4242);
+    let set = w
+        .store()
+        .set_process(set_process(&attempt, "process-1", Some(record.clone())))
+        .await
+        .unwrap();
+    assert_eq!(
+        (set.disposition, &set.value.process),
+        (Disposition::Applied, &Some(record.clone()))
+    );
+    let shown = &w.invocations().await[0];
+    assert_eq!(
+        (&shown.process, shown.lease_until_ms),
+        (&Some(record.clone()), Some(1_100))
+    );
+
+    let cleared = w
+        .store()
+        .set_process(set_process(&attempt, "process-2", None))
+        .await
+        .unwrap();
+    assert_eq!(cleared.value.process, None);
+    assert_eq!(w.invocations().await[0].process, None);
+    let replay = w
+        .store()
+        .set_process(set_process(&attempt, "process-1", Some(record.clone())))
+        .await
+        .unwrap();
+    assert_eq!(
+        (replay.disposition, &replay.value.process),
+        (Disposition::Duplicate, &Some(record.clone()))
+    );
+    assert_eq!(w.invocations().await[0].process, None, "a replay wrote");
+    w.store()
+        .set_process(set_process(&attempt, "process-3", Some(record.clone())))
+        .await
+        .unwrap();
+
+    let other = process_record("other", 7);
+    let mut wrong_owner = attempt.clone();
+    wrong_owner.owner = "w2".to_string();
+    let mut wrong_fence = attempt.clone();
+    wrong_fence.fence += 1;
+    for (n, stranger) in [wrong_owner, wrong_fence].iter().enumerate() {
+        let refused = w
+            .store()
+            .set_process(set_process(
+                stranger,
+                &format!("stranger-{n}"),
+                Some(other.clone()),
+            ))
+            .await;
+        assert_eq!(
+            failure(refused),
+            (StoreFailureKind::Stale, "lease.lost".into())
+        );
+    }
+    w.clock.set(1_100);
+    let at = w
+        .store()
+        .set_process(set_process(&attempt, "process-at", Some(other.clone())))
+        .await;
+    assert_eq!(failure(at), (StoreFailureKind::Stale, "lease.lost".into()));
+    assert_eq!(w.invocations().await[0].process, Some(record.clone()));
+    assert_eq!(
+        w.due().await,
+        vec![DueItem::Lease {
+            attempt: attempt.clone(),
+            process: Some(record.clone()),
+        }]
+    );
+
+    let mut unchecked = expire(&attempt, "expire");
+    unchecked.process_unchecked = true;
+    unchecked.mutation = mutation("expire_attempt", "expire", json!([attempt, true]));
+    let expired = w.store().expire_attempt(unchecked).await.unwrap();
+    assert_eq!(expired.disposition, Disposition::Applied);
+    let after = w
+        .store()
+        .set_process(set_process(&attempt, "process-after", None))
+        .await;
+    assert_eq!(
+        failure(after),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
+    assert_eq!(
+        w.invocations().await[0].process,
+        Some(record),
+        "an ended attempt keeps its record"
+    );
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1093,7 +1222,7 @@ macro_rules! store_conformance_tests {
             s04_result_after_expiry s05_heartbeat_deadline s06_event_id_conflict
             s07_concurrent_appends s08_atomic_commit s09_not_before s10_fences
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
-            s15_start_key_race);
+            s15_start_key_race s16_process_record);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

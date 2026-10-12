@@ -6,7 +6,16 @@ mod common;
 use common::Dir;
 use serde_json::{json, Value};
 
-const FAST: [&str; 5] = ["--native-kernel", "--poll-ms", "20", "--lease-ms", "500"];
+/// The heartbeat renews the lease well before it runs out on a busy machine.
+const FAST: [&str; 7] = [
+    "--native-kernel",
+    "--poll-ms",
+    "20",
+    "--lease-ms",
+    "500",
+    "--heartbeat-ms",
+    "100",
+];
 
 /// `test` is red once, then green. `fix` echoes its input, which says why it was
 /// entered. `approve` ends at `done` or, abandoned, at `broken`.

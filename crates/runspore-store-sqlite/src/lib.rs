@@ -19,8 +19,12 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 const SCHEMA: &str = include_str!("schema.sql");
+/// Upgrades a version 1 database to version 2: the attempt's process record and the
+/// audit record's kind.
+const UPGRADE_1: &str = "ALTER TABLE attempts ADD COLUMN process BLOB;
+    ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'late-evidence';";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
 
@@ -89,6 +93,45 @@ fn verify(evidence: &Evidence) -> R<()> {
 
 fn i(value: u64) -> i64 {
     value as i64
+}
+
+fn process_blob(process: &Option<ProcessRecord>) -> R<Option<Vec<u8>>> {
+    process.as_ref().map(encode).transpose()
+}
+
+/// Reads a stored process record; anything else in the column is `rusqlite`'s
+/// conversion failure, which maps to `store.io`.
+fn process_column(r: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<Option<ProcessRecord>> {
+    let Some(bytes) = r.get::<_, Option<Vec<u8>>>(index)? else {
+        return Ok(None);
+    };
+    canonical::decode(&bytes).map(Some).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Blob, Box::new(e))
+    })
+}
+
+fn insert_audit(
+    c: &Connection,
+    a: &AttemptRef,
+    kind: &str,
+    evidence: &Evidence,
+    now: u64,
+) -> R<i64> {
+    c.execute(
+        "INSERT INTO audit (tenant, run_id, attempt_id, evidence_digest, evidence, at_ms, kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            a.key.tenant,
+            a.key.run,
+            a.attempt_id,
+            evidence.digest,
+            evidence.body,
+            i(now),
+            kind
+        ],
+    )
+    .map_err(db)?;
+    Ok(c.last_insert_rowid())
 }
 
 /// The result of a mutation body: `Applied` writes a receipt, `Same` returns an
@@ -313,8 +356,12 @@ impl SqliteStore {
                 format!("schema version {version} is newer than {SCHEMA_VERSION}"),
             ));
         }
-        if version == 0 {
-            tx.execute_batch(SCHEMA).map_err(db)?;
+        match version {
+            0 => tx.execute_batch(SCHEMA).map_err(db)?,
+            1 => tx.execute_batch(UPGRADE_1).map_err(db)?,
+            _ => {}
+        }
+        if version < SCHEMA_VERSION {
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)
                 .map_err(db)?;
         }
@@ -597,7 +644,9 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     )
     .map_err(db)?;
     c.execute(
-        "INSERT INTO attempts VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', NULL)",
+        "INSERT INTO attempts (tenant, run_id, attempt_id, invocation_id, attempt_number, owner,
+                               fence, lease_until_ms, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running')",
         params![
             q.key.tenant,
             q.key.run,
@@ -865,6 +914,21 @@ impl Store for SqliteStore {
         })
     }
 
+    async fn set_process(&self, q: SetProcess) -> R<Receipt<ProcessSet>> {
+        self.mutate("set_process", Some("set-process"), &q.attempt.key, &q.mutation, |c, now| {
+            match attempt_row(c, &q.attempt)? {
+                Some(a) if a.status == "running" && now < a.lease_until_ms => {}
+                _ => return Err(stale("lease.lost")),
+            }
+            c.execute(
+                "UPDATE attempts SET process = ?4 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+                params![q.attempt.key.tenant, q.attempt.key.run, q.attempt.attempt_id, process_blob(&q.process)?],
+            )
+            .map_err(db)?;
+            Ok(Outcome::Applied(ProcessSet { process: q.process.clone() }))
+        })
+    }
+
     async fn finish_attempt(&self, q: FinishAttempt) -> R<Receipt<ResultAccepted>> {
         self.mutate(
             "finish_attempt",
@@ -920,6 +984,12 @@ impl Store for SqliteStore {
                     &q.attempt.invocation_id,
                     row.attempt_number,
                 ))?;
+                let mut audit = json!({"reason": "lease"});
+                if q.process_unchecked {
+                    audit["notes"] = json!(["process.unchecked"]);
+                }
+                let audit = Evidence::from_canonical(encode(&audit)?);
+                insert_audit(c, &q.attempt, "attempt.expired", &audit, now)?;
                 settle(c, &q.attempt, "expired", &body, now).map(Outcome::Applied)
             },
         )
@@ -939,12 +1009,8 @@ impl Store for SqliteStore {
             if !exists {
                 return Err(fail(StoreFailureKind::NotFound, "attempt.not-found", "attempt.not-found"));
             }
-            c.execute(
-                "INSERT INTO audit (tenant, run_id, attempt_id, evidence_digest, evidence, at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![a.key.tenant, a.key.run, a.attempt_id, q.evidence.digest, q.evidence.body, i(now)],
-            )
-            .map_err(db)?;
-            Ok(Outcome::Applied(AuditRecorded { audit_id: format!("audit_{}", c.last_insert_rowid()) }))
+            let id = insert_audit(c, a, "late-evidence", &q.evidence, now)?;
+            Ok(Outcome::Applied(AuditRecorded { audit_id: format!("audit_{id}") }))
         })
     }
 
@@ -1001,7 +1067,7 @@ impl Store for SqliteStore {
             if !in_outbox {
                 let mut stmt = c
                     .prepare(
-                        "SELECT tenant, run_id, invocation_id, attempt_id, owner, fence, lease_until_ms FROM attempts
+                        "SELECT tenant, run_id, invocation_id, attempt_id, owner, fence, lease_until_ms, process FROM attempts
                          WHERE status = 'running' AND lease_until_ms <= ?1
                            AND (lease_until_ms, attempt_id, tenant, run_id) > (?2, ?3, ?4, ?5)
                          ORDER BY lease_until_ms, attempt_id, tenant, run_id LIMIT ?6",
@@ -1017,7 +1083,8 @@ impl Store for SqliteStore {
                             fence: r.get::<_, i64>(5)? as u64,
                         };
                         let cursor = json!(["lease", r.get::<_, i64>(6)?, attempt.attempt_id, attempt.key.tenant, attempt.key.run]);
-                        Ok((DueItem::Lease { attempt }, cursor))
+                        let process = process_column(r, 7)?;
+                        Ok((DueItem::Lease { attempt, process }, cursor))
                     })
                     .and_then(Iterator::collect::<rusqlite::Result<Vec<_>>>)
                     .map_err(db)?;
@@ -1114,7 +1181,7 @@ impl Store for SqliteStore {
             let mut stmt = c
                 .prepare(
                     "SELECT i.invocation_id, i.node_id, i.action_id, i.status, i.attempt_number, i.not_before_ms,
-                            a.lease_until_ms, a.owner
+                            a.lease_until_ms, a.owner, a.process
                      FROM invocations i LEFT JOIN attempts a ON a.tenant = i.tenant AND a.run_id = i.run_id
                        AND a.invocation_id = i.invocation_id AND a.attempt_number = i.attempt_number
                      WHERE i.tenant = ?1 AND i.run_id = ?2 ORDER BY i.invocation_id",
@@ -1136,6 +1203,7 @@ impl Store for SqliteStore {
                         not_before_ms: r.get::<_, i64>(5)? as u64,
                         lease_until_ms: r.get::<_, Option<i64>>(6)?.map(|v| v as u64),
                         owner: r.get(7)?,
+                        process: process_column(r, 8)?,
                     })
                 })
                 .and_then(Iterator::collect)

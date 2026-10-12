@@ -95,6 +95,11 @@ until it reaches the new node. The cost is one transition per event of the run.
 none). `state` is `scheduled`, `unknown` or `stuck`; at a stuck step `error` is the
 kept error. `run` and `worker --until-parked` print the same object.
 
+**0.2:** `invocation.process` is the process record of the invocation's latest attempt
+(store.md §2 `set_process`): `{"host", "boot", "pgid", "started"}`, or null when the
+attempt has none. A running command shows its record; a command that ended has had its
+record cleared; an attempt whose worker died keeps its record.
+
 Text output is for people and is not a stable interface.
 
 ## Interrupts

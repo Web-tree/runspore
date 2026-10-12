@@ -222,9 +222,10 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             let view = existing(&engine, run_id).await?;
             let arrival = engine.arrival(&view).await?;
             let package = package(&engine, &view).await?;
+            let invocations = engine.list_invocations(&view.key).await?;
             done(
-                view::status_json(&view, &arrival, package.as_ref()),
-                view::status_text(&view, &arrival, package.as_ref()),
+                view::status_json(&view, &arrival, package.as_ref(), &invocations),
+                view::status_text(&view, &arrival, package.as_ref(), &invocations),
             )
         }
         Command::List => list(&engine).await,
@@ -408,12 +409,13 @@ async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
     };
     let arrival = engine.arrival(&view).await?;
     let package = package(engine, &view).await?;
-    let mut json = view::status_json(&view, &arrival, package.as_ref());
+    let invocations = engine.list_invocations(&view.key).await?;
+    let mut json = view::status_json(&view, &arrival, package.as_ref(), &invocations);
     if exit == EXIT_INTERRUPTED {
         json["interrupted"] = json!(true);
     }
     Ok(Output {
-        text: view::status_text(&view, &arrival, package.as_ref()),
+        text: view::status_text(&view, &arrival, package.as_ref(), &invocations),
         json,
         exit,
     })

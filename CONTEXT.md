@@ -38,6 +38,10 @@ _Avoid_: orphan, zombie, stray process
 The small process `spore` puts in front of every command it runs for a step, outside the command's process group. It lets the command run only once the worker says go, and stops the command's group when the worker dies. It is never named in a workflow.
 _Avoid_: wrapper, supervisor, shim
 
+**Process record**:
+What a try of a step keeps about the process group doing its work: the machine, its boot, the group and the start time of the command that leads it. A later worker reads it to stop a leftover command before the step is tried again. `spore` writes and reads it itself.
+_Avoid_: holder handle (an async job's identity, which `spore` never reads), PID file
+
 **Loop-back**:
 The run going back to an earlier step along an arrow, such as failing tests sending it back to implement. Each loop-back is a new visit of that step.
 _Avoid_: retry (that repeats one visit after it was lost)

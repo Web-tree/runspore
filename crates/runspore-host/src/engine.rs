@@ -23,6 +23,7 @@ use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT
 use crate::arrival::{Arrival, Trail};
 use crate::error::HostError;
 use crate::guard;
+use crate::process::{self, Leftover};
 
 /// Engine settings. Defaults are those of the host specification.
 #[derive(Debug, Clone)]
@@ -625,8 +626,8 @@ impl Engine {
         let mut report = TickReport::default();
         inner.reap();
         for item in inner.scan_due().await? {
-            if let DueItem::Lease { attempt } = item {
-                if inner.expire(attempt).await? {
+            if let DueItem::Lease { attempt, process } = item {
+                if inner.expire(attempt, process.as_ref()).await? {
                     report.expired += 1;
                 }
             }
@@ -792,20 +793,38 @@ impl Inner {
         Ok(package)
     }
 
-    async fn expire(&self, attempt: AttemptRef) -> Result<bool, HostError> {
+    /// Expires an attempt whose lease ran out, once the process group its record names
+    /// is gone from this machine or cannot be checked from here (host §3).
+    async fn expire(
+        &self,
+        attempt: AttemptRef,
+        process: Option<&ProcessRecord>,
+    ) -> Result<bool, HostError> {
+        let grace = Duration::from_millis(self.config.stop_grace_ms);
+        let process_unchecked = match process {
+            None => false,
+            Some(record) => match process::settle(record, grace).await {
+                Leftover::Gone => false,
+                Leftover::Unchecked => true,
+                Leftover::Remains => return Ok(false),
+            },
+        };
         let request = ExpireAttempt {
             mutation: mutation(
                 "expire_attempt",
                 format!("expire/{}", attempt.attempt_id),
-                json!([attempt]),
+                json!([attempt, process_unchecked]),
             )?,
             attempt,
+            process_unchecked,
         };
         match retry(true, || self.store.expire_attempt(request.clone())).await {
             Ok(_) => Ok(true),
+            // Another sweeper expired it first, or marked it the other way.
             Err(f)
                 if is(&f, StoreFailureKind::Stale, "lease.lost")
-                    || is(&f, StoreFailureKind::Conflict, "lease.not-due") =>
+                    || is(&f, StoreFailureKind::Conflict, "lease.not-due")
+                    || is(&f, StoreFailureKind::Conflict, "request.digest-mismatch") =>
             {
                 Ok(false)
             }
@@ -917,6 +936,24 @@ impl Inner {
         retry(true, || self.store.heartbeat(request.clone())).await
     }
 
+    async fn set_process(
+        &self,
+        attempt: &AttemptRef,
+        process: Option<ProcessRecord>,
+    ) -> Result<(), HostError> {
+        let request = SetProcess {
+            mutation: mutation(
+                "set_process",
+                self.unique(&format!("process/{}", attempt.attempt_id)),
+                json!([attempt, process]),
+            )?,
+            attempt: attempt.clone(),
+            process,
+        };
+        retry(true, || self.store.set_process(request.clone())).await?;
+        Ok(())
+    }
+
     /// Claims one due invocation and starts its attempt in the background, unless the
     /// engine is shutting down.
     async fn dispatch(
@@ -992,6 +1029,16 @@ impl Inner {
                 );
                 ctx.guard = self.config.guard.clone();
                 ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
+                let (inner, held) = (self.clone(), attempt.clone());
+                ctx.process = Arc::new(move |process| {
+                    let (inner, held) = (inner.clone(), held.clone());
+                    Box::pin(async move {
+                        inner
+                            .set_process(&held, process)
+                            .await
+                            .map_err(|e| e.to_string())
+                    })
+                });
                 let run = runner.run(&ctx, &action, &input);
                 tokio::pin!(run);
                 let period = Duration::from_millis(self.config.heartbeat_ms.max(1));

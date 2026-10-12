@@ -3,7 +3,7 @@
 
 use runspore_host::{Arrival, Arrow};
 use runspore_types::model::State;
-use runspore_types::store::{EventRecord, RunView};
+use runspore_types::store::{EventRecord, InvocationView, RunView};
 use serde_json::{json, Value};
 
 /// The exit code a parked run maps to: quarantine first, then the run status.
@@ -40,8 +40,14 @@ fn max_attempts(package: &Value, action_id: &str) -> Value {
 }
 
 /// The `status` object of spec/cli.md, plus `startKey` and the latest result per node.
-/// With the run's `package`, the invocation carries its action's `maxAttempts`.
-pub fn status_json(view: &RunView, arrival: &Arrival, package: Option<&Value>) -> Value {
+/// With the run's `package`, the invocation carries its action's `maxAttempts`; it shows
+/// the process record of its latest attempt, from `invocations`.
+pub fn status_json(
+    view: &RunView,
+    arrival: &Arrival,
+    package: Option<&Value>,
+    invocations: &[InvocationView],
+) -> Value {
     let state = state(view);
     let field = |f: fn(&State) -> Value| state.as_ref().map_or(Value::Null, f);
     let mut position = field(|s| json!(s.position));
@@ -52,6 +58,13 @@ pub fn status_json(view: &RunView, arrival: &Arrival, package: Option<&Value>) -
     if let (Some(package), Some(i)) = (package, invocation.as_object_mut()) {
         let action_id = i["actionId"].as_str().unwrap_or_default().to_string();
         i.insert("maxAttempts".into(), max_attempts(package, &action_id));
+    }
+    if let Value::Object(fields) = &mut invocation {
+        let process = invocations
+            .iter()
+            .find(|i| fields.get("invocationId").and_then(Value::as_str) == Some(&i.invocation_id))
+            .and_then(|i| i.process.as_ref());
+        fields.insert("process".into(), json!(process));
     }
     json!({
         "runId": view.key.run,
@@ -77,8 +90,13 @@ fn arrow_text(arrow: &Value) -> String {
     }
 }
 
-pub fn status_text(view: &RunView, arrival: &Arrival, package: Option<&Value>) -> String {
-    let s = status_json(view, arrival, package);
+pub fn status_text(
+    view: &RunView,
+    arrival: &Arrival,
+    package: Option<&Value>,
+    invocations: &[InvocationView],
+) -> String {
+    let s = status_json(view, arrival, package, invocations);
     let mut text = format!(
         "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\n",
         view.key.run, view.start_key, view.status, view.revision
@@ -113,6 +131,13 @@ pub fn status_text(view: &RunView, arrival: &Arrival, package: Option<&Value>) -
                 "error      {}: {}\n",
                 error["code"].as_str().unwrap_or_default(),
                 error["message"].as_str().unwrap_or_default()
+            );
+        }
+        if let Some(p) = i.get("process").and_then(Value::as_object) {
+            text += &format!(
+                "process    group {} on {}\n",
+                p["pgid"],
+                p["host"].as_str().unwrap_or_default()
             );
         }
     }

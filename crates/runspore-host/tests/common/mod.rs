@@ -129,11 +129,27 @@ pub async fn results(engine: &Engine, key: &RunKey) -> Vec<Value> {
         .collect()
 }
 
-/// Rows of the store's late-evidence audit table.
+/// Late evidence recorded in the store's audit table.
 pub fn audits(path: &std::path::Path) -> i64 {
     let db = rusqlite::Connection::open(path).unwrap();
-    db.query_row("SELECT count(*) FROM audit", [], |r| r.get(0))
+    db.query_row(
+        "SELECT count(*) FROM audit WHERE kind = 'late-evidence'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// The audit records of the run's expiries, oldest first.
+pub fn expiry_audits(path: &std::path::Path) -> Vec<Value> {
+    let db = rusqlite::Connection::open(path).unwrap();
+    let mut stmt = db
+        .prepare("SELECT evidence FROM audit WHERE kind = 'attempt.expired' ORDER BY audit_id")
+        .unwrap();
+    stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))
         .unwrap()
+        .map(|bytes| serde_json::from_slice(&bytes.unwrap()).unwrap())
+        .collect()
 }
 
 /// Faults a test injects into a `Hooked` store.
@@ -194,6 +210,9 @@ impl<H: Hook> Store for Hooked<H> {
     }
     async fn heartbeat(&self, r: Heartbeat) -> StoreResult<Receipt<LeaseExtended>> {
         self.inner.heartbeat(r).await
+    }
+    async fn set_process(&self, r: SetProcess) -> StoreResult<Receipt<ProcessSet>> {
+        self.inner.set_process(r).await
     }
     async fn finish_attempt(&self, r: FinishAttempt) -> StoreResult<Receipt<ResultAccepted>> {
         self.inner.finish_attempt(r).await

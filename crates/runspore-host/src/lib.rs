@@ -10,9 +10,11 @@ mod command;
 mod engine;
 mod error;
 pub mod guard;
+pub mod process;
 
 pub use activity::{
     ActivityContext, ActivityOutput, ActivityRegistry, ActivityRunner, NativeFn, NativeRunner,
+    RecordProcess,
 };
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
