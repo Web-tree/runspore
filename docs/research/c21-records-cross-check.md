@@ -2,12 +2,12 @@
 
 Findings for the map ticket [C21 — Cross-check the records: one change list per spec file](https://github.com/Web-tree/runspore/issues/47) (map #5). Read on 2026-10-12 at `main` 17d9715: `CONTEXT.md`, `spec/*.md` (0.1), every record in `docs/design/` (C02, C03, C06–C17) and `docs/research/` (C04, C05, `claude-code-mods.md`, `cli-name.md`), the [C01 findings][c01] on branch `research/workflow-map-carryover`, the other files in `docs/`, `work/`, and the two READMEs. The spec-addition inventory in the ticket's comment was a starting point; §6 lists where it differs from the records.
 
-Facts only. Nothing here decides; [C22](https://github.com/Web-tree/runspore/issues/48) does. Rule IDs are the records' own (C13 R2 = rule R2 of the C13 record; L = locked decision, R = routine choice). `file:line` is at 17d9715.
+Facts only. Nothing here decides; `/to-spec` does, after the map closed its decision tickets on 2026-10-12. Rule IDs are the records' own (C13 R2 = rule R2 of the C13 record; L = locked decision, R = routine choice). `file:line` is at 17d9715.
 
 ## Summary
 
 - **Change items:** `kernel.md` 18, `host.md` 37, `store.md` 13, `cli.md` 25, new `dot.md` 12, new `artifact.md` 8, the schema subset 8 (its own `schema.md` or a `kernel.md` section; placement is open), the plugin's spec in `max-skills` 25, and `spec/README.md` 4. That makes 150 in total.
-- **Contradictions with no later decision:** 9 (U1–U9 in §2.2). Another 5 gaps were never decided (U10–U14), and 12 routine items are left for C22 (§2.3).
+- **Contradictions with no later decision:** 9 (U1–U9 in §2.2). Another 5 gaps were never decided (U10–U14), and 12 routine items are left for `/to-spec` (§2.3).
 - **Stale statements with a later decision:** 53 places in the records (§2.1) and 38 in docs outside `spec/` (§4).
 - **Terms used two ways:** 20 (§3). `CONTEXT.md` is also missing 27 terms the records define.
 - **Concurrency:** on one machine, with one OS user and one database per checkout, any mix of drivers is safe. Several machines, two repositories sharing one database on purpose, another OS user, who is *allowed* to claim, and how later steps run inside a worktree a step made are all undecided (§5).
@@ -161,7 +161,7 @@ Facts only. Nothing here decides; [C22](https://github.com/Web-tree/runspore/iss
 
 ### 1.7 The schema subset: `spec/schema.md` or a `kernel.md` section (8)
 
-[C12][c12] §Spec names both homes; the choice is open (C22).
+[C12][c12] §Spec names both homes; the choice is open (`/to-spec`).
 
 | ID | Change | Source |
 |---|---|---|
@@ -277,7 +277,7 @@ This repo's spec must name no Claude ([C10][c10] R4). Everything below goes to `
 
 The other changes C06 and C17 list for earlier records ("Changes to earlier records") were never written into those files. This is why c08 and c10 still show `/spore`, no View, and no Continue on `held`.
 
-### 2.2 Contradictions with no later decision (U1–U9: questions for Max or C22)
+### 2.2 Contradictions with no later decision (U1–U9: questions for Max during `/to-spec`)
 
 | ID | Contradiction | Where |
 |---|---|---|
@@ -287,7 +287,7 @@ The other changes C06 and C17 list for earlier records ("Changes to earlier reco
 | U4 | **What a session death records.** C11's table says "your session dying records it as stopped at once". C15 says a dead worker's try records nothing and its lease runs out, and that a closed terminal (SIGHUP) kills the worker "without a graceful shutdown". Handling SIGHUP like SIGTERM is left as an optional refinement. | c11:88, 93 vs c15:25, 71 |
 | U5 | **`async.stop` and the guard.** C08 runs `stop` with "the C14 environment" and `RUNSPORE_DB`. C14's variable list names only the command, async start, probe and watch. C15's guard and stop sequence cover the same four, not `stop`. Whether `stop` is guarded, and what its timeout is, is not stated. | c08:151, 193; c14:91; c15:79 |
 | U6 | **File references in `settings.json`.** C02 R4's strip-before-validate rule (`instructions` on nodes, `assets` on actions) is "my resolution; Max did not rule on it" (the alternative was a top-level `files` section). Every later record (C07, C11, C12, C14) writes the R4 form. | c02:128, 278 |
-| U7 | **Who may act on a step.** In the profile an approval is a plain `spore signal` (C07 R1, C11), and any caller may claim any label, `abandon`, `resolve` or `cancel`. `docs/11` says "a plain graph signal saying approved is not sufficient" and that an approval binds an authenticated actor. `docs/14` says `abandon` needs "stronger permissions and an expected revision". No record addresses either. (C18 and C20 are open.) | docs/11-security.md:30; docs/14-api-and-operations.md:5; c03:88, 92 |
+| U7 | **Who may act on a step.** In the profile an approval is a plain `spore signal` (C07 R1, C11), and any caller may claim any label, `abandon`, `resolve` or `cancel`. `docs/11` says "a plain graph signal saying approved is not sufficient" and that an approval binds an authenticated actor. `docs/14` says `abandon` needs "stronger permissions and an expected revision". No record addresses either. ([C18](https://github.com/Web-tree/runspore/issues/44) and [C20](https://github.com/Web-tree/runspore/issues/46) were closed and left to implementation.) | docs/11-security.md:30; docs/14-api-and-operations.md:5; c03:88, 92 |
 | U8 | **Which run when `<runId>` is left out.** `step claim` takes "the first ready one" in the whole database. `step show` takes "the only unfinished run". `continue` lists runs and exits 2 when there are several. | c03:160; c14:111; c08:161 |
 | U9 | **Evidence IDs.** C15 numbers its evidence H6–H11 (with H7b). Host 0.1 already has H6 ("crash at every failpoint"), which C16 R5 and `work/tasks.md:30` cite. | c15:95–105; host.md:213; c16:49 |
 
@@ -299,11 +299,11 @@ Questions (U10–U14):
 |---|---|---|
 | U10 | The base dir when the database comes from `--db` or `RUNSPORE_DB` (for example a `spore start` run inside a step). R1 keeps 0.1's current directory; "a flag may be wanted". | c11:202 |
 | U11 | What `status --json` shows for a `cancelled` run. `end` is defined only for `completed` and `failed`. | c17:46, 87 |
-| U12 | An interactive step's permission mode. C11 R7 covers only `claude-spore run`, and C04's `permissionMode`/`allow` are outside C10's closed set (C20 is open). | c11:134; c10:116 |
+| U12 | An interactive step's permission mode. C11 R7 covers only `claude-spore run`, and C04's `permissionMode`/`allow` are outside C10's closed set ([C20](https://github.com/Web-tree/runspore/issues/46) was closed and left to implementation). | c11:134; c10:116 |
 | U13 | Several machines, two repositories sharing a database on purpose, and another OS user. See §5. | c15:61 |
 | U14 | Whether a `spore` 0.2 build still accepts `dialect="runspore/0.1"` folders. C02 R5 defines 0.1, and C13 R2 says a 0.2 kernel accepts 0.1 packages, but JSON packages are no longer an input (C02 R2). | c02:129; c13:69 |
 
-Routine, for C22 from standard practice (12):
+Routine, for `/to-spec` to settle from standard practice (12):
 - The render allowlist (c02:160).
 - The composed-build flag and file name (c02:282).
 - `inspect` spelling and output (c02:283; c17:91).
@@ -418,7 +418,7 @@ C02's open thread (c02:284) worried that uncommitted "bundle" edits to `CONTEXT.
 1. **Several machines on one database.** C15 L6 explicitly "left open; joins the map's open question". Step-file paths are local, and delivery to another machine is deferred ([C14][c14] Risks, Deferred). A probe from another machine answers `unknown` ([C11][c11] R6). A Claude step whose conversation is on another machine fails without retry ([C13][c13] §Plugin). store.md §3 says "never on a network filesystem (documented, not detected)", and docs/01:9 adds PostgreSQL "before supporting multiple worker machines". The map's Out of scope does not list it.
 2. **Two repositories sharing one database on purpose** (`--db`, `RUNSPORE_DB`). Every CLI run uses tenant `default`, so the repositories share one start-key namespace: the same key returns the other repository's run, or `run.exists` ([C16][c16] L1). `worker`, and `step claim` with no `<runId>`, act on every run in the database (U8), and the menu would list the other repository's runs. The base dir for such runs is an open thread (U10). No record allows or forbids this.
 3. **Another OS user on the same machine.** Work folders are mode 0700 for whoever made them ([C14][c14] §Host step 5), and process records answer EPERM, so the attempt expires as `process.unchecked` ([C15][c15] L6). Nothing says whether this is supported.
-4. **Who is allowed to claim.** The label is a filter, not an authorization. Anyone who can open the file can claim any label, `signal`, `resolve`, `abandon` or `cancel`. A claim records only a fresh owner ID and an opaque holder handle, so no actor identity is kept (U7; C18 and C20 are open).
+4. **Who is allowed to claim.** The label is a filter, not an authorization. Anyone who can open the file can claim any label, `signal`, `resolve`, `abandon` or `cancel`. A claim records only a fresh owner ID and an opaque holder handle, so no actor identity is kept (U7; C18 and C20 were closed and left to implementation).
 5. **Two runs in one checkout.** The isolation C08 L3 points to (a worktree step) has no mechanism that sends later steps into the worktree (U3).
 6. **Mixed `spore` versions on one database.** A newer schema is refused ([C10][c10] R6). Upgrading a 0.1 database and resuming 0.1 runs under 0.2 are unspecified (U2).
 7. **Unmeasured:** write contention from many pollers (1 s `status --no-probe` per visible run in C17; 200 ms reloads in `continue --wait` in C06) under the 5 s busy timeout; a locked database overrunning the 10 s `session.start` hook budget ([C08][c08] Risks).
