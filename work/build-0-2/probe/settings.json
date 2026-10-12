@@ -1,6 +1,0 @@
-{
-  "format": "runspore.workflow/0.2",
-  "nodes": {
-    "done": {}
-  }
-}

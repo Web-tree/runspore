@@ -12,14 +12,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]  # the orchestrator checkout
 STATE = Path(os.environ.get("BUILD_STATE", ROOT / ".spore/build-state"))
 # The spore this build runs on, and its database: set by `build --upgrade`
-# (state file `engine.json`), else a fixed spore 0.1.
+# (state file `engine.json`), else the `spore` on PATH.
 _ENGINE = json.loads((STATE / "engine.json").read_text()) if (STATE / "engine.json").exists() else {}
-SPORE = os.environ.get("SPORE") or _ENGINE.get("spore") or str(Path.home() / ".local/share/runspore-0.1/bin/spore")
+SPORE = os.environ.get("SPORE") or _ENGINE.get("spore") or "spore"
 DB = os.environ.get("RUNSPORE_DB") or _ENGINE.get("db") or str(ROOT / ".spore/runspore.db")
-GEN = ROOT / ".spore/gen"
-# `bin/build` sets this to the workflow folders when the spore reads them, else
-# to the 0.1 documents converted into GEN.
-WORKFLOWS = Path(os.environ.get("BUILD_WORKFLOWS", GEN))
+WORKFLOWS = ROOT / ".spore/workflows"
 HOME = Path(os.environ.get("BUILD_HOME", Path.home() / "git/webtree/build-0-2")).expanduser()
 REPOS = json.loads(os.environ.get("BUILD_REPOS", json.dumps({
     "Web-tree/runspore": "~/git/webtree/runspore",
@@ -51,8 +48,8 @@ def spore(*args):
 
 
 def workflow(name):
-    """What `spore start` takes for a workflow: its folder, or its converted 0.1 document."""
-    return WORKFLOWS / name if (WORKFLOWS / name).is_dir() else WORKFLOWS / f"{name}.json"
+    """What `spore start` takes for a workflow: its folder."""
+    return WORKFLOWS / name
 
 
 def runs():
