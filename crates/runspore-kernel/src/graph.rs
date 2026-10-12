@@ -5,11 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use runspore_types::canonical;
 use runspore_types::model::{
     code, ActionPolicy, Effect, Node, Workflow, WorkflowLimits, MAX_NODES, OUTCOME_FAILED,
-    WORKFLOW_FORMATS,
+    WORKFLOW_FORMATS, WORKFLOW_FORMAT_0_2,
 };
 use runspore_types::reducer::Failure;
 use serde::Deserialize;
 
+use crate::mapping::Dialect;
 use crate::{failure, mapping, pattern};
 
 const MAX_VISITS_PER_NODE: u32 = 1_000;
@@ -24,6 +25,7 @@ pub(crate) struct Graph {
 
 impl Graph {
     /// Decodes a canonical workflow document and applies rules W01–W11 in order.
+    /// Within W10, a 0.2 document's mappings may use `from` and `default`.
     pub(crate) fn load(bytes: &[u8]) -> Result<Self, Failure> {
         let workflow: Workflow = canonical::decode(bytes).map_err(|error| {
             failure::invalid(
@@ -180,10 +182,11 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
         }
     }
 
+    let dialect = dialect(workflow);
     for (id, node) in nodes {
         let checked = match node {
-            Node::Activity { input, .. } => mapping::check(input),
-            Node::Complete { output } => mapping::check(output),
+            Node::Activity { input, .. } => mapping::check(input, dialect),
+            Node::Complete { output } => mapping::check(output, dialect),
             Node::AwaitSignal { .. } | Node::Fail { .. } => Ok(()),
         };
         if let Err(reason) = checked {
@@ -209,6 +212,15 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
     }
 
     Ok(policies)
+}
+
+/// The mapping dialect of a document whose format passed W01.
+fn dialect(workflow: &Workflow) -> Dialect {
+    if workflow.format == WORKFLOW_FORMAT_0_2 {
+        Dialect::V0_2
+    } else {
+        Dialect::V0_1
+    }
 }
 
 /// Rule W07 for one action. An effect this semantics version does not support is

@@ -86,7 +86,7 @@ impl<'a> Machine<'a> {
             return self.diagnose(code::EVENT_IGNORED_TERMINAL, None, details);
         }
         match event {
-            Event::Started(_) => self.enter(self.graph.start()),
+            Event::Started(_) => self.enter(self.graph.start(), None),
             Event::Signal(signal) => self.on_signal(envelope, signal),
             Event::Result(result) => self.on_result(result),
             Event::Resolved(resolved) => self.on_resolved(resolved),
@@ -147,7 +147,7 @@ impl<'a> Machine<'a> {
             let waiter = self.waiter()?;
             if arrived.name == waiter.signal {
                 return match self.take(&waiter, arrived)? {
-                    Some(target) => self.enter(target),
+                    Some(target) => self.enter(target, Some(waiter.node_id)),
                     None => Ok(()),
                 };
             }
@@ -288,10 +288,12 @@ impl<'a> Machine<'a> {
     }
 
     /// Enter (7.4): admit the node against the graph limits, count the visit, then
-    /// act by node kind. Only a consumed signal continues the loop.
-    fn enter(&mut self, first: &'a str) -> Result<(), Failure> {
+    /// act by node kind. Only a consumed signal continues the loop. `from` names the
+    /// node whose just-recorded result routed here; `None` for the start node.
+    fn enter(&mut self, first: &'a str, from: Option<&'a str>) -> Result<(), Failure> {
         let graph = self.graph;
         let mut target = first;
+        let mut from = from;
         loop {
             self.count_microstep()?;
             let Some((node_id, node)) = graph.node(target) else {
@@ -334,7 +336,7 @@ impl<'a> Machine<'a> {
 
             match node {
                 Node::Activity { action, input, .. } => {
-                    return match self.evaluate(input, node_id) {
+                    return match self.evaluate(input, node_id, from) {
                         Some(input) => self.schedule(position, action, input),
                         None => Ok(()),
                     };
@@ -344,12 +346,15 @@ impl<'a> Machine<'a> {
                     self.state.status = RunStatus::Waiting;
                     self.state.invocation = None;
                     match self.consume()? {
-                        Some(next) => target = next,
+                        Some(next) => {
+                            from = Some(node_id);
+                            target = next;
+                        }
                         None => return Ok(()),
                     }
                 }
                 Node::Complete { output } => {
-                    if let Some(output) = self.evaluate(output, node_id) {
+                    if let Some(output) = self.evaluate(output, node_id, from) {
                         self.state.status = RunStatus::Completed;
                         self.state.result = Some(RunResult::Output(output));
                         self.state.position = None;
@@ -495,7 +500,7 @@ impl<'a> Machine<'a> {
             },
         );
         self.state.invocation = None;
-        self.enter(target)
+        self.enter(target, Some(activity.node_id))
     }
 
     /// Retry (7.4): authorize the next attempt of the same invocation. The delay
@@ -566,7 +571,7 @@ impl<'a> Machine<'a> {
                 output: object([("error", error)]),
             },
         );
-        self.enter(target)
+        self.enter(target, Some(activity.node_id))
     }
 
     /// Terminal `failed`: the error becomes the result; position and invocation clear.
@@ -577,13 +582,17 @@ impl<'a> Machine<'a> {
         self.state.invocation = None;
     }
 
-    /// Evaluates a node's mapping. An unresolved path ends the run and yields `None`.
-    fn evaluate(&mut self, mapping: &Value, node_id: &str) -> Option<Value> {
+    /// Evaluates a node's mapping; `from` reads the recorded result of the node that
+    /// routed here. An unresolved path ends the run and yields `None`.
+    fn evaluate(&mut self, mapping: &Value, node_id: &str, from: Option<&str>) -> Option<Value> {
         let context = Context {
             input: &self.state.input,
             nodes: &self.state.nodes,
             run_id: &self.state.run_id,
             tenant: &self.state.tenant,
+            from: from
+                .and_then(|id| self.state.nodes.get_key_value(id))
+                .map(|(id, result)| (id.as_str(), result)),
         };
         match mapping::evaluate(mapping, &context, &mut self.operations) {
             Ok(value) => Some(value),

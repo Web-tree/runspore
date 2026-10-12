@@ -102,8 +102,8 @@ fn w01_format() {
     assert_invalid(&edited("/format", json!("")));
 }
 
-/// Until a rule names 0.2, a 0.2 document is judged by 0.1's rules: the same
-/// documents are refused, with the same code.
+/// Outside the rules that name 0.2, a 0.2 document is judged by 0.1's rules: the
+/// same documents are refused, with the same code.
 #[test]
 fn a_0_2_document_follows_the_0_1_rules() {
     let refused = [
@@ -113,8 +113,8 @@ fn a_0_2_document_follows_the_0_1_rules() {
         edited("/actions/build/outcomes", json!(["ok", "failed"])),
         edited("/actions/build/effect", json!("reconcilable")),
         edited("/nodes/build/outcomes/exhausted", json!("done")),
-        with_input(json!({"$get": ["from"]})),
-        with_input(json!({"$get": ["input"], "default": 1})),
+        with_input(json!({"$get": ["elsewhere"]})),
+        with_input(json!({"$get": ["input"], "other": 1})),
     ];
     for workflow in refused {
         let expected = check(&workflow).expect_err("refused as 0.1");
@@ -380,6 +380,36 @@ fn w10_accepts_every_documented_form() {
         json!({"a": [1, "two", {"b": {"$literal": "$x"}}], "dollar$inside": 1}),
     ] {
         assert_valid(&edited("/nodes/done/output", mapping));
+    }
+}
+
+/// W10 in 0.2: `from` may start a path, and `$get` may carry `default` and no other
+/// key. A 0.1 document refuses both.
+#[test]
+fn w10_a_0_2_document_admits_from_and_default() {
+    let as_0_2 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT_0_2));
+    for mapping in [
+        json!({"$get": ["from"]}),
+        json!({"$get": ["from", "output", "log", 0]}),
+        json!({"$get": ["nodes", "test"], "default": null}),
+        json!({"$get": ["from", "node"], "default": {"$get": 5, "$unknown": 1}}),
+        json!({"default": 1}),
+    ] {
+        assert_valid(&as_0_2(with_input(mapping.clone())));
+        assert_valid(&as_0_2(edited("/nodes/done/output", mapping.clone())));
+        if mapping.get("default") != Some(&json!(1)) {
+            assert_invalid(&with_input(mapping));
+        }
+    }
+    for mapping in [
+        json!({"$get": ["input"], "default": 1, "other": 1}),
+        json!({"$get": ["input"], "fallback": 1}),
+        json!({"$literal": 1, "default": 1}),
+        json!({"$get": ["From"]}),
+        json!({"$get": [], "default": 1}),
+        json!({"$get": ["from", -1], "default": 1}),
+    ] {
+        assert_invalid(&as_0_2(with_input(mapping)));
     }
 }
 
