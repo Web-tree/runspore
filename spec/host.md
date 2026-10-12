@@ -88,7 +88,8 @@ process on its own.
   canonical package bytes. `start` uses it.
 - `release(key)`: `release_run`, with a request ID derived from the quarantine it
   lifts, so repeating it is a duplicate.
-- Read-through views: `get_run`, `list_runs`, `list_events`, `list_invocations`.
+- Read-through views: `get_run`, `get_package`, `list_runs`, `list_events`,
+  `list_invocations`.
 
 Request IDs for these are derived from their idempotency key (start key, message ID,
 request ID), so a client retry is a duplicate, not a second event.

@@ -184,12 +184,17 @@ fn a_failed_run_ends_at_its_fail_node_or_the_step_that_failed() {
         json!({"nodeId": "broken", "from": {"nodeId": "approve", "outcome": "abandoned"}})
     );
 
-    // A step that fails with no `failed` arrow: the run ends at that step, and the
-    // arrow is the one that led into it.
+    // A step that fails with no `failed` arrow is stuck; failed by a person, the run
+    // ends at that step, and the arrow is the one that led into it.
     let mut broken = coding_loop();
     broken["actions"]["fix"]["argv"] = json!(["sh", "-c", "exit 7"]);
     dir.write("broken.json", &broken);
     std::fs::remove_file(dir.file("green")).unwrap();
+    let out = dir.run(&args(&["--json", "run", "broken.json", "--key", "c"]));
+    assert_eq!(out.code(), Some(4), "{}", out.stdout);
+    assert_eq!(out.json()["end"], Value::Null);
+    let stuck = out.json()["runId"].as_str().unwrap().to_string();
+    dir.run(&args(&["resolve", &stuck, "--fail", "giving up"]));
     let out = dir.run(&args(&["--json", "run", "broken.json", "--key", "c"]));
     assert_eq!(out.code(), Some(1), "{}", out.stdout);
     assert_eq!(

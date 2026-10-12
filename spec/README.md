@@ -23,6 +23,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 | Graph | `activity`, `await-signal`, `complete`, `fail`; routing by named outcome; bounded loops through back edges |
 | Data | Run input, latest result per node, `$get` projection and `$literal` in mappings |
 | Effects | `pure`, `read-only`, `idempotent` repeat after an unknown outcome; `unsafe` pauses for an operator |
+| Stuck steps | 0.2: a step that gives up with no `failed` route pauses the run for a person, who retries, completes or fails it |
 | Retry | Kernel-decided delivery retries with exponential backoff, same invocation and effect key |
 | Actions | `command` (argv, no shell) and registered native Rust functions |
 | Store | SQLite, one file, several processes on one host |

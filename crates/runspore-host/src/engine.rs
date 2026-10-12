@@ -526,6 +526,11 @@ impl Engine {
         Ok(self.inner.store.get_run(key).await?)
     }
 
+    /// The canonical package bytes stored under `digest`.
+    pub async fn get_package(&self, digest: &str) -> Result<Option<Vec<u8>>, HostError> {
+        Ok(self.inner.store.get_package(digest).await?)
+    }
+
     pub async fn list_runs(
         &self,
         cursor: Option<String>,
