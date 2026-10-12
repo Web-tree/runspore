@@ -16,9 +16,9 @@ engine. It never listens on a network.
 
 | Command | Does |
 | --- | --- |
-| `validate <workflow.json>` | Checks the document and its actions without touching the database |
-| `start <workflow.json> [--input <json> \| --input-file <path>] [--key <startKey>]` | Creates a run and returns. A missing key is generated; the same key always names the same run |
-| `run <workflow.json> [--input …] [--key …]` | `start`, then works until the run is terminal or parked |
+| `validate <workflow>` | Builds the workflow and checks it and its actions without touching the database |
+| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>]` | Creates a run and returns. A missing key is generated; the same key always names the same run |
+| `run <workflow> [--input …] [--key …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId>` | Status, position, result, quarantine reason, outstanding invocation |
 | `list` | All runs with status |
@@ -26,6 +26,11 @@ engine. It never listens on a network.
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> <invocationId> (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers an invocation whose outcome is unknown |
 | `release <runId>` | Lifts a quarantine |
+
+A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
+as [dot.md](dot.md) describes, or a JSON workflow document. JSON documents are still
+accepted until the cut-over to 0.2. A build error exits 2 and names the file and line
+(dot.md §6).
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
 `worker --run` and `--until-parked` are only valid together. `release` on a run that is
