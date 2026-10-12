@@ -651,6 +651,46 @@ async fn two_command_activities_pass_output_through_a_mapping() {
     assert_eq!(statuses, vec![json!("success"), json!("success")]);
 }
 
+/// H7: a command learns its visit; result mode names the outcome.
+#[tokio::test]
+async fn a_command_gets_the_visit_of_its_activation() {
+    let path = temp_db("visit");
+    let script = r#"if [ "$RUNSPORE_VISIT" = 1 ]; then o=again; else o=ok; fi
+                    printf '{"outcome":"%s","output":%s}' "$o" "$RUNSPORE_VISIT""#;
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.1",
+        "name": "visit",
+        "start": "check",
+        "actions": {
+            "check": {"kind": "command", "effect": "read-only", "output": "result",
+                      "outcomes": ["ok", "again"], "argv": ["/bin/sh", "-c", script]}
+        },
+        "nodes": {
+            "check": {"kind": "activity", "action": "check",
+                      "outcomes": {"again": "check", "ok": "done"}},
+            "done": {"kind": "complete", "output": {"$get": ["nodes", "check", "output"]}}
+        }
+    }))
+    .unwrap();
+    let engine = native(&path, None, NativeRunner::new());
+    let key = engine
+        .start(&workflow, json!({}), "visit")
+        .await
+        .unwrap()
+        .key;
+    let view = engine.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.status, "completed");
+    let results: Vec<(Value, Value)> = results(&engine, &key)
+        .await
+        .into_iter()
+        .map(|r| (r["outcome"].clone(), r["output"].clone()))
+        .collect();
+    assert_eq!(
+        results,
+        vec![(json!("again"), json!(1)), (json!("ok"), json!(2))]
+    );
+}
+
 #[tokio::test]
 async fn validate_workflow_checks_what_start_checks_without_a_store() {
     let registry = ActivityRegistry::with_builtins(work(Arc::default(), |_| ok(Value::Null)));

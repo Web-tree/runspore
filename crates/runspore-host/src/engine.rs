@@ -11,7 +11,7 @@ use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
 use runspore_types::model::{
     event_kind, ActivityResult, AttemptStatus, InvocationResolved, Resolution, RunStarted,
-    RunStatus, SignalReceived,
+    RunStatus, SignalReceived, WorkflowLimits,
 };
 use runspore_types::reducer::{Envelope, Identity, Limits, Reducer, TransitionRequest};
 use runspore_types::store::*;
@@ -164,6 +164,8 @@ enum Unrunnable {
 struct Package {
     bytes: Vec<u8>,
     actions: Map<String, Value>,
+    /// `limits.maxVisitsPerNode`: no activation has a higher visit.
+    max_visits: u32,
 }
 
 struct Inner {
@@ -237,6 +239,15 @@ fn snapshot_status(snapshot: &[u8]) -> Option<&'static str> {
     let state: Value = serde_json::from_slice(snapshot).ok()?;
     let status: RunStatus = serde_json::from_value(state.get("status")?.clone()).ok()?;
     Some(status.as_str())
+}
+
+/// The visit `v` of the claimed node, at most `max_visits`, whose activation
+/// `<node>/<v>` derives the claimed invocation ID.
+fn invocation_visit(key: &RunKey, claim: &Claim, max_visits: u32) -> Option<u32> {
+    (1..=max_visits).find(|visit| {
+        let activation = ids::activation(&claim.node_id, *visit);
+        ids::invocation(&key.tenant, &key.run, &activation) == claim.attempt.invocation_id
+    })
 }
 
 fn parked(view: &RunView) -> bool {
@@ -705,7 +716,16 @@ impl Inner {
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        let package = Arc::new(Package { bytes, actions });
+        let max_visits = workflow
+            .pointer("/limits/maxVisitsPerNode")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or(WorkflowLimits::default().max_visits_per_node);
+        let package = Arc::new(Package {
+            bytes,
+            actions,
+            max_visits,
+        });
         lock(&self.packages).insert(digest.to_string(), package.clone());
         Ok(package)
     }
@@ -891,24 +911,25 @@ impl Inner {
         failpoint::hit("host.attempt.after-claim");
         let attempt = claim.attempt.clone();
         let (stop, stop_rx) = watch::channel(false);
-        let mut ctx = ActivityContext::new(
-            attempt.key.clone(),
-            claim.node_id.clone(),
-            claim.action_id.clone(),
-            attempt.invocation_id.clone(),
-            claim.attempt_number,
-            claim.effect_key.clone(),
-            self.config.base_dir.clone(),
-            stop_rx,
-        );
-        ctx.guard = self.config.guard.clone();
-        ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
         let mut lost = false;
         let mut stopping = false;
         let output = match self.resolve_action(&attempt.key, &claim).await {
             Err(Unrunnable::Abandon) => return,
             Err(Unrunnable::Fail(output)) => output,
-            Ok((action, runner, input)) => {
+            Ok((action, runner, input, visit)) => {
+                let mut ctx = ActivityContext::new(
+                    attempt.key.clone(),
+                    claim.node_id.clone(),
+                    claim.action_id.clone(),
+                    attempt.invocation_id.clone(),
+                    claim.attempt_number,
+                    visit,
+                    claim.effect_key.clone(),
+                    self.config.base_dir.clone(),
+                    stop_rx,
+                );
+                ctx.guard = self.config.guard.clone();
+                ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
                 let run = runner.run(&ctx, &action, &input);
                 tokio::pin!(run);
                 let period = Duration::from_millis(self.config.heartbeat_ms.max(1));
@@ -1004,7 +1025,7 @@ impl Inner {
         &self,
         key: &RunKey,
         claim: &Claim,
-    ) -> Result<(Value, Arc<dyn crate::ActivityRunner>, Value), Unrunnable> {
+    ) -> Result<(Value, Arc<dyn crate::ActivityRunner>, Value, u32), Unrunnable> {
         let fail = |code: &str, message: String| {
             Unrunnable::Fail(ActivityOutput::Failure {
                 error: ActivityOutput::error(code, message, Value::Null),
@@ -1034,6 +1055,12 @@ impl Inner {
             .ok_or_else(|| fail("host.runner-missing", kind.to_string()))?;
         let input = canonical::parse(&claim.input)
             .map_err(|e| fail("host.input-invalid", e.to_string()))?;
-        Ok((action, runner, input))
+        let visit = invocation_visit(key, claim, package.max_visits).ok_or_else(|| {
+            fail(
+                "host.invocation-unknown",
+                claim.attempt.invocation_id.clone(),
+            )
+        })?;
+        Ok((action, runner, input, visit))
     }
 }

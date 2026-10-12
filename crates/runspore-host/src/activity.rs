@@ -51,6 +51,8 @@ pub struct ActivityContext {
     pub action_id: String,
     pub invocation_id: String,
     pub attempt: u32,
+    /// The visit of the invocation's activation `<node>/<visit>`, from 1.
+    pub visit: u32,
     /// Identical on every attempt of one invocation.
     pub effect_key: String,
     /// Base for relative working directories.
@@ -72,6 +74,7 @@ impl ActivityContext {
         action_id: String,
         invocation_id: String,
         attempt: u32,
+        visit: u32,
         effect_key: String,
         base_dir: PathBuf,
         stop: watch::Receiver<bool>,
@@ -82,6 +85,7 @@ impl ActivityContext {
             action_id,
             invocation_id,
             attempt,
+            visit,
             effect_key,
             base_dir,
             guard: crate::guard::own_executable(),
