@@ -116,6 +116,12 @@ _Avoid_: runtime dir, temp dir, scratch
 The values a workflow sets on a node for the program its action runs, delivered with the node's input. Runspore passes them on without reading them.
 _Avoid_: frontmatter, flags, options
 
+### Releases
+
+**Release key**:
+The Ed25519 key that signs every release's checksum list. Its public half is pinned in `install.sh` and the README; an installer trusts a downloaded `spore` only when the checksum list carries its signature and the archive matches the list.
+_Avoid_: signing key (ambiguous with package signing), GPG key
+
 ### Claude Code integration
 
 **Mod**:
