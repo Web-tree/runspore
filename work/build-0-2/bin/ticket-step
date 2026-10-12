@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""The steps of the `ticket` workflow: setup, implement, test, ship.
+
+    ticket-step <step>     (spore runs it with the step's input on stdin)
+
+setup      makes or reuses a git worktree for the ticket, on its own branch from
+           origin/main, and prints {dir, branch, ...} as JSON.
+implement  runs the examples/headless-agent Claude wrapper in the worktree with
+           .spore/workflows/ticket/steps/implement.md.
+test       runs the repo's checks; exit 1 (outcome `red`) prints what failed.
+ship       rebases onto origin/main, pushes, opens or reuses the PR, waits for CI
+           and squash-merges; exit 1 (outcome `red`) prints why it could not.
+
+Every step is safe to run again: each part checks what is already done.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from buildlib import HOME, POLL_S, REPOS, ROOT, gh_json, log, sh, split_issue  # noqa: E402
+
+FAILED = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
+TAIL = 12 * 1024
+# How long a PR with no checks at all waits for them to register before it counts
+# as a repo without CI.
+CI_GRACE_S = float(os.environ.get("BUILD_CI_GRACE_S", "300"))
+
+
+def red(text):
+    print(text[-TAIL:])
+    sys.exit(1)
+
+
+def slug(title):
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].rstrip("-")
+
+
+def setup(inp):
+    t = inp["ticket"]
+    repo, _ = split_issue(t["issue"])
+    local = Path(REPOS[repo]).expanduser()
+    d = HOME / f"{repo.split('/')[1]}-{t['id']}"
+    branch = f"build/{t['id'].lower()}-{slug(t['title'])}"
+    sh("git", "-C", local, "fetch", "--quiet", "origin", "main")
+    if not (d / ".git").exists():
+        HOME.mkdir(parents=True, exist_ok=True)
+        has_branch = sh("git", "-C", local, "branch", "--list", branch).strip()
+        if has_branch:
+            sh("git", "-C", local, "worktree", "add", d, branch)
+        else:
+            sh("git", "-C", local, "worktree", "add", "-b", branch, d, "origin/main")
+        log(f"worktree {d} on {branch}")
+    print(json.dumps({"dir": str(d), "branch": branch, "repo": repo, "issue": t["issue"],
+                      "id": t["id"], "title": t["title"]}))
+
+
+def implement(inp, raw):
+    os.chdir(inp["worktree"]["dir"])
+    step = ROOT / ".spore/workflows/ticket/steps"
+    # A file, not a pipe: a fix input with long failures can outgrow a pipe's buffer,
+    # and nothing reads the pipe until the exec below.
+    f = tempfile.TemporaryFile()
+    f.write(raw.encode())
+    f.seek(0)
+    os.dup2(f.fileno(), 0)
+    # exec, not a child: the wrapper watches its parent to notice a dead worker.
+    os.execvp("python3", ["python3", str(ROOT / "examples/headless-agent/claude-step"),
+                          str(step / "implement.md"), "--schema", str(step / "implement.schema.json")])
+
+
+def checks(repo, d):
+    override = json.loads(os.environ.get("BUILD_CHECKS", "{}"))
+    if repo in override:
+        return override[repo]
+    if repo == "Web-tree/runspore":
+        return [["cargo", "test", "--workspace", "--locked"]]
+    cmds = [["bash", "scripts/validate-naming.sh"]]
+    if (d / "plugins/ml-workflow/package.json").exists():
+        cmds.append(["bash", "-c", "cd plugins/ml-workflow && bun install --frozen-lockfile && bun test"])
+    return cmds
+
+
+def test(inp):
+    wt = inp["worktree"]
+    d = Path(wt["dir"])
+    os.chdir(d)
+    dirty = sh("git", "status", "--porcelain")
+    if dirty.strip():
+        red(f"The worktree has uncommitted changes; commit or remove them:\n{dirty}")
+    ahead = sh("git", "rev-list", "--count", "origin/main..HEAD").strip()
+    if ahead == "0":
+        red("The branch has no commits beyond origin/main: nothing was built yet.")
+    run_checks(wt, d)
+    print(f"checks pass on {ahead} commit(s)")
+
+
+def run_checks(wt, d):
+    """The repo's checks in the worktree; outcome `red` with the output of the first that fails."""
+    for cmd in checks(wt["repo"], d):
+        log("running " + " ".join(cmd))
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if p.returncode != 0:
+            red(f"$ {' '.join(cmd)}\nexited {p.returncode}\n\n{p.stdout}")
+
+
+def pr_body(inp):
+    repo, num = split_issue(inp["ticket"]["issue"])
+    return (f"Closes #{num}\n\n{inp.get('summary', '').strip()}\n\n---\n"
+            f"Built by the `build-0-2` runspore run; ticket run `{os.environ.get('RUNSPORE_RUN_ID', '?')}`.")
+
+
+def failed_logs(checks_):
+    out = []
+    for c in checks_:
+        if c.get("conclusion") in FAILED:
+            out.append(f"## {c.get('name')}: {c.get('conclusion')}")
+            m = re.search(r"/runs/(\d+)", c.get("detailsUrl") or "")
+            if m:
+                out.append(sh("gh", "run", "view", m.group(1), "--repo", REPO, "--log-failed", check=False)[-8000:])
+    return "\n".join(out)
+
+
+def dropped(inp):
+    """The ticket's issue was closed without this run merging: not planned, or done by hand."""
+    repo, num = split_issue(inp["ticket"]["issue"])
+    return gh_json("issue", "view", str(num), "--repo", repo, "--json", "state")["state"] == "CLOSED"
+
+
+def stop_dropped(inp, num=None):
+    if num is not None:
+        sh("gh", "pr", "close", str(num), "--repo", REPO, "--comment",
+           "The ticket's issue was closed without this PR, so the build run does not merge it.", check=False)
+    print(f"{inp['ticket']['issue']} was closed without this run; nothing merged")
+    sys.exit(0)
+
+
+def ship(inp):
+    global REPO
+    wt = inp["worktree"]
+    REPO = wt["repo"]
+    os.chdir(wt["dir"])
+    branch = wt["branch"]
+    prs = gh_json("pr", "list", "--repo", REPO, "--head", branch, "--state", "all",
+                  "--json", "number,state,url") or []
+    merged = [p for p in prs if p["state"] == "MERGED"]
+    if merged:
+        return finish(inp, merged[0]["url"])
+    if dropped(inp):
+        stop_dropped(inp, next((p["number"] for p in prs if p["state"] == "OPEN"), None))
+    sh("git", "fetch", "--quiet", "origin", "main")
+    if subprocess.run(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"]).returncode != 0:
+        r = subprocess.run(["git", "rebase", "origin/main"], capture_output=True, text=True)
+        if r.returncode != 0:
+            files = sh("git", "diff", "--name-only", "--diff-filter=U", check=False)
+            subprocess.run(["git", "rebase", "--abort"], capture_output=True)
+            red(f"Rebasing onto origin/main conflicts in:\n{files}\n{r.stdout}{r.stderr}")
+        # The tree changed since `test`: check it again before it goes anywhere.
+        run_checks(wt, Path(wt["dir"]))
+    sh("git", "push", "--quiet", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{branch}")
+    head = sh("git", "rev-parse", "HEAD").strip()
+    open_ = [p for p in prs if p["state"] == "OPEN"]
+    if open_:
+        num, url = open_[0]["number"], open_[0]["url"]
+    else:
+        t = inp["ticket"]
+        url = sh("gh", "pr", "create", "--repo", REPO, "--head", branch, "--base", "main",
+                 "--title", f"{t['id']}: {t['title']}", "--body", pr_body(inp)).strip().splitlines()[-1]
+        num = int(url.rstrip("/").split("/")[-1])
+        log(f"opened {url}")
+    pushed = time.monotonic()
+    while True:
+        v = gh_json("pr", "view", str(num), "--repo", REPO,
+                    "--json", "state,mergeable,headRefOid,statusCheckRollup")
+        if v["state"] == "MERGED":
+            return finish(inp, url)
+        if v["state"] == "CLOSED":
+            red(f"{url} was closed without merging. Reopen it or close the ticket.")
+        if v["headRefOid"] != head:
+            log("the PR head moved; waiting for GitHub to catch up")
+        elif v["mergeable"] == "CONFLICTING":
+            red(f"{url} conflicts with main. Rebase onto origin/main and resolve the conflicts.")
+        else:
+            # Check runs carry status + conclusion; commit statuses carry only state.
+            rollup = [{**c, "conclusion": c.get("conclusion") or c.get("state")}
+                      for c in v.get("statusCheckRollup") or []]
+            if any(c["conclusion"] in FAILED for c in rollup):
+                red(f"CI failed on {url}:\n{failed_logs(rollup)}")
+            pending = [c for c in rollup if c.get("status", "COMPLETED") != "COMPLETED"
+                       or c["conclusion"] in ("PENDING", "EXPECTED", "")]
+            if not rollup and time.monotonic() - pushed < CI_GRACE_S:
+                log("no checks registered yet")
+            elif not pending and v["mergeable"] == "MERGEABLE":
+                if dropped(inp):
+                    stop_dropped(inp, num)
+                sh("gh", "pr", "merge", str(num), "--repo", REPO, "--squash", "--match-head-commit", head)
+                log(f"merged {url}")
+                continue
+        time.sleep(POLL_S)
+
+
+def finish(inp, url):
+    repo, num = split_issue(inp["ticket"]["issue"])
+    if gh_json("issue", "view", str(num), "--repo", repo, "--json", "state")["state"] != "CLOSED":
+        sh("gh", "issue", "close", str(num), "--repo", repo, "--comment", f"Merged in {url}")
+    print(url)
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ("setup", "implement", "test", "ship"):
+        sys.exit("usage: ticket-step setup|implement|test|ship  (input on stdin)")
+    raw = sys.stdin.read()
+    inp = json.loads(raw)
+    step = sys.argv[1]
+    if step == "setup":
+        setup(inp)
+    elif step == "implement":
+        implement(inp, raw)
+    elif step == "test":
+        test(inp)
+    else:
+        ship(inp)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:  # noqa: BLE001
+        # Exit 1 means outcome `red`; anything unexpected (gh or git down) must
+        # be a plain failure, which spore retries.
+        print(f"ticket-step: {e}", file=sys.stderr)
+        sys.exit(2)

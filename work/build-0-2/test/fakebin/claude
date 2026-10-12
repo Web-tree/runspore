@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""A fake claude -p: commits <id>.txt in cwd; ticket R9 first breaks the checks, the fix repairs them."""
+import json, os, re, subprocess, sys, time
+prompt = sys.stdin.read()
+inp = json.loads(re.search(r"## Input\n\n```json\n(.*)\n```", prompt, re.S).group(1))
+tid = inp["ticket"]["id"]
+def git(*a): subprocess.run(["git", *a], check=True, capture_output=True)
+if "failures" in inp:
+    if os.path.exists("BROKEN"): git("rm", "-q", "BROKEN")
+    open(f"{tid}.txt", "a").write("fixed\n")
+else:
+    open(f"{tid}.txt", "a").write(f"{inp['ticket']['title']}\n")
+    if tid == "R9": open("BROKEN", "w").write("x\n"); git("add", "BROKEN")
+git("add", f"{tid}.txt"); git("-c", "user.name=fake", "-c", "user.email=f@x", "commit", "-q", "-m", f"{tid}: work")
+time.sleep(0.2)
+print(json.dumps({"is_error": False, "subtype": "success", "num_turns": 1, "duration_ms": 1, "total_cost_usd": 0.0,
+                  "structured_output": {"outcome": "ok", "summary": f"did {tid}"}}))

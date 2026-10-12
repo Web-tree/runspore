@@ -1,0 +1,6 @@
+runspore.db
+runspore.db-*
+runspore.db.files/
+gen/
+build-state/
+runspore-*.db*

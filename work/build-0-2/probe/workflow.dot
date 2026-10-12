@@ -1,0 +1,8 @@
+// The smallest workflow folder: bin/build validates it to learn whether the spore
+// reads workflow folders at all.
+digraph "probe" {
+  dialect = "runspore/0.2";
+  start   = "done";
+
+  done [kind="complete"];
+}

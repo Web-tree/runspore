@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary"],
+  "properties": {
+    "outcome": {"type": "string", "enum": ["ok"]},
+    "summary": {"type": "string", "minLength": 1}
+  }
+}
