@@ -1,6 +1,6 @@
 # Checkpoint A: Draw a workflow and run it
 
-Comes after wave 2 (R1, R3).
+Comes after wave 2 (R1 and R3 came first, in the fast lane).
 
 **Try:** Write a small `workflow.dot` + `settings.json` folder and run `spore validate` / `spore run` on it. Typos come back with file and line.
 

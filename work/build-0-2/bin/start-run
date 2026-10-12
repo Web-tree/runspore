@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from buildlib import BUILD_KEY, DB, GEN, SPORE, build_runs, load_state, sh, spore  # noqa: E402
+from buildlib import BUILD_KEY, DB, SPORE, build_runs, load_state, sh, spore, workflow  # noqa: E402
 
 restart = sys.argv[1:] == ["--restart"]
 if sys.argv[1:] not in ([], ["--restart"]):
@@ -25,7 +25,7 @@ if tries and not restart:
     sys.exit(0)
 n = tries[-1][0] + 1 if tries else 1
 key = BUILD_KEY if n == 1 else f"{BUILD_KEY}:{n}"
-run = json.loads(sh(SPORE, "--db", DB, "--json", "start", GEN / "build-0-2.json", "--key", key))["runId"]
+run = json.loads(sh(SPORE, "--db", DB, "--json", "start", workflow("build-0-2"), "--key", key))["runId"]
 for k, answer in sorted(load_state("answers").items()):
     spore("signal", run, f"checkpoint-{k}", "--outcome", answer, "--id", f"{key}-replay-{k}")
 print(run)

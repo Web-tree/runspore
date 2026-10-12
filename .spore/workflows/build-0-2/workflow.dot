@@ -1,10 +1,12 @@
 digraph "build-0-2" {
   dialect = "runspore/0.2";
-  start   = "wave_1";
+  start   = "lane_r1";
   rankdir = LR;
 
-  wave_1 [label="Wave 1\nR1 R9 R15\nR16 R26 P1", shape=box];
-  wave_2 [label="Wave 2\nR2 R3 R10\nR12 R17", shape=box];
+  lane_r1 [label="Fast lane\nR1", shape=box];
+  lane_r3 [label="Fast lane\nR3", shape=box];
+  wave_1 [label="Wave 1\nR9 R15 R16\nR26 P1", shape=box];
+  wave_2 [label="Wave 2\nR2 R10\nR12 R17", shape=box];
   wave_3 [label="Wave 3\nR4 R6 R8\nR11 R13", shape=box];
   wave_4 [label="Wave 4\nR5 R7 R14\nR18 R25", shape=box];
   wave_5 [label="Wave 5\nR19 P3", shape=box];
@@ -14,6 +16,7 @@ digraph "build-0-2" {
   wave_9 [label="Wave 9\nR28 P6", shape=box];
   wave_10 [label="Wave 10\nP7", shape=box];
   wave_11 [label="Wave 11\nP9", shape=box];
+  checkpoint_0 [kind="await-signal", label="Checkpoint 0\nSwitch the build to spore 0.2", shape=hexagon];
   checkpoint_a [kind="await-signal", label="Checkpoint A\nDraw a workflow and run it", shape=hexagon];
   checkpoint_b [kind="await-signal", label="Checkpoint B\nThe coding-loop shape runs in a terminal", shape=hexagon];
   checkpoint_c [kind="await-signal", label="Checkpoint C\nClaude does a step", shape=hexagon];
@@ -21,6 +24,7 @@ digraph "build-0-2" {
   checkpoint_e [kind="await-signal", label="Checkpoint E\nRun it from Claude Code", shape=hexagon];
   checkpoint_f [kind="await-signal", label="Checkpoint F\nSee it", shape=hexagon];
   checkpoint_g [kind="await-signal", label="Checkpoint G\nThe destination", shape=hexagon];
+  feedback_0 [label="Feedback 0\ntickets from your changes", shape=box, style=dashed];
   feedback_a [label="Feedback A\ntickets from your changes", shape=box, style=dashed];
   feedback_b [label="Feedback B\ntickets from your changes", shape=box, style=dashed];
   feedback_c [label="Feedback C\ntickets from your changes", shape=box, style=dashed];
@@ -30,7 +34,10 @@ digraph "build-0-2" {
   feedback_g [label="Feedback G\ntickets from your changes", shape=box, style=dashed];
   done [kind="complete", label="0.2 shipped", shape=doublecircle];
 
-  // the main path
+  // the main path; the fast lane gets spore reading this folder first
+  lane_r1 -> lane_r3;
+  lane_r3 -> checkpoint_0;
+  checkpoint_0 -> wave_1 [on="go"];
   wave_1 -> wave_2;
   wave_2 -> checkpoint_a;
   checkpoint_a -> wave_3 [on="go"];
@@ -51,6 +58,8 @@ digraph "build-0-2" {
   checkpoint_g -> done [on="go"];
 
   // a `changes` answer runs tickets made from your changes, then asks again
+  checkpoint_0 -> feedback_0 [on="changes", style=dashed];
+  feedback_0 -> checkpoint_0 [style=dashed];
   checkpoint_a -> feedback_a [on="changes", style=dashed];
   feedback_a -> checkpoint_a [style=dashed];
   checkpoint_b -> feedback_b [on="changes", style=dashed];

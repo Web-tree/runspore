@@ -25,6 +25,86 @@
     }
   },
   "nodes": {
+    "lane_r1": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "r1"
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R1",
+              "issue": "Web-tree/runspore#51",
+              "title": "Package format 0.2 accepted beside 0.1 (expand)"
+            }
+          ]
+        }
+      }
+    },
+    "lane_r3": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "r3"
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "R3",
+              "issue": "Web-tree/runspore#53",
+              "title": "Workflow folders: spore reads workflow.dot + settings.json"
+            }
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-0.md"
+        }
+      }
+    },
+    "checkpoint_0": {
+      "signal": "checkpoint-0",
+      "instructions": "steps/checkpoint-0.md",
+      "outputSchemas": {
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "changes"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "What to change before the next wave starts, one item per change."
+            }
+          }
+        }
+      }
+    },
+    "feedback_0": {
+      "action": "run-wave",
+      "input": {
+        "checkpoint": {
+          "$literal": "0"
+        },
+        "changes": {
+          "$get": [
+            "nodes",
+            "checkpoint_0",
+            "output",
+            "changes"
+          ]
+        },
+        "ask": {
+          "$literal": "steps/checkpoint-0.md"
+        }
+      }
+    },
     "wave_1": {
       "action": "run-wave",
       "input": {
@@ -33,11 +113,6 @@
         },
         "tickets": {
           "$literal": [
-            {
-              "id": "R1",
-              "issue": "Web-tree/runspore#51",
-              "title": "Package format 0.2 accepted beside 0.1 (expand)"
-            },
             {
               "id": "R9",
               "issue": "Web-tree/runspore#59",
@@ -79,11 +154,6 @@
               "id": "R2",
               "issue": "Web-tree/runspore#52",
               "title": "Move fixtures, golden traces and examples to format 0.2 (migrate)"
-            },
-            {
-              "id": "R3",
-              "issue": "Web-tree/runspore#53",
-              "title": "Workflow folders: spore reads workflow.dot + settings.json"
             },
             {
               "id": "R10",

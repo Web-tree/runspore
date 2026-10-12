@@ -12,15 +12,14 @@ build-order page with the workflow drawn from its DOT and the position highlight
 Before the run is started it reads the position from GitHub alone: the first wave
 with an open ticket. Once the plugin's live view (P7) lands, it draws this instead.
 """
-import html, json, os, re, subprocess, sys
+import html, json, re, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 WF = REPO / ".spore/workflows/build-0-2"
-SPORE = os.environ.get("SPORE", str(Path.home() / ".local/share/runspore-0.1/bin/spore"))
-DB = os.environ.get("RUNSPORE_DB", str(REPO / ".spore/runspore.db"))
-STATE = Path(os.environ.get("BUILD_STATE", REPO / ".spore/build-state"))
+sys.path.insert(0, str(HERE / "bin"))
+from buildlib import DB, SPORE, STATE  # noqa: E402  the spore and database the build runs on
 
 # Placeholder colours in the display DOT; the page's CSS maps them to theme tokens.
 DONE, CURRENT, ARROW = "#010101", "#020202", "#030303"

@@ -1,23 +1,59 @@
 #!/usr/bin/env bash
 # Start (or resume) the build-0-2 run and work on it and its ticket runs.
 #
-#   work/build-0-2/bin/build             # Ctrl-C to stop; run again to go on
-#   work/build-0-2/bin/build --restart   # a new try after a failed one (see start-run)
+#   work/build-0-2/bin/build                   # Ctrl-C to stop; run again to go on
+#   work/build-0-2/bin/build --restart         # a new try after a failed one (see start-run)
+#   work/build-0-2/bin/build --upgrade [<rev>] # move the build onto spore from <rev>
+#                                              # (default origin/main), then go on
 #
-# Converts both workflow folders to 0.1 documents (spore 0.1 has no DOT reader
-# yet), checks them, makes sure the build run exists (start keys make this safe to
-# repeat), then runs one worker for every run in the database. Stopping and running
-# this again picks up where it was.
+# --upgrade checks this folder out at <rev>, installs that commit's spore into a
+# folder of its own (once per commit), and records it with a database of its own
+# in the state file engine.json. The run starts again in that database: closed
+# waves pass at once and every `go` you gave is sent again up front. Upgrade while
+# the build waits at a checkpoint, with the build stopped.
+#
+# When the spore reads workflow folders (R3), they are started as they are;
+# before that, both are converted to 0.1 documents. Then the build run is made
+# sure to exist (start keys make this safe to repeat), and one worker runs every
+# run in the database. Stopping and running this again picks up where it was.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
-export SPORE="${SPORE:-$HOME/.local/share/runspore-0.1/bin/spore}"
-export RUNSPORE_DB="${RUNSPORE_DB:-$PWD/.spore/runspore.db}"
 bin=work/build-0-2/bin
-mkdir -p .spore/gen
-for w in build-0-2 ticket; do
-  "$bin/to-0.1" ".spore/workflows/$w" > ".spore/gen/$w.json"
-  "$SPORE" validate ".spore/gen/$w.json" >/dev/null
-done
+
+if [ "${1:-}" = --upgrade ]; then
+  [ $# -le 2 ] || { echo "usage: build --upgrade [<rev>]" >&2; exit 2; }
+  rev="${2:-origin/main}"
+  [ -z "$(git status --porcelain)" ] || { echo "build: this checkout has changes; commit or remove them first" >&2; exit 1; }
+  git fetch -q origin
+  from="$(git rev-parse HEAD)"
+  git checkout -q --detach "$rev"
+  sha="$(git rev-parse HEAD)"
+  engine="${BUILD_ENGINES:-$HOME/.local/share/runspore-build}/${sha:0:12}"
+  [ -x "$engine/bin/spore" ] || cargo install --quiet --locked --path crates/runspore-cli --root "$engine"
+  state="${BUILD_STATE:-$PWD/.spore/build-state}"
+  mkdir -p "$state"
+  python3 - "$state/engine.json" "$engine/bin/spore" "$PWD/.spore/runspore-${sha:0:12}.db" "$sha" "$from" <<'EOF'
+import json, sys
+path, spore, db, sha, came_from = sys.argv[1:]
+json.dump({"spore": spore, "db": db, "commit": sha, "from": came_from}, open(path, "w"), indent=2)
+EOF
+  echo "build: on spore from ${sha:0:12}; to go back: work/build-0-2/bin/build --upgrade ${from:0:12}"
+  exec "$bin/build"  # this script as of the new commit
+fi
+
+eval "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b, shlex
+print(f"export SPORE={shlex.quote(b.SPORE)} RUNSPORE_DB={shlex.quote(b.DB)}")' "$bin")"
+if "$SPORE" validate .spore/workflows/build-0-2 >/dev/null 2>&1; then
+  export BUILD_WORKFLOWS="$PWD/.spore/workflows"
+  "$SPORE" validate .spore/workflows/ticket >/dev/null
+else
+  export BUILD_WORKFLOWS="$PWD/.spore/gen"
+  mkdir -p .spore/gen
+  for w in build-0-2 ticket; do
+    "$bin/to-0.1" ".spore/workflows/$w" > ".spore/gen/$w.json"
+    "$SPORE" validate ".spore/gen/$w.json" >/dev/null
+  done
+fi
 if [ -z "${BUILD_NO_LABELS:-}" ]; then
   gh label create checkpoint --repo Web-tree/runspore --color f0b765 \
     --description "Try the build and answer" >/dev/null 2>&1 || true

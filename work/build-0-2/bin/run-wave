@@ -21,12 +21,19 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from buildlib import (DB, GEN, POLL_S, ROOT, SPORE, gh_json, load_state, log,  # noqa: E402
-                      runs, save_state, sh, split_issue)
+from buildlib import (DB, POLL_S, ROOT, SPORE, gh_json, load_state, log,  # noqa: E402
+                      runs, save_state, sh, split_issue, workflow)
 
 RUNSPORE, SKILLS = "Web-tree/runspore", "Max-Levitskiy/skills"
 TRIES = 2
 STEPS = ROOT / ".spore/workflows/build-0-2"
+UPGRADE = """
+## Try it on the newest spore
+
+The build runs on the spore it was last upgraded to. To try this checkpoint on
+spore from `main`, and move the build onto it: stop the build (Ctrl-C), answer,
+then run `work/build-0-2/bin/build --upgrade`. It prints how to go back.
+"""
 
 
 def feedback_tickets(k, changes, key):
@@ -71,7 +78,7 @@ def tick(tickets, all_runs, st):
         last_try, last = mine[-1] if mine else (0, None)
         if last is None or (last["status"] == "failed" and last_try < TRIES):
             key = f"{base}{last_try + 1}"
-            sh(SPORE, "--db", DB, "--json", "start", GEN / "ticket.json", "--key", key,
+            sh(SPORE, "--db", DB, "--json", "start", workflow("ticket"), "--key", key,
                "--input", json.dumps({"ticket": t}))
             log(f"started {key}")
         elif last["status"] == "failed" and t["issue"] not in st["asked"]:
@@ -95,6 +102,8 @@ def ask(k, step_md, tickets, feedback):
     if k not in cps:
         title = text.splitlines()[0].lstrip("# ").strip()
         body = f"{text}\n\n## Merged in this wave\n\n{merged}\n"
+        if k != "0":
+            body += UPGRADE
         url = sh("gh", "issue", "create", "--repo", RUNSPORE, "--title", title, "--body", body,
                  "--assignee", "@me", "--label", "checkpoint").strip().splitlines()[-1]
         cps[k] = {"url": url, "asked": [os.environ.get("RUNSPORE_EFFECT_KEY", "")]}
