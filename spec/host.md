@@ -99,7 +99,11 @@ request ID), so a client retry is a duplicate, not a second event.
 One bounded pass. It never blocks on an activity.
 
 1. **Sweep.** For each `Lease` item of `scan_due`: `expire_attempt`. `lease.lost` and
-   `lease.not-due` mean another actor got there first; ignore.
+   `lease.not-due` mean another actor got there first; ignore. **0.2:** an item that
+   carries a process record is first settled by the check before a lease expiry (§3),
+   which may stop a leftover group, mark the expiry `processUnchecked`, or leave the
+   attempt for the next pass. `request.digest-mismatch` means another sweeper expired
+   the attempt with the other mark; ignore.
 2. **Coordinate.** For each key of `scan_ready`, up to `turns_per_run` times:
    `load_turn`; fetch the package (cached by digest); call `reducer.transition`;
    - on a decision: `commit_turn` with request ID
@@ -178,7 +182,9 @@ pub trait ActivityRunner: Send + Sync {
 
 `ActivityContext` carries the run key, node ID, action ID, invocation ID, attempt
 number, visit number, effect key, and a stop signal that fires when the lease is lost or the engine
-shuts down. The registry maps an action's `kind` to a runner.
+shuts down. **0.2:** it also records the attempt's process record (§3,
+`record_process`), which the engine stores with `set_process`. The registry maps an
+action's `kind` to a runner.
 
 ### `command`
 
@@ -291,6 +297,50 @@ once, as in 0.1, so nothing the command left behind outlives it.
 A command that starts its own process group or session escapes the guard, as it
 escapes 0.1's timeout kill.
 
+### The process record (0.2)
+
+An attempt keeps a **process record** of the process group doing its work, so a worker
+that comes later can stop it even when its worker and its guard are both gone. A step
+therefore never runs twice at once on one machine.
+
+- The record is `{"host", "boot", "pgid", "started"}`: the machine's host name, an
+  identifier of its boot (`/proc/sys/kernel/random/boot_id` on Linux, `kern.boottime`
+  on macOS), the process group ID (the ID of the process the guard started, which leads
+  the group), and that process's start time as a decimal string in the operating
+  system's own unit. The start time is read before the program runs and does not change
+  when it does.
+- Before a `command` is let run, the host records its process record with
+  `set_process` (store §2). A failure to record is `Failure`, `command.spawn`,
+  retryable; the guard then kills the waiting process, so no program runs that the
+  store does not know about.
+- Once the command has ended and the guard has stopped its group, the host clears the
+  record (`set_process` with null). A failure to clear is ignored. When the guard ended
+  without reporting, the record is kept.
+- Only the processes that do a step's work are recorded.
+
+**The check before a lease expiry.** For a `Lease` item that carries a process record,
+the sweep settles the record before `expire_attempt`:
+
+| What the record names | The sweep |
+| --- | --- |
+| Another host name | Expires, with `processUnchecked` (the audit record says `process.unchecked`) |
+| This host, another boot | Expires: the group is gone |
+| This host and boot, a group that is not ours, or none | Expires |
+| This host and boot, our group | Stops the group, waits until no process of it remains, then expires |
+| A group the host may not signal (EPERM) | Expires, with `processUnchecked` |
+
+A group is ours when its leader is alive with the recorded start time, or, when it has
+lost its leader, when every member started at or after that time: the operating system
+does not hand out a group's ID again while any member of it lives. A process with the
+group's ID and another start time took the number after our group was gone, and is left
+alone. Stopping is the stop sequence of the guard, and the wait for the group to be gone
+is bounded by `stop_grace_ms` plus 1 s. A group still there after that leaves the
+attempt unexpired; the sweep tries again on its next pass.
+
+Where the check cannot be made, the host signals nothing. A record from another machine
+or another OS user therefore leaves the risk 0.1 had: a leftover there may still run
+beside the next try. Several machines on one database are not supported (store §3).
+
 ### `native`
 
 `{"kind": "native", "function": "<name>", ...}` calls a Rust closure registered under
@@ -319,3 +369,5 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H12 | **0.2.** SIGKILL the worker while a command runs | The command's group is gone within `stop_grace_ms` + 1 s; the next try starts only after it |
 | H14 | **0.2.** SIGKILL the worker while a command that ignores SIGTERM runs | The guard survives its own SIGTERM to the group and sends SIGKILL after `stop_grace_ms` |
 | H15 | **0.2.** SIGKILL the worker while a command that traps SIGTERM runs | The command writes its file before the group goes |
+| H13 | **0.2.** SIGKILL the worker and its guard together while the command's group runs, with its leader and without it | The next sweep stops the recorded group before it expires the attempt; the next try starts only after the group is gone |
+| H16 | **0.2.** A process record with another host name | The attempt is expired by its lease; the audit record says `process.unchecked` |

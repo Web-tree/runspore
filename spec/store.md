@@ -27,7 +27,8 @@ a scan cursor the store did not issue.
 
 Failure codes are part of the contract. `kind` is in parentheses.
 
-Protocol 0.2 adds `find_run` and scenario S15; everything else is as in 0.1.
+Protocol 0.2 adds `find_run`, an attempt's process record with `set_process`, the
+audit record of an expiry, and scenarios S15 and S16; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -125,6 +126,20 @@ Predicate: the attempt is `running`, its ID, owner, and fence match, and now <
 `leaseUntilMs` (`stale` / `lease.lost` for all of these). Writes `leaseUntilMs = now +
 extendMs`. A replayed receipt returns the historical deadline and extends nothing.
 
+### set_process (0.2)
+
+`set_process(attempt, process)` stores the attempt's **process record**, the process
+group doing its work (host §3), or clears it with null. A record is canonical JSON
+`{"host": "<name>", "boot": "<id>", "pgid": <int>, "started": "<decimal>"}`.
+
+Predicate: as `heartbeat`, the attempt is `running`, its ID, owner, and fence match, and
+now < `leaseUntilMs` (`stale` / `lease.lost` for all of these). Writes the record on the
+attempt and nothing else; the lease is not extended. Returns the stored record. A
+replayed receipt returns the historical record and writes nothing.
+
+The record is the store's to keep and the host's to read. An attempt that ends keeps
+whatever record it had.
+
 ### finish_attempt
 
 Predicates: `result.body` decodes as `ActivityResult` whose `invocationId`,
@@ -148,10 +163,16 @@ ID `ids::event_for_attempt(attemptId)`, kind `activity.result`, and body
 `canonical::encode(ActivityResult::expired(invocationId, attemptNumber))`. Returns its
 sequence. `finish_attempt` and `expire_attempt` compete: exactly one succeeds.
 
+**0.2:** the request carries `processUnchecked`, true when the expiring host could not
+check the attempt's process record (host §3). In the same transaction the store writes
+one audit record for the attempt: `{"reason": "lease"}`, with `"notes":
+["process.unchecked"]` when `processUnchecked` is true.
+
 ### record_late_evidence
 
 Predicate: the attempt exists (`not-found` / `attempt.not-found`). Writes one audit
-record holding the evidence and the time. It changes no run, invocation, attempt, or
+record holding the evidence and the time, of kind `late-evidence` (an expiry's audit
+record is of kind `attempt.expired`). It changes no run, invocation, attempt, or
 event. This is where a result that lost to expiry is kept.
 
 ### quarantine_run, release_run
@@ -169,10 +190,12 @@ and are idempotent on an already matching state.
 - `scan_due`: first `Lease` items for running attempts with `leaseUntilMs ≤ now`,
   ascending by deadline then attempt ID; then `Outbox` items for `pending` invocations
   with `notBeforeMs ≤ now` in runs that are not quarantined, ascending by
-  `notBeforeMs` then invocation ID.
+  `notBeforeMs` then invocation ID. **0.2:** a `Lease` item carries the attempt's
+  process record, or null, so the sweeping host needs no second read.
 - `get_run`, `list_runs` (ascending by run ID within a tenant), `list_events`
   (ascending by sequence, with the consuming revision and that commit's diagnostics),
-  `list_invocations` (ascending by invocation ID).
+  `list_invocations` (ascending by invocation ID). **0.2:** an invocation shows the
+  process record of its latest attempt, or null.
 
 ## 3. SQLite adapter
 
@@ -182,7 +205,9 @@ and are idempotent on an already matching state.
 - Every mutation runs in `BEGIN IMMEDIATE`. `SQLITE_BUSY` after the timeout maps to
   `unavailable` / `store.busy`.
 - The schema carries a version. Opening a newer version fails with `incompatible` /
-  `schema.too-new`. An empty file is initialized.
+  `schema.too-new`. An empty file is initialized. An older version is upgraded in place
+  in one transaction: version 1 to 2 adds the attempt's process record and the audit
+  record's kind.
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
@@ -194,7 +219,7 @@ and are idempotent on an already matching state.
 Around the transaction commit of each mutating operation:
 `store.<op>.before-commit` and `store.<op>.after-commit`, with `<op>` one of
 `create-run`, `append-event`, `commit-turn`, `claim-attempt`, `heartbeat`,
-`finish-attempt`, `expire-attempt`. Use `runspore_types::failpoint::hit`.
+`set-process` (0.2), `finish-attempt`, `expire-attempt`. Use `runspore_types::failpoint::hit`.
 
 ## 4. Conformance tests
 
@@ -218,6 +243,7 @@ Written once, generic over a store factory and a manual clock, in
 | S13 | `create_run` repeated with the same start key, and with a changed package | `duplicate` with the original value; `run.exists` |
 | S14 | Reserved kinds and oversize bodies in `append_event` | `event.reserved-kind`; `event.too-large` |
 | S15 | Two `create_run` calls carry one start key and two run IDs, from two instances at once (0.2) | One is `applied`, the other `run.start-key-mismatch`; `find_run` returns the winner; `find_run` of an unknown key, or of the key in another tenant, is `None` |
+| S16 | `set_process` on a running attempt, then with another owner or fence, at and after the deadline, and after expiry (0.2) | The record shows in `list_invocations` and in the `Lease` item of `scan_due`; null clears it; the lease is not extended; a replay is `duplicate` with the historical record; every other call is `lease.lost` and changes nothing; an expiry with `processUnchecked` is applied |
 
 SQLite-specific, in the adapter crate:
 
@@ -227,3 +253,5 @@ SQLite-specific, in the adapter crate:
 | Q02 | Two store instances on one file, on different threads | S01 and S03 hold across instances |
 | Q03 | A child process aborts at each store failpoint | After reopen the mutation is either wholly absent or wholly present; a retry of the same request converges to one applied mutation |
 | Q04 | Open a file with a newer schema version | `schema.too-new` |
+| Q05 | Expire one attempt plainly and one with `processUnchecked` (0.2) | Each writes one `attempt.expired` audit record with reason `lease`; only the second notes `process.unchecked` |
+| Q06 | Open a version 1 file (0.2) | Upgraded to version 2; its records are kept; process records and audit kinds work |
