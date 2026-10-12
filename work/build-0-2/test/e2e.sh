@@ -75,9 +75,12 @@ test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R9: ')" =
 echo "ok: waves 1-2 merged, checkpoint A asked"
 
 "$bin/answer" a changes "Errors should name the settings key" "skills: the menu needs a hint line" > /dev/null
+"$bin/answer" a changes "Errors should name the settings key" "skills: the menu needs a hint line" > /dev/null  # a repeat
 wait_for waiting checkpoint_a 2
 check "sum(1 for i in s['issues'].values() if i['title'].startswith('Checkpoint A feedback') and i['state'] == 'CLOSED') == 2"
-echo "ok: changes built two feedback tickets, checkpoint A asked again"
+sleep 2
+wait_for waiting checkpoint_a 2
+echo "ok: changes built two feedback tickets, checkpoint A asked again; the repeated answer was the same message"
 
 "$bin/answer" a go > /dev/null
 wait_for waiting checkpoint_b 1

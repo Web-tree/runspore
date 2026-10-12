@@ -20,7 +20,16 @@ if len(args) < 2 or args[0] not in "0abcdefg" or len(args[0]) != 1 or args[1] no
         or (args[1] == "go") != (len(args) == 2) or any(not a.strip() for a in args[2:]):
     sys.exit(__doc__.strip())
 k, outcome, changes = args[0], args[1], args[2:]
-cmd = ["signal", build_run_id(), f"checkpoint-{k}", "--outcome", outcome]
+run = build_run_id()
+# One message ID per visit of the checkpoint, so answering again (after an
+# interrupted try) is the same message, and a later visit needs a new answer.
+# Away from the checkpoint, the answer is for its last visit (a repeat of the
+# answer that moved the run on), or for its first (an answer sent early).
+st = spore("status", run)
+node = f"checkpoint_{k}"
+pos = st.get("position") or {}
+visit = pos["visit"] if pos.get("nodeId") == node else (st["nodes"].get(node) or {}).get("visit", 1)
+cmd = ["signal", run, f"checkpoint-{k}", "--outcome", outcome, "--id", f"answer-{run}-{node}-{visit}"]
 if changes:
     cmd += ["--data", json.dumps({"changes": changes})]
 res = spore(*cmd)

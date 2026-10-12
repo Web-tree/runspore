@@ -26,6 +26,9 @@ from buildlib import HOME, POLL_S, REPOS, ROOT, gh_json, log, sh, split_issue  #
 
 FAILED = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
 TAIL = 12 * 1024
+# How long a PR with no checks at all waits for them to register before it counts
+# as a repo without CI.
+CI_GRACE_S = float(os.environ.get("BUILD_CI_GRACE_S", "300"))
 
 
 def red(text):
@@ -144,6 +147,7 @@ def ship(inp):
                  "--title", f"{t['id']}: {t['title']}", "--body", pr_body(inp)).strip().splitlines()[-1]
         num = int(url.rstrip("/").split("/")[-1])
         log(f"opened {url}")
+    pushed = time.monotonic()
     while True:
         v = gh_json("pr", "view", str(num), "--repo", REPO,
                     "--json", "state,mergeable,headRefOid,statusCheckRollup")
@@ -163,7 +167,9 @@ def ship(inp):
                 red(f"CI failed on {url}:\n{failed_logs(rollup)}")
             pending = [c for c in rollup if c.get("status", "COMPLETED") != "COMPLETED"
                        or c["conclusion"] in ("PENDING", "EXPECTED", "")]
-            if not pending and v["mergeable"] == "MERGEABLE":
+            if not rollup and time.monotonic() - pushed < CI_GRACE_S:
+                log("no checks registered yet")
+            elif not pending and v["mergeable"] == "MERGEABLE":
                 sh("gh", "pr", "merge", str(num), "--repo", REPO, "--squash")
                 log(f"merged {url}")
                 continue

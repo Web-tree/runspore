@@ -36,6 +36,18 @@ then run `work/build-0-2/bin/build --upgrade`. It prints how to go back.
 """
 
 
+def create_issue(repo, title, body, marker, *flags):
+    """`gh issue create`, unless an issue carrying `marker` already exists: a step
+    that died after creating it but before saving its state finds it again."""
+    tag = f"<!-- {marker} -->"
+    found = [i for i in gh_json("issue", "list", "--repo", repo, "--state", "all", "--limit", "100",
+                                "--json", "number,url,body") or [] if tag in (i.get("body") or "")]
+    if found:
+        return found[0]["url"]
+    return sh("gh", "issue", "create", "--repo", repo, "--title", title, "--body", f"{body}\n\n{tag}",
+              *flags).strip().splitlines()[-1]
+
+
 def feedback_tickets(k, changes, key):
     """One issue per change, created once per step visit (the effect key)."""
     st = load_state(f"feedback-{key.replace('/', '_')}")
@@ -48,8 +60,7 @@ def feedback_tickets(k, changes, key):
             body = (f"{text}\n\nFrom checkpoint {k.upper()} of the `build-0-2` run"
                     f"{': ' + cp['url'] if cp.get('url') else ''}. The run builds this ticket, "
                     "then asks the checkpoint again.")
-            url = sh("gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                     "--label", "ready-for-agent").strip().splitlines()[-1]
+            url = create_issue(repo, title, body, f"build-0-2 feedback {key} {i}", "--label", "ready-for-agent")
             st[str(i)] = {"issue": f"{repo}#{url.rstrip('/').split('/')[-1]}", "title": title,
                           "run": os.environ.get("RUNSPORE_RUN_ID", "")}
             save_state(f"feedback-{key.replace('/', '_')}", st)
@@ -68,10 +79,7 @@ def tick(tickets, all_runs, st):
     """Start what needs starting; return the tickets still open."""
     left = []
     for t in tickets:
-        if t["issue"] in st["done"]:
-            continue
-        if closed(t["issue"]):
-            st["done"].append(t["issue"])
+        if closed(t["issue"]):  # every poll: a reopened ticket counts as open again
             continue
         base = f"ticket:{t['issue']}:"
         mine = sorted((int(r["startKey"][len(base):]), r) for r in all_runs if r["startKey"].startswith(base))
@@ -104,8 +112,8 @@ def ask(k, step_md, tickets, feedback):
         body = f"{text}\n\n## Merged in this wave\n\n{merged}\n"
         if k != "0":
             body += UPGRADE
-        url = sh("gh", "issue", "create", "--repo", RUNSPORE, "--title", title, "--body", body,
-                 "--assignee", "@me", "--label", "checkpoint").strip().splitlines()[-1]
+        url = create_issue(RUNSPORE, title, body, f"build-0-2 checkpoint {k}",
+                           "--assignee", "@me", "--label", "checkpoint")
         cps[k] = {"url": url, "asked": [os.environ.get("RUNSPORE_EFFECT_KEY", "")]}
         save_state("checkpoints", cps)
         log(f"checkpoint {url}")
@@ -129,7 +137,7 @@ def main():
     else:
         k = inp["ask"].split("-")[-1].removesuffix(".md") if inp.get("ask") else None
         tickets = inp["tickets"]
-    st = {"done": [], "asked": []}
+    st = {"asked": []}
     while True:
         left = tick(tickets, runs(), st)
         if not left:
