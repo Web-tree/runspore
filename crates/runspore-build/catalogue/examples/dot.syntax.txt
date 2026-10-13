@@ -1,0 +1,9 @@
+── DOT syntax ────────────────── dot.syntax/workflow.dot:8  dot.syntax
+workflow.dot has ";" here, where spore expects a node ID.
+
+  8 │   build -> ;
+    │            ^
+
+To fix: check this line against the DOT spore reads: steps, arrows written with "->", and attributes in [brackets].
+
+1 problem in dot.syntax. Nothing was run.

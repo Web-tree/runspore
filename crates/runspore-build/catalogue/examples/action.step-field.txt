@@ -1,0 +1,10 @@
+── Step key on an action ── action.step-field/settings.json:8  action.step-field
+"input" is a key of a step, not of action "build".
+
+  7 │       "effect": "idempotent",
+  8 │       "input": { "target": "release" }
+    │       ^^^^^^^
+
+To fix: move it to the steps that run action "build", under "nodes".
+
+1 problem in release. Nothing was run.

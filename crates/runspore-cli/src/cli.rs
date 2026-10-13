@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
+use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
     validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner,
     StartOutcome,
@@ -61,7 +62,21 @@ pub enum Command {
     /// Create the project folder `.spore/` at the repository root.
     Init,
     /// Build a workflow and check it and its actions without touching the database.
-    Validate { workflow: PathBuf },
+    /// Reports every problem at once.
+    Validate {
+        workflow: PathBuf,
+        /// One line per problem: `file:line:col: code: message`.
+        #[arg(long)]
+        short: bool,
+        /// Fail on warnings too.
+        #[arg(long)]
+        strict: bool,
+        /// Apply the fixes marked safe, write the files, and check again.
+        #[arg(long)]
+        fix: bool,
+    },
+    /// Print the help page of a validation code, or list every code.
+    Explain { code: Option<String> },
     /// Build a workflow folder into its workflow artifact.
     Build {
         /// A workflow folder or its workflow.dot.
@@ -74,6 +89,9 @@ pub enum Command {
         /// artifact in one file, exporting both worlds.
         #[arg(long)]
         composed: bool,
+        /// Fail on warnings too.
+        #[arg(long)]
+        strict: bool,
     },
     /// Print an artifact's manifest and package, or a file a run's artifact holds. For
     /// debugging; not a stable interface.
@@ -160,6 +178,9 @@ pub struct Fail {
     pub message: String,
     /// Structured details for JSON mode, such as the errors of `output.invalid`.
     pub details: Option<Value>,
+    /// Text mode prints this instead of the one line `spore: <code>: <message>`: the
+    /// report of a workflow that did not build.
+    pub report: Option<String>,
 }
 
 impl Fail {
@@ -169,6 +190,7 @@ impl Fail {
             code: code.to_string(),
             message: message.into(),
             details: None,
+            report: None,
         }
     }
 
@@ -178,8 +200,26 @@ impl Fail {
             code: code.to_string(),
             message: message.into(),
             details: None,
+            report: None,
         }
     }
+
+    /// A workflow folder with problems: `workflow.invalid`, the report in text mode,
+    /// its diagnostics as `details` in JSON mode.
+    fn rejected(report: &Report) -> Self {
+        Self {
+            exit: 2,
+            code: "workflow.invalid".to_string(),
+            message: report.count(),
+            details: Some(report.json()),
+            report: Some(report.text(&short_command(report))),
+        }
+    }
+}
+
+/// How the report says to list every problem.
+fn short_command(report: &Report) -> String {
+    format!("spore validate --short {}", report.folder)
 }
 
 /// An artifact that does not load is the caller's to fix: exit 2.
@@ -222,6 +262,8 @@ pub struct Output {
     pub text: String,
     /// Bytes printed as they are instead of `text`.
     pub raw: Option<Vec<u8>>,
+    /// Text mode prints this on stderr first: `validate`'s diagnostics.
+    pub stderr: String,
     pub exit: u8,
 }
 
@@ -230,8 +272,18 @@ fn done(json: Value, text: String) -> Result<Output, Fail> {
         json,
         text,
         raw: None,
+        stderr: String::new(),
         exit: 0,
     })
+}
+
+/// Text mode shows a workflow's warnings on stderr before a command goes on.
+fn warn(cli: &Cli, report: Option<&Report>) {
+    if let (false, Some(report)) = (cli.json, report) {
+        if report.warnings() > 0 {
+            eprint!("{}", report.text(&short_command(report)));
+        }
+    }
 }
 
 pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
@@ -244,16 +296,31 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Start(args) | Command::Run(args) => Some(StartRequest::read(args, &db, &cwd)?),
         _ => None,
     };
+    if let Some(request) = &request {
+        warn(cli, request.source.report.as_ref());
+    }
     match &cli.command {
         Command::Init => return project::init(&cwd),
-        Command::Validate { workflow } => {
-            return validate(cli, &project::workflow(workflow, &cwd)?)
+        Command::Validate {
+            workflow,
+            short,
+            strict,
+            fix,
+        } => {
+            let options = Check {
+                short: *short,
+                strict: *strict,
+                fix: *fix,
+            };
+            return validate(cli, &project::workflow(workflow, &cwd)?, options);
         }
+        Command::Explain { code } => return explain(code.as_deref()),
         Command::Build {
             folder,
             output,
             composed,
-        } => return build(cli, folder, output.as_deref(), *composed),
+            strict,
+        } => return build(cli, folder, output.as_deref(), *composed, *strict),
         Command::Inspect {
             artifact: Some(path),
             ..
@@ -297,6 +364,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     match &cli.command {
         Command::Init
         | Command::Validate { .. }
+        | Command::Explain { .. }
         | Command::Build { .. }
         | Command::Start(_)
         | Command::Run(_) => unreachable!("handled above"),
@@ -317,6 +385,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
                 json: json!({"interrupted": true}),
                 text: "worker stopped".into(),
                 raw: None,
+                stderr: String::new(),
                 exit: EXIT_INTERRUPTED,
             })
         }
@@ -433,13 +502,145 @@ fn registry() -> ActivityRegistry {
     ActivityRegistry::with_builtins(NativeRunner::new())
 }
 
-/// Validation opens no database: it runs the checks of `start` against no store.
-fn validate(cli: &Cli, workflow: &Path) -> Result<Output, Fail> {
-    let source = Source::read(workflow)?;
-    let package = source.validate(cli)?;
+/// The options of `validate`.
+struct Check {
+    short: bool,
+    strict: bool,
+    fix: bool,
+}
+
+/// Validation opens no database: it runs the checks of `start` against no store. A
+/// folder gets every problem at once, on stderr; stdout says only that it is valid. An
+/// artifact is checked as `start` checks it, and any other file is refused as `start`
+/// refuses it.
+fn validate(cli: &Cli, workflow: &Path, options: Check) -> Result<Output, Fail> {
+    let folder = match runspore_build::entry(workflow).map_err(build_fail)? {
+        runspore_build::Entry::Folder(folder) => folder,
+        runspore_build::Entry::Document(_) => {
+            let source = Source::read(workflow)?;
+            let package = source.validate(cli)?;
+            return done(
+                json!({"valid": true, "problems": "0", "warnings": "0", "diagnostics": [],
+                       "packageBytes": package.len().to_string()}),
+                format!("{} is valid", workflow.display()),
+            );
+        }
+    };
+    let machine = Machine::here();
+    let mut checked = runspore_build::check(&folder, &machine).map_err(build_fail)?;
+    let mut fixed = Vec::new();
+    let mut messages = String::new();
+    if options.fix {
+        let applied = checked.report.apply(Applicability::Safe);
+        for (path, content) in [
+            (runspore_build::DOT_FILE, &applied.dot),
+            (runspore_build::SETTINGS_FILE, &applied.settings),
+        ] {
+            if let Some(content) = content {
+                let target = folder.join(path);
+                std::fs::write(&target, content).map_err(|e| {
+                    Fail::internal("file.unwritable", format!("{}: {e}", target.display()))
+                })?;
+            }
+        }
+        for (code, file, _) in &applied.changes {
+            fixed.push(json!({"code": code, "file": checked.report.path_of(*file)}));
+        }
+        if !applied.changes.is_empty() {
+            messages.push_str(&applied.text(&checked.report));
+            checked = runspore_build::check(&folder, &machine).map_err(build_fail)?;
+        }
+    }
+    let (report, package) = kernel_check(cli, &folder, checked)?;
+    let failed = report.problems() > 0 || (options.strict && report.warnings() > 0);
+    let mut json = report.json();
+    json["valid"] = json!(!failed);
+    if options.fix {
+        json["fixed"] = json!(fixed);
+    }
+    if let (false, Some(package)) = (failed, &package) {
+        json["packageBytes"] = json!(package.len().to_string());
+    }
+    if options.short {
+        messages.push_str(&report.short());
+    } else if !report.diagnostics.is_empty() {
+        messages.push_str(&report.text(&short_command(&report)));
+    }
+    let text = if failed {
+        String::new()
+    } else {
+        format!("{} is valid", workflow.display())
+    };
+    Ok(Output {
+        json,
+        text,
+        raw: None,
+        stderr: messages,
+        exit: if failed { 2 } else { 0 },
+    })
+}
+
+/// The kernel's own checks of a folder the build accepted. A refusal means the build
+/// missed a check: the report says so and asks for a bug report, in place of the
+/// kernel's own words.
+fn kernel_check(
+    cli: &Cli,
+    folder: &Path,
+    checked: runspore_build::Checked,
+) -> Result<(Report, Option<Vec<u8>>), Fail> {
+    let mut report = checked.report;
+    let Some(built) = checked.built else {
+        return Ok((report, None));
+    };
+    let sealed = built.seal().map_err(build_fail)?;
+    let artifact = load(&sealed.bytes, folder)?;
+    let limits = EngineConfig::default().limits;
+    match validate_workflow(&*reducer(cli)?, &registry(), limits, &artifact.package) {
+        Ok(package) => Ok((report, Some(package))),
+        Err(HostError::Store(f)) => Err(Fail::internal(&f.code, f.message.clone())),
+        Err(_) => {
+            report.add(missed_check());
+            Ok((report, None))
+        }
+    }
+}
+
+/// The diagnostic of a package the build accepted and the kernel refused.
+fn missed_check() -> runspore_build::Diagnostic {
+    runspore_build::Diagnostic::new(
+        "spore.missed-check",
+        runspore_build::diagnostic::At::dot_line(1),
+    )
+}
+
+/// `spore explain [<code>]`: one code's page, or every code with its title.
+fn explain(code: Option<&str>) -> Result<Output, Fail> {
+    let catalogue = runspore_build::catalogue::catalogue();
+    let Some(code) = code else {
+        let mut entries: Vec<_> = catalogue.entries.iter().collect();
+        entries.sort_by(|a, b| a.code.cmp(&b.code));
+        let text: String = entries
+            .iter()
+            .map(|e| format!("{:<32} {:<8} {}\n", e.code, e.severity.as_str(), e.title))
+            .collect();
+        let json: Vec<Value> = entries
+            .iter()
+            .map(|e| json!({"code": e.code, "severity": e.severity.as_str(), "title": e.title}))
+            .collect();
+        return done(json!({"codes": json}), text);
+    };
+    let entry = catalogue.get(code).ok_or_else(|| {
+        Fail::usage(
+            "explain.unknown-code",
+            format!("spore gives no code {code}; `spore explain` lists the codes it gives"),
+        )
+    })?;
+    let page = runspore_build::explain(code).unwrap_or_default();
     done(
-        json!({"valid": true, "packageBytes": package.len().to_string()}),
-        format!("{} is valid", workflow.display()),
+        json!({"code": entry.code, "severity": entry.severity.as_str(), "title": entry.title,
+               "page": page,
+               "docs": format!("{}/{}.md", runspore_build::catalogue::DOCS, entry.code)}),
+        page,
     )
 }
 
@@ -466,7 +667,13 @@ fn missing_database(command: &Command, db: &Path) -> Result<Output, Fail> {
 /// Builds a folder, checks it as `validate` does, and writes its artifact: the
 /// workflow artifact, or with `composed` the composed artifact holding the kernel too
 /// (spec/artifact.md §7).
-fn build(cli: &Cli, folder: &Path, output: Option<&Path>, composed: bool) -> Result<Output, Fail> {
+fn build(
+    cli: &Cli,
+    folder: &Path,
+    output: Option<&Path>,
+    composed: bool,
+    strict: bool,
+) -> Result<Output, Fail> {
     let folder = match runspore_build::entry(folder).map_err(build_fail)? {
         runspore_build::Entry::Folder(folder) => folder,
         runspore_build::Entry::Document(path) => {
@@ -481,6 +688,12 @@ fn build(cli: &Cli, folder: &Path, output: Option<&Path>, composed: bool) -> Res
         }
     };
     let source = Source::folder(&folder)?;
+    if let Some(report) = &source.report {
+        if strict && report.warnings() > 0 {
+            return Err(Fail::rejected(report));
+        }
+    }
+    warn(cli, source.report.as_ref());
     source.validate(cli)?;
     let artifact = source.artifact;
     // The kernel a composed artifact carries: the one this binary runs.
@@ -577,6 +790,7 @@ async fn inspect_file(engine: &Engine, run: &str, path: &str) -> Result<Output, 
                      "digest": entry.digest, "text": String::from_utf8(content.clone()).ok()}),
         text: String::new(),
         raw: Some(content),
+        stderr: String::new(),
         exit: 0,
     })
 }
@@ -690,6 +904,7 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
         text: view::status_text(&view, &arrival, package.as_ref(), &invocations),
         json,
         raw: None,
+        stderr: String::new(),
         exit,
     })
 }
@@ -801,11 +1016,13 @@ fn load(bytes: &[u8], origin: &Path) -> Result<Artifact, Fail> {
 /// The WebAssembly magic bytes that start every artifact.
 const WASM_MAGIC: &[u8] = b"\0asm";
 
-/// The workflow a command was given, as the artifact it builds to or is, and the
-/// folder or artifact file it came from.
+/// The workflow a command was given, as the artifact it builds to or is, the folder
+/// or artifact file it came from, and for a folder the report of its build (its
+/// warnings).
 struct Source {
     artifact: Artifact,
     origin: PathBuf,
+    report: Option<Report>,
 }
 
 impl Source {
@@ -832,19 +1049,24 @@ impl Source {
                 Ok(Self {
                     artifact: load(&bytes, &path)?,
                     origin: path,
+                    report: None,
                 })
             }
         }
     }
 
-    /// Builds the folder in memory and loads its artifact like a prebuilt one.
+    /// Builds the folder in memory and loads its artifact like a prebuilt one. A folder
+    /// with problems is refused with every one of them.
     fn folder(folder: &Path) -> Result<Self, Fail> {
-        let sealed = runspore_build::build(folder)
-            .and_then(|built| built.seal())
-            .map_err(build_fail)?;
+        let checked = runspore_build::check(folder, &Machine::here()).map_err(build_fail)?;
+        let Some(built) = checked.built else {
+            return Err(Fail::rejected(&checked.report));
+        };
+        let sealed = built.seal().map_err(build_fail)?;
         Ok(Self {
             artifact: load(&sealed.bytes, folder)?,
             origin: folder.to_path_buf(),
+            report: Some(checked.report),
         })
     }
 
@@ -865,9 +1087,17 @@ impl Source {
 
     /// A rejection of a package names the folder or artifact file it came from. A
     /// rejection of the run's input (`input.invalid`) is about the input, not the
-    /// workflow, and names neither.
+    /// workflow, and names neither. The kernel refusing a folder the build accepted is
+    /// a check the build missed.
     fn fail(&self, e: HostError) -> Fail {
         let about_input = matches!(e, HostError::InputInvalid(_));
+        let about_workflow = matches!(&e, HostError::Invalid { .. } | HostError::Kernel(_))
+            && (e.code().starts_with("workflow.") || e.code().starts_with("action."));
+        if let (Some(report), true) = (&self.report, about_workflow) {
+            let mut report = report.clone();
+            report.add(missed_check());
+            return Fail::rejected(&report);
+        }
         let mut fail = Fail::from(e);
         if fail.exit == 2 && !about_input {
             fail.message = format!("{}: {}", self.origin.display(), fail.message);

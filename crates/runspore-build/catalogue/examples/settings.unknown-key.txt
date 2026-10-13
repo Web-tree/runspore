@@ -1,0 +1,10 @@
+── Unknown key ────────────────── settings.unknown-key/settings.json:8  settings.unknown-key
+There is no key "priority" in "actions" → "build".
+
+  7 │       "effect": "idempotent",
+  8 │       "priority": 3
+    │       ^^^^^^^^^^
+
+To fix: remove it; the keys allowed here are "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "kind" | "outcomes" | "output" | "retry" | "timeoutMs".
+
+1 problem in release. Nothing was run.

@@ -1,0 +1,9 @@
+── Workflow name with other characters ── dot.bad-name/workflow.dot:1  dot.bad-name
+The workflow name "nightly release" in workflow.dot has characters a name cannot have; it may use letters, digits, ".", "_" and "-".
+
+  1 │ digraph "nightly release" {
+    │         ^^^^^^^^^^^^^^^^^
+
+To fix: rename it to "nightly-release".
+
+1 problem in nightly release. Nothing was run.

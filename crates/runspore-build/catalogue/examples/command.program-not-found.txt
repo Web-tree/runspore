@@ -1,0 +1,10 @@
+── Program not found (warning) ── command.program-not-found/settings.json:6  command.program-not-found
+Program "mkae" of action "build" is not on this machine's PATH.
+
+  6 │       "argv": ["mkae"],
+    │                ^^^^^^
+
+To fix: install it, or name it by its full path.
+Why: the run may happen on another machine, so this is only a warning.
+
+1 warning in release.

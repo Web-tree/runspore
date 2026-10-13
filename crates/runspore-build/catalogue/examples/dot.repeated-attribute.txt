@@ -1,0 +1,9 @@
+── Attribute given twice ── dot.repeated-attribute/workflow.dot:4  dot.repeated-attribute
+Attribute "start" is given twice in workflow.dot.
+
+  4 │   start   = "build";
+    │   ^^^^^
+
+To fix: keep one of them.
+
+1 problem in release. Nothing was run.

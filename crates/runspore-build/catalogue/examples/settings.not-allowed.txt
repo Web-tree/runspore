@@ -1,0 +1,9 @@
+── Value not allowed ────────────────── settings.not-allowed/settings.json:8  settings.not-allowed
+"stdout" at "actions" → "build" → "output" is not one of the values allowed there.
+
+  8 │       "output": "stdout"
+    │                 ^^^^^^^^
+
+To fix: use one of "text" | "json" | "result" | "none".
+
+1 problem in release. Nothing was run.

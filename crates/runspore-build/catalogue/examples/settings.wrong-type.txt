@@ -1,0 +1,9 @@
+── Wrong type ────────────────── settings.wrong-type/settings.json:6  settings.wrong-type
+"make test" at "actions" → "build" → "argv" is a string, and it must be a list.
+
+  6 │       "argv": "make test",
+    │               ^^^^^^^^^^^
+
+To fix: write a list here.
+
+1 problem in release. Nothing was run.

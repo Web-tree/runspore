@@ -1,0 +1,9 @@
+── Schema file that is not JSON ── schema.file-not-json/settings.json:11  schema.file-not-json
+The schema file "schemas/result.json" for "ok" on step "build" is not JSON that spore can read.
+
+ 11 │     "build": { "action": "build", "outputSchemas": { "ok": "schemas/result.json" } }
+    │                                                            ^^^^^^^^^^^^^^^^^^^^^
+
+To fix: make it a JSON object, with whole numbers only.
+
+1 problem in release. Nothing was run.

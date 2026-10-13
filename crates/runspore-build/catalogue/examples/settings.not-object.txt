@@ -1,0 +1,9 @@
+── Settings that are not an object ── settings.not-object/settings.json:1  settings.not-object
+settings.json holds ["build"], and it must hold one JSON object.
+
+  1 │ ["build"]
+    │ ^^^^^^^^^
+
+To fix: write the settings as one object, with "format", "actions" and "nodes".
+
+1 problem in release. Nothing was run.

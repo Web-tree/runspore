@@ -1,0 +1,9 @@
+── Not an outcome name ── dot.bad-outcome/workflow.dot:8  dot.bad-outcome
+The arrow outcome "ok,red" in workflow.dot is not one outcome name; an outcome has lowercase letters, digits and "-".
+
+  8 │   build -> done [on="ok,red"];
+    │                     ^^^^^^^^
+
+To fix: draw one arrow per outcome, each with one name.
+
+1 problem in release. Nothing was run.

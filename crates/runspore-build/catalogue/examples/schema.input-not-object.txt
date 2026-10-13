@@ -1,0 +1,10 @@
+── Input schema that is not an object ── schema.input-not-object/settings.json:3  schema.input-not-object
+The input schema of "release" does not have "type": "object" at its root.
+
+  3 │   "inputSchema": { "type": "string" },
+    │                            ^^^^^^^^
+
+To fix: give its root "type": "object".
+Why: A run's input is a JSON object, its fields named, so steps can read them.
+
+1 problem in release. Nothing was run.

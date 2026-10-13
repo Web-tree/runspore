@@ -184,6 +184,7 @@ pub fn init(cwd: &Path) -> Result<Output, Fail> {
         json: json!({"root": root, "created": created}),
         text,
         raw: None,
+        stderr: String::new(),
         exit: 0,
     })
 }

@@ -1,0 +1,9 @@
+── Action name with other characters ── action.bad-name/settings.json:4  action.bad-name
+Action "make all" has a name spore cannot use; an action name has letters, digits, "_" and "-", at most 64.
+
+  4 │     "make all": {
+    │     ^^^^^^^^^^
+
+To fix: rename it, and every "action" that names it.
+
+1 problem in release. Nothing was run.

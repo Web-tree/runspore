@@ -1,0 +1,9 @@
+── "$get" with another key ── mapping.get-extra-key/settings.json:13  mapping.get-extra-key
+The "$get" object in step "build" also has "fallback", and it may have only "$get" and "default".
+
+ 13 │       "input": { "repo": { "$get": ["input", "repo"], "fallback": "shop" } }
+    │                                                       ^^^^^^^^^^
+
+To fix: remove "fallback", or put the object inside "$literal".
+
+1 problem in release. Nothing was run.

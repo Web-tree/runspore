@@ -1,0 +1,10 @@
+── One signal, two schemas ── node.signal-schemas-differ/settings.json:20  node.signal-schemas-differ
+Steps "approve" and "recheck" wait for the signal "approval" with different schemas for "approved".
+
+ 20 │       "outputSchemas": { "approved": { "type": "object" } }
+    │                          ^^^^^^^^^^
+
+To fix: give both steps the same schema for "approved".
+Why: a signal goes to whichever step waits for it, so its data must fit both.
+
+1 problem in release. Nothing was run.

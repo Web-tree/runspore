@@ -1,0 +1,9 @@
+digraph "release" {
+  dialect = "runspore/0.2";
+  start   = "biuld";
+
+  build [label="Build the release"];
+  done  [kind="complete"];
+
+  build -> done;
+}

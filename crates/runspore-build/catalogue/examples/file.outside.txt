@@ -1,0 +1,10 @@
+── File outside the folder ── file.outside/settings.json:11  file.outside
+"../build.md" leads outside the workflow folder.
+
+ 11 │     "build": { "action": "build", "instructions": "../build.md" }
+    │                                                   ^^^^^^^^^^^^^
+
+To fix: copy the file into the workflow folder, and name it there.
+Why: the workflow artifact seals the folder's files, so a run sees the same files wherever it runs.
+
+1 problem in release. Nothing was run.

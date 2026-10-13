@@ -1,0 +1,12 @@
+{
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" }
+  }
+}

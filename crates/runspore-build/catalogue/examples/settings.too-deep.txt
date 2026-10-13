@@ -1,0 +1,9 @@
+── Nested too deep ────────────────── settings.too-deep/settings.json:42  settings.too-deep
+"nodes" → "build" → "input" has values nested deeper than the 32 levels a package may hold.
+
+ 42 │                                                                 "a": { "a": "x" }
+    │                                                                      ^^^^^^^^^^^^
+
+To fix: flatten it.
+
+1 problem in release. Nothing was run.

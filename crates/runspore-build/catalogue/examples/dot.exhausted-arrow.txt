@@ -1,0 +1,9 @@
+── Arrow for "exhausted" without a loop limit ── dot.exhausted-arrow/workflow.dot:10  dot.exhausted-arrow
+Step "build" has an arrow for "exhausted", but no loop limit that could run out.
+
+ 10 │   build -> broken [on="exhausted"];
+    │   ^^^^^^^^^^^^^^^
+
+To fix: add "loopLimits" to step "build" in settings.json, or remove the arrow.
+
+1 problem in release. Nothing was run.

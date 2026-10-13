@@ -56,10 +56,10 @@ without regard to case, as in Graphviz.
 | `kind` | node | no, default `activity` | `activity`, `await-signal`, `complete` or `fail` |
 | `on` | edge | no, default `ok` | One outcome: `[a-z0-9][a-z0-9-]{0,63}`, `failed` or `exhausted` |
 
-`dialect` is checked before any other rule: a missing or unknown dialect is the first
-error the build reports. `runspore/0.2` is the only dialect this version reads; a
-folder marked `runspore/0.1` is refused with the fix (change the dialect line, and
-`format` in `settings.json`).
+`dialect` is checked before any other rule: a missing or unknown dialect is the only
+problem the build reports, since nothing after it can be read. `runspore/0.2` is the
+only dialect this version reads; a folder marked `runspore/0.1` is refused with the fix
+(change the dialect line, and `format` in `settings.json`).
 
 `label` is render-only and never carries meaning. An edge routes one outcome; to
 route two outcomes to one node, draw two edges. `on="failed"` routes a failure of the
@@ -95,6 +95,7 @@ required. Node IDs match `[A-Za-z0-9_-]{1,64}`. A graph has at most 256 nodes.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
+| `$schema` | no | The address of the settings' JSON Schema, for editors; build-only |
 | `format` | yes | `runspore.workflow/0.2`; must agree with the dialect |
 | `limits` | no | The package's `limits` |
 | `actions` | no | The package's `actions`, each optionally with `assets` |
@@ -103,6 +104,16 @@ required. Node IDs match `[A-Za-z0-9_-]{1,64}`. A graph has at most 256 nodes.
 
 `name`, `start`, a node's `kind` and its `outcomes` come from `workflow.dot` and are
 not allowed here. Any other top-level field is an error.
+
+The shape of `settings.json` is the JSON Schema (2020-12) generated from the build's
+own Rust types, published at
+`https://raw.githubusercontent.com/Web-tree/runspore/main/spec/settings.schema.json`
+([settings.schema.json](settings.schema.json)). `settings.json` may name it as
+`"$schema"` so that an editor completes and checks it; the build checks every file
+against the same schema whether or not it does. An action takes only the fields the
+schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, and per kind: for
+`command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
+`native`, `function`), so a misspelt field is a problem rather than ignored.
 
 The fields a node may carry depend on its kind in the DOT:
 
@@ -184,9 +195,10 @@ it becomes an entry of each. No reference may name `workflow.dot` or `settings.j
 6. Produce the package: `format`, `name` and `start` from the files above, `limits`,
    `actions` and `inputSchema` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
-   `on` to its target. The package then passes the kernel's validation (kernel.md
-   §2) like any other, including W12 (loop limits), W14 (every node is reachable
-   from `start`) and W15 (an end is reachable from every node).
+   `on` to its target. The build checks every rule of the kernel's validation
+   (kernel.md §2, W01 to W15) and the host's checks of each action itself, and words
+   each problem with its own code (§6). The package then passes the kernel's
+   validation like any other; a refusal there is a check the build missed (§6).
 7. Seal the artifact: the canonical package bytes as `main`, `workflow.dot` and
    `settings.json` as `source` entries, and the entries of step 5, each with its
    bytes, its blob digest and `executable` when the file had an execute bit
@@ -196,23 +208,78 @@ it becomes an entry of each. No reference may name `workflow.dot` or `settings.j
    composed artifact (artifact.md §7). The artifact inside is the one step 7 sealed,
    byte for byte.
 
-## 6. Errors
+## 6. Diagnostics
 
-A build error is reported with exit code 2 and names the file and line:
-`<folder>/workflow.dot:<line>: <message>` or `<folder>/settings.json:<line>:
-<message>`. An error that concerns both files (a node in one and not the other, a
-format that disagrees with the dialect) names both. An error found by the kernel's
-validation after the build names the folder.
+The build reports **every problem at once**, as diagnostics, and builds the package
+only when there is none. A diagnostic is values, not text:
 
-| Code | Cause |
+- a **code**, such as `action.no-effect`;
+- a **place**: a JSON Pointer into `settings.json`, or a line and column of
+  `workflow.dot` (or of `settings.json`, for what no pointer names, such as a key given
+  twice);
+- named **arguments** of five kinds: `input` (the author's value at a pointer, quoted
+  from the file), `key` (the key at a pointer), `place` (a pointer, shown as
+  `"actions" → "upload"`), `computed` (a value the check worked out, such as the
+  closest name) and `code` (text in the author's language, such as a DOT line);
+- **fixes**: concrete edits (set the value at a pointer; remove, rename or replace the
+  member at a pointer; or replace a range of text), each with an applicability:
+  `safe` (cannot change what the workflow means beyond fixing the problem),
+  `needs-review` (probably right; the author should look) or `needs-choice` (one of
+  several alternatives). The first fix is the example spore shows.
+
+The words come from the catalogue, `crates/runspore-build/catalogue/catalogue.toml`:
+one entry per code with its severity (`problem` or `warning`), a title with no
+placeholders, a message, a fix, an optional why and explanation, and templates with
+`{name}` placeholders and no logic. `{action}`, `{step}`, `{file}` and `{workflow}` are
+filled from the place. Wording a template cannot express is another code. Every code
+has an example folder under `catalogue/examples/`, its expected text output, and the
+folder after its first fix under `catalogue/fixed/<code>/`; `spore explain <code>`
+shows them, and `docs/codes/<code>.md` is generated from them. The catalogue's tests
+check that every placeholder is declared and used, that every message quotes something
+of the author's (or, for an absence, says so), that each example gives exactly its code
+and the codes its entry lists in `also`, that its first fix gives the fixed folder,
+and that every `safe` fix leaves no new problem.
+
+Rules:
+
+- **No follow-ons.** A check that depends on a broken part is skipped, so one mistake
+  gives one message: a missing arrow is not also an unreachable step, a misspelt key
+  is not also a missing one, an arrow whose outcome is not a name is not checked
+  against the action. Reachability (W14, W15) is checked only when `workflow.dot` and
+  the arrows have no problem.
+- **The dialect stops the build.** A missing or unknown dialect is the only problem
+  reported (§3). A syntax error stops the reading of `workflow.dot`; `settings.json`
+  is still checked on its own.
+- **No kernel wording.** No message contains the kernel's or the host's words, a rule
+  number such as `W07`, or a Rust type or field error. A package the build accepted
+  and the kernel refused is `spore.missed-check`: spore says it missed a check and
+  asks for a bug report.
+- **Typos and wrong places.** A key in the wrong place names where it belongs (a key of
+  an action under `nodes`, a key of a step on an action, `name` or `start` in the
+  settings). A misspelt key, step, action, start, attribute, kind or effect gets the
+  closest name as a `needs-review` fix.
+- **Warnings** are likely run-time mistakes that do not stop the build: an `argv[0]`
+  that holds spaces and names no existing file (`command.argv-spaces`; its split is
+  `safe` when the line has no quotes, `$`, globs, backslashes or other shell
+  characters, else `needs-review`), and a program not found on this machine's `PATH`
+  (`command.program-not-found`), since the run may happen on another machine.
+- A broken diagnostic (a pointer that does not resolve, a placeholder left empty, an
+  edit that does not apply) is shown as `spore.broken-message`, never dropped.
+
+The codes, by family; [docs/codes](../docs/codes/README.md) lists each one:
+
+| Family | What it covers |
 | --- | --- |
-| `workflow.folder` | The entry is neither a folder nor its `workflow.dot`, or a fixed file is missing |
-| `dot.dialect` | `dialect` missing or unknown, or `format` in `settings.json` disagrees with it |
-| `dot.syntax` | Outside the grammar of §2 |
-| `dot.attribute` | An unknown or misplaced attribute, one given twice, or a bad value |
-| `dot.graph` | A rule of §3 Names and limits or of §5 step 2; an outcome with no edge, or an edge for an outcome the action does not declare (§5 step 4) |
-| `settings.invalid` | `settings.json` is not JSON or not the shape of §4, or a node names an action `actions` does not define |
-| `settings.mismatch` | A node is in one file and missing from the other |
-| `settings.reference` | A file reference that is absolute, escapes the folder, names no file, or names `workflow.dot` or `settings.json` |
-| `settings.invalid` | Also: a `$outputSchemas` marker on a node with no `outputSchemas`, or not written as `{"$outputSchemas": {}}` |
-| `workflow.invalid-schema` | A schema file that is not JSON in the canonical domain, a schema outside the subset, too deep, too large or with a bad `$ref`, or an `inputSchema` whose root is not `"type": "object"` ([schema.md](schema.md)). The message names `nodes.<id>.outputSchemas.<outcome>` or `inputSchema`, the schema file when there is one, and the JSON Pointer of the keyword |
+| `dot.*` | `workflow.dot`: the dialect, its syntax, names, attributes, the start, arrows, and the arrows against the actions (including W08, W09, W12, W14, W15) |
+| `settings.*` | `settings.json`: JSON, values the package cannot hold, its shape against the schema, keys that are not steps |
+| `action.*`, `command.*` | Actions (W04, W07) and command actions |
+| `node.*` | Steps: the fields their kind takes, their action, signal, error, loop limits and output schemas (W11, W12, W13) |
+| `mapping.*`, `input.*` | Mappings (W10) and the `$outputSchemas` marker |
+| `schema.*` | Schema files, schemas outside the subset, and an `inputSchema` whose root is not `"type": "object"` ([schema.md](schema.md)) |
+| `file.*` | File references (§4) |
+| `spore.*` | spore itself: a missed check, a broken message |
+
+`workflow.folder` is not a diagnostic: an entry that is neither a folder nor its
+`workflow.dot`, or a folder without one of its two files, is refused before any check,
+with exit code 2. How `spore` shows diagnostics, and its exit codes, are in
+[cli.md](cli.md).

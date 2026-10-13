@@ -1,0 +1,9 @@
+── Old dialect ────────────────── dot.old-dialect/workflow.dot:2  dot.old-dialect
+workflow.dot is written in dialect "runspore/0.1", which this spore no longer reads.
+
+  2 │   dialect = "runspore/0.1";
+    │             ^^^^^^^^^^^^^^
+
+To fix: change the dialect to "runspore/0.2", and "format" in settings.json to "runspore.workflow/0.2".
+
+1 problem in dot.old-dialect. Nothing was run.

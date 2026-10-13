@@ -1,0 +1,9 @@
+── Step that cannot be reached ── dot.unreachable/workflow.dot:6  dot.unreachable
+Step "cleanup" can't be reached from the first step "build".
+
+  6 │   cleanup [label="Clean up"];
+    │   ^^^^^^^
+
+To fix: draw an arrow into it, or remove it.
+
+1 problem in release. Nothing was run.

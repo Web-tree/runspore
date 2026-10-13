@@ -1,0 +1,9 @@
+── Not an outcome name ── action.bad-outcome/settings.json:8  action.bad-outcome
+Outcome "Red" of action "build" is not an outcome name; an outcome has lowercase letters, digits and "-", and starts with a letter or digit.
+
+  8 │       "outcomes": ["ok", "Red"]
+    │                          ^^^^^
+
+To fix: rename it with those characters only.
+
+1 problem in release. Nothing was run.

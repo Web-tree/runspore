@@ -1,0 +1,9 @@
+── Key given twice ────────────────── settings.repeated-key/settings.json:8  settings.repeated-key
+"effect" is given twice in "actions" → "build", and JSON keeps only the last one.
+
+  8 │       "effect": "idempotent"
+    │       ^^^^^^^^
+
+To fix: remove the one you do not want.
+
+1 problem in release. Nothing was run.

@@ -1,0 +1,14 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent",
+      "retry": {"maxAttempts": 3}
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" }
+  }
+}

@@ -1,0 +1,9 @@
+── Attribute in the wrong place ── dot.misplaced-attribute/workflow.dot:5  dot.misplaced-attribute
+Attribute "start" in workflow.dot belongs on the graph, not on a step.
+
+  5 │   build [label="Build the release", start="yes"];
+    │                                     ^^^^^
+
+To fix: move it to the graph.
+
+1 problem in release. Nothing was run.

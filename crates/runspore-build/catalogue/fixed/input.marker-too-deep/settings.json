@@ -1,0 +1,86 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "build": {
+      "action": "build",
+      "input": { "$outputSchemas": {} },
+      "outputSchemas": {
+        "ok": {
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "type": "object",
+                  "properties": {
+                    "a": {
+                      "type": "object",
+                      "properties": {
+                        "a": {
+                          "type": "object",
+                          "properties": {
+                            "a": {
+                              "type": "object",
+                              "properties": {
+                                "a": {
+                                  "type": "object",
+                                  "properties": {
+                                    "a": {
+                                      "type": "object",
+                                      "properties": {
+                                        "a": {
+                                          "type": "object",
+                                          "properties": {
+                                            "a": {
+                                              "type": "object",
+                                              "properties": {
+                                                "a": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "a": {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "a": {
+                                                          "type": "object",
+                                                          "properties": {
+                                                            "a": {
+                                                              "type": "string"
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

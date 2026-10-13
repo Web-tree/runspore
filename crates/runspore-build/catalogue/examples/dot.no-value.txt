@@ -1,0 +1,9 @@
+── Attribute with no value ── dot.no-value/workflow.dot:5  dot.no-value
+Attribute "bold" in workflow.dot has no value.
+
+  5 │   build [label="Build the release", bold];
+    │                                     ^^^^
+
+To fix: give it one, as in bold="…".
+
+1 problem in dot.no-value. Nothing was run.

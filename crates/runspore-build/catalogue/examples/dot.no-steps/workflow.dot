@@ -1,0 +1,3 @@
+digraph "release" {
+  dialect = "runspore/0.2";
+}

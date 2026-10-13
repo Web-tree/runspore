@@ -1,0 +1,10 @@
+── DOT that spore does not read ── dot.unsupported/workflow.dot:8  dot.unsupported
+workflow.dot uses subgraphs, which spore does not read.
+
+  8 │   subgraph cluster_main { build -> done; }
+    │   ^^^^^^^^
+
+To fix: write it with what spore reads: steps, arrows written with "->", and attributes in [brackets].
+Why: spore reads a small part of DOT, so that every workflow.dot means one thing.
+
+1 problem in dot.unsupported. Nothing was run.

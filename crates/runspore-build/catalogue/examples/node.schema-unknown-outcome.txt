@@ -1,0 +1,9 @@
+── Schema for an outcome the step does not have ── node.schema-unknown-outcome/settings.json:14  node.schema-unknown-outcome
+Step "build" has a schema for "okay", an outcome it never ends with.
+
+ 14 │         "okay": {
+    │         ^^^^^^
+
+To fix: rename it to an outcome the step ends with, or remove it.
+
+1 problem in release. Nothing was run.

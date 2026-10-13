@@ -1,0 +1,9 @@
+── Backslash in a path ── file.backslash/settings.json:11  file.backslash
+"steps\\build.md" separates folders with a backslash.
+
+ 11 │     "build": { "action": "build", "instructions": "steps\\build.md" }
+    │                                                   ^^^^^^^^^^^^^^^^^
+
+To fix: separate folders with "/".
+
+1 problem in release. Nothing was run.

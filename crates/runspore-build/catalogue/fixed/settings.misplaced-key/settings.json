@@ -1,0 +1,19 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "dump": {
+      "kind": "command",
+      "argv": ["pg_dump --format=custom --file=backup.dump shop"],
+      "effect": "idempotent"
+    },
+    "upload": {
+      "kind": "command",
+      "argv": ["aws", "s3", "cp", "backup.dump", "s3://acme-backups/shop/latest.dump"],
+      "outcomes": ["ok"]
+    }
+  },
+  "nodes": {
+    "dump": { "action": "dump" },
+    "upload": { "action": "upload" }
+  }
+}

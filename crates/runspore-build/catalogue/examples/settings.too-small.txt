@@ -1,0 +1,9 @@
+── Number too small ────────────────── settings.too-small/settings.json:8  settings.too-small
+0 at "actions" → "build" → "retry" → "maxAttempts" is too small.
+
+  8 │       "retry": { "maxAttempts": 0 }
+    │                                 ^
+
+To fix: use 1 or more.
+
+1 problem in release. Nothing was run.

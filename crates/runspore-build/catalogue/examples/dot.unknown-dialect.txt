@@ -1,0 +1,9 @@
+── Unknown dialect ────────────────── dot.unknown-dialect/workflow.dot:2  dot.unknown-dialect
+workflow.dot is written in dialect "runspore/2", which this spore does not know.
+
+  2 │   dialect = "runspore/2";
+    │             ^^^^^^^^^^^^
+
+To fix: change it to "runspore/0.2", the dialect this spore reads.
+
+1 problem in dot.unknown-dialect. Nothing was run.

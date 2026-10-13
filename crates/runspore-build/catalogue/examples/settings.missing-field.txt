@@ -1,0 +1,9 @@
+── Missing key ────────────────── settings.missing-field/settings.json:12  settings.missing-field
+This object in settings.json needs "message".
+
+ 12 │     "broken": { "error": { "code": "build.broken" } }
+    │                 ^^^^^^^
+
+To fix: add "message".
+
+1 problem in release. Nothing was run.

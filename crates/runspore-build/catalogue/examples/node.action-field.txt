@@ -1,0 +1,9 @@
+── Action key on a step ── node.action-field/settings.json:11  node.action-field
+"timeoutMs" is a key of an action, not of step "build".
+
+ 11 │     "build": { "action": "build", "timeoutMs": "600000" }
+    │                                   ^^^^^^^^^^^
+
+To fix: move it into the action that step "build" runs, under "actions".
+
+1 problem in release. Nothing was run.

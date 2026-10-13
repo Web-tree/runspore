@@ -1,0 +1,16 @@
+{
+  "format": "runspore.workflow/0.2",
+  "limits": {
+    "maxVisitsPerNode": 1000
+  },
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" }
+  }
+}

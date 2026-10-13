@@ -1,0 +1,9 @@
+── Unknown native function ── action.unknown-function/settings.json:6  action.unknown-function
+Action "build" calls the native function "build", which this spore does not have.
+
+  6 │       "function": "build",
+    │                   ^^^^^^^
+
+To fix: run a program instead, with "kind": "command" and "argv".
+
+1 problem in release. Nothing was run.

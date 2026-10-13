@@ -1,0 +1,9 @@
+── Reference to workflow.dot or settings.json ── file.fixed-name/settings.json:11  file.fixed-name
+"workflow.dot" names a file every build already includes.
+
+ 11 │     "build": { "action": "build", "instructions": "workflow.dot" }
+    │                                                   ^^^^^^^^^^^^^^
+
+To fix: name another file.
+
+1 problem in release. Nothing was run.
