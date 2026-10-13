@@ -221,8 +221,9 @@ spore: input.invalid: the input does not fit the workflow's inputSchema
 In JSON mode the error object carries `details`:
 `{"errors": [{"path": "/task", "message": "required, but missing"}, …]}`. An
 `inputSchema` whose root is not `"type": "object"` is refused by `validate`, `start`
-and `run` with `workflow.invalid-schema`, like any schema outside the subset. A
-workflow without `inputSchema` accepts any input.
+and `run`: in a folder as the diagnostic `schema.input-not-object` (beside
+`schema.input-outside-subset` for one outside the subset), in an artifact with
+`workflow.invalid-schema`. A workflow without `inputSchema` accepts any input.
 
 ## Project folder (0.2)
 
