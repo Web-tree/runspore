@@ -1,7 +1,9 @@
 //! `spec/schema.md`: the subset, the authoring form, the minimum size, and the check of
 //! data with its error format.
 
-use runspore_schema::{check, fit, inline, shown, smallest, validate, ROOT_LEVEL};
+use runspore_schema::{
+    check, check_input, fit, fit_input, inline, shown, smallest, validate, ROOT_LEVEL,
+};
 use serde_json::{json, Value};
 
 fn refused(schema: Value) -> (String, String) {
@@ -329,4 +331,54 @@ fn a_misfit_carries_the_outcome_and_its_errors() {
         &json!({"requests": [{"file": "a", "change": "b"}]})
     )
     .is_ok());
+}
+
+/// An input schema (spec/schema.md §4): the subset at the package's second level, with
+/// an object root.
+#[test]
+fn an_input_schema_needs_an_object_root() {
+    let task = json!({"type": "object", "required": ["task"], "properties": {
+        "task": {"type": "string", "description": "What should this run build or fix?"}}});
+    check_input(&task).unwrap();
+    for root in [
+        json!({"type": "string"}),
+        json!({"anyOf": [{"type": "object"}]}),
+        json!({}),
+    ] {
+        let e = check_input(&root).unwrap_err();
+        assert_eq!(e.path, "/type", "{root}");
+        assert!(
+            e.message
+                .contains("an input schema's root must be `\"type\": \"object\"`"),
+            "{root}: {}",
+            e.message
+        );
+    }
+    // The subset still applies, with its own paths.
+    let e = check_input(&json!({"type": "object", "properties": {"t": {"type": "number"}}}))
+        .unwrap_err();
+    assert_eq!(e.path, "/properties/t/type");
+    // The root is level 2, so 15 nested properties reach level 31 and 16 reach 33.
+    check_input(&nested(15)).unwrap();
+    assert!(check_input(&nested(16)).is_err());
+}
+
+#[test]
+fn an_input_misfit_carries_its_errors() {
+    let schema = json!({"type": "object", "required": ["task", "branch"],
+        "properties": {"task": {"type": "string"}, "branch": {"type": "string"}}});
+    let misfit = fit_input(&schema, &json!({"branch": 7})).unwrap_err();
+    assert_eq!(
+        misfit.details(),
+        json!({"errors": [
+            {"path": "/task", "message": "required, but missing"},
+            {"path": "/branch", "message": "expected type \"string\", got integer (7)"}]})
+    );
+    assert_eq!(
+        misfit.to_string(),
+        "the input does not fit the workflow's inputSchema\n\
+         /task: required, but missing\n\
+         /branch: expected type \"string\", got integer (7)"
+    );
+    assert!(fit_input(&schema, &json!({"task": "t", "branch": "b"})).is_ok());
 }
