@@ -1,7 +1,8 @@
-//! Output schemas through the compiled binary (spec/schema.md, spec/cli.md): the build
-//! inlines schema files, `$ref`s and the `$outputSchemas` marker; a command whose output
-//! does not fit is stuck with `output.invalid`; a signal or a resolution whose data does
-//! not fit exits 2 and records nothing.
+//! Schemas through the compiled binary (spec/schema.md, spec/cli.md): the build inlines
+//! schema files, `$ref`s and the `$outputSchemas` marker; a command whose output does
+//! not fit is stuck with `output.invalid`; a signal or a resolution whose data does not
+//! fit exits 2 and records nothing; `start` refuses input that does not fit the
+//! workflow's `inputSchema` with `input.invalid` and creates nothing.
 
 mod common;
 
@@ -60,6 +61,135 @@ fn folder(name: &str) -> Dir {
     dir
 }
 
+/// An input schema in the authoring form: a `task` the run must be given.
+const INPUT: &str = r##"{
+  "$defs": {"text": {"type": "string", "minLength": 1}},
+  "type": "object",
+  "properties": {"task": {"$ref": "#/$defs/text", "description": "What should this run build or fix?"}},
+  "required": ["task"],
+  "additionalProperties": false
+}
+"##;
+
+/// Points the folder's settings at `schemas/input.json` as its `inputSchema`.
+fn declare_input_schema(dir: &Dir) {
+    let settings = dir.file("flow/settings.json");
+    let text = std::fs::read_to_string(&settings).unwrap();
+    assert!(text.contains("\"format\": \"runspore.workflow/0.2\","));
+    let text = text.replacen(
+        "\"format\": \"runspore.workflow/0.2\",",
+        "\"format\": \"runspore.workflow/0.2\",\n  \"inputSchema\": \"schemas/input.json\",",
+        1,
+    );
+    std::fs::write(settings, text).unwrap();
+}
+
+/// spec/schema.md §4, spec/cli.md: the build inlines the input schema into the package,
+/// so the digest covers it; `start` refuses input that does not fit with exit 2 and
+/// creates nothing; a root that is not an object is `workflow.invalid-schema`.
+#[test]
+fn start_checks_the_input_against_the_input_schema() {
+    let dir = folder("schemas-input");
+    std::fs::write(dir.file("flow/schemas/input.json"), INPUT).unwrap();
+    let plain = dir.run(&args(&["--json", "build", "flow"]));
+    assert_eq!(plain.code(), Some(0), "{}", plain.stdout);
+    declare_input_schema(&dir);
+    let built = dir.run(&args(&["--json", "build", "flow"]));
+    assert_eq!(built.code(), Some(0), "{}", built.stdout);
+    assert_ne!(
+        built.json()["packageDigest"],
+        plain.json()["packageDigest"],
+        "inputSchema is covered by the package digest"
+    );
+    let shown = dir.run(&args(&["--json", "inspect", "flow.wasm"])).json();
+    assert_eq!(
+        shown["package"]["inputSchema"],
+        json!({"type": "object", "additionalProperties": false, "required": ["task"],
+               "properties": {"task": {"type": "string", "minLength": 1,
+                                       "description": "What should this run build or fix?"}}}),
+        "the file is read and its $ref inlined"
+    );
+    let entries = shown["manifest"]["entries"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e["path"] == "schemas/input.json" && e["kind"] == "source"),
+        "{entries:?}"
+    );
+
+    // Input that does not fit: exit 2, the failing paths, and no run or database.
+    let refused = dir.run(&args(&[
+        "--json",
+        "start",
+        "flow",
+        "--key",
+        "k",
+        "--input",
+        "{\"task\": 7, \"x\": 1}",
+    ]));
+    assert_eq!(refused.code(), Some(2), "{}", refused.stdout);
+    let error = refused.json()["error"].clone();
+    assert_eq!(error["code"], "input.invalid");
+    assert_eq!(
+        error["details"],
+        json!({"errors": [
+            {"path": "/task", "message": "expected type \"string\", got integer (7)"},
+            {"path": "/x", "message": "not allowed; allowed properties: task"}]})
+    );
+    assert!(
+        !dir.file("runspore.db").exists(),
+        "a refused start creates nothing"
+    );
+    // No input is `{}`, which misses the required `task`.
+    let missing = dir.run(&args(&["start", "flow", "--key", "k"]));
+    assert_eq!(missing.code(), Some(2));
+    assert_eq!(
+        missing.stderr,
+        "spore: input.invalid: the input does not fit the workflow's inputSchema\n\
+         /task: required, but missing\n"
+    );
+    assert!(!dir.file("runspore.db").exists());
+    // An artifact carries the schema too.
+    let artifact = dir.run(&args(&["--json", "start", "flow.wasm", "--key", "k"]));
+    assert_eq!(
+        artifact.json()["error"]["code"],
+        "input.invalid",
+        "{}",
+        artifact.stdout
+    );
+
+    // Input that fits starts the run.
+    let started = dir.run(&args(&[
+        "--json",
+        "start",
+        "flow",
+        "--key",
+        "k",
+        "--input",
+        "{\"task\": \"write the tests\"}",
+    ]));
+    assert_eq!(started.code(), Some(0), "{}", started.stdout);
+    assert_eq!(started.json()["created"], true);
+
+    // A root that is not an object is refused at build time, naming the file.
+    std::fs::write(
+        dir.file("flow/schemas/input.json"),
+        "{\"type\": \"string\"}\n",
+    )
+    .unwrap();
+    let bad = dir.run(&args(&["--json", "validate", "flow"]));
+    let error = bad.json()["error"].clone();
+    assert_eq!(
+        (bad.code(), error["code"].as_str()),
+        (Some(2), Some("workflow.invalid-schema"))
+    );
+    assert_eq!(
+        error["message"],
+        "flow/settings.json:3: inputSchema (schemas/input.json): /type: an input schema's \
+         root must be `\"type\": \"object\"`"
+    );
+}
+
 /// The repository's own workflow folders under `.spore/workflows`.
 fn dogfood(name: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -68,7 +198,8 @@ fn dogfood(name: &str) -> String {
 }
 
 /// The build's checkpoints declare the shape of a `changes` answer; spore holds
-/// `work/build-0-2/bin/answer` to it. No step runs: nothing works the run.
+/// `work/build-0-2/bin/answer` to it. The `ticket` workflow declares the input a run
+/// needs, so a start without a ticket is refused. No step runs: nothing works the run.
 #[test]
 fn the_build_checks_checkpoint_answers() {
     let dir = Dir::new("schemas-dogfood");
@@ -76,6 +207,18 @@ fn the_build_checks_checkpoint_answers() {
         let valid = dir.run(&args(&["--json", "validate", &dogfood(name)]));
         assert_eq!(valid.code(), Some(0), "{name}: {}", valid.stdout);
     }
+    let no_ticket = dir.run(&args(&[
+        "--json",
+        "start",
+        &dogfood("ticket"),
+        "--key",
+        "t",
+    ]));
+    assert_eq!(no_ticket.code(), Some(2), "{}", no_ticket.stdout);
+    assert_eq!(
+        no_ticket.json()["error"]["details"],
+        json!({"errors": [{"path": "/ticket", "message": "required, but missing"}]})
+    );
     let build = dogfood("build-0-2");
     let started = dir.run(&args(&["--json", "start", &build, "--key", "build-0-2"]));
     let run = started.json()["runId"].as_str().unwrap().to_string();

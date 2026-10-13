@@ -1,8 +1,10 @@
-//! Output schemas (`spec/schema.md`): the JSON Schema subset a workflow may declare
-//! per outcome, the checks of a schema itself, and the check of a step's data.
+//! Schemas (`spec/schema.md`): the JSON Schema subset a workflow may declare per
+//! outcome and for a run's input, the checks of a schema itself, and the check of a
+//! step's data or a run's input.
 //!
 //! Shared by the build, which inlines `$ref`s and checks schemas, and the host, which
-//! checks schemas in `validate_workflow` and checks every result against them.
+//! checks schemas in `validate_workflow`, every result against its outcome's schema,
+//! and a run's input against the input schema when the run starts.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -13,6 +15,8 @@ use serde_json::{Map, Value};
 /// The level of a schema's root object in a package: the package, `nodes`, the node,
 /// `outputSchemas`, the schema.
 pub const ROOT_LEVEL: usize = 5;
+/// The level of the input schema's root object in a package: the package, the schema.
+pub const INPUT_LEVEL: usize = 2;
 /// The largest result a step may report, in bytes; a schema must admit a smaller value.
 pub const MAX_RESULT_BYTES: u64 = 65_536;
 /// The most errors one check reports.
@@ -24,6 +28,8 @@ pub const MAX_BOUND: i64 = 65_536;
 pub const INVALID_SCHEMA: &str = "workflow.invalid-schema";
 /// The error code of data that does not fit its schema.
 pub const OUTPUT_INVALID: &str = "output.invalid";
+/// The error code of a run's input that does not fit the workflow's input schema.
+pub const INPUT_INVALID: &str = "input.invalid";
 
 const TYPES: [&str; 6] = ["object", "array", "string", "integer", "boolean", "null"];
 const ANNOTATIONS: [&str; 2] = ["description", "title"];
@@ -100,6 +106,42 @@ impl fmt::Display for Misfit {
 }
 
 impl std::error::Error for Misfit {}
+
+/// A run's input refused: `input.invalid` with details `{errors}` (spec/schema.md §4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputMisfit {
+    pub errors: Vec<DataError>,
+}
+
+impl InputMisfit {
+    /// One line naming what was checked.
+    pub fn summary(&self) -> &'static str {
+        "the input does not fit the workflow's inputSchema"
+    }
+
+    /// The details of an `input.invalid` error.
+    pub fn details(&self) -> Value {
+        let errors = self
+            .errors
+            .iter()
+            .map(|e| serde_json::json!({"path": e.path, "message": e.message}))
+            .collect();
+        serde_json::json!({"errors": Value::Array(errors)})
+    }
+}
+
+/// The summary, then one error per line.
+impl fmt::Display for InputMisfit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.summary())?;
+        for error in &self.errors {
+            write!(f, "\n{error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for InputMisfit {}
 
 /// A path as people read it: `(root)` for the whole value.
 pub fn shown(path: &str) -> &str {
@@ -274,6 +316,19 @@ pub fn check(schema: &Value, level: usize) -> Result<(), SchemaError> {
         ));
     }
     Ok(())
+}
+
+/// Checks an input schema (spec/schema.md §4): the subset at [`INPUT_LEVEL`], and a
+/// root of `"type": "object"`, so a run's input always has named fields.
+pub fn check_input(schema: &Value) -> Result<(), SchemaError> {
+    check(schema, INPUT_LEVEL)?;
+    match schema.get("type") {
+        Some(Value::String(t)) if t == "object" => Ok(()),
+        _ => Err(error(
+            "/type",
+            "an input schema's root must be `\"type\": \"object\"`",
+        )),
+    }
 }
 
 fn error(path: &str, message: impl Into<String>) -> SchemaError {
@@ -552,6 +607,16 @@ pub fn fit(outcome: &str, schema: &Value, data: &Value) -> Result<(), Misfit> {
             outcome: outcome.to_string(),
             errors,
         })
+    }
+}
+
+/// Checks a run's input against the workflow's input schema.
+pub fn fit_input(schema: &Value, input: &Value) -> Result<(), InputMisfit> {
+    let errors = validate(schema, input);
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(InputMisfit { errors })
     }
 }
 

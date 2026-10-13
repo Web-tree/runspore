@@ -84,6 +84,14 @@ pub struct Workflow {
     #[serde(default)]
     pub actions: BTreeMap<String, Value>,
     pub nodes: BTreeMap<String, Node>,
+    /// 0.2: the schema a run's input must fit (`spec/schema.md` §4). The kernel never
+    /// reads it; hosts check the input when a run starts, and the schema itself.
+    #[serde(
+        default,
+        rename = "inputSchema",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub input_schema: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

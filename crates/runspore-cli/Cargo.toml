@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 runspore-types.workspace = true
 runspore-kernel.workspace = true
+runspore-schema.workspace = true
 runspore-build = { path = "../runspore-build" }
 runspore-host = { path = "../runspore-host" }
 runspore-store-sqlite = { path = "../runspore-store-sqlite" }

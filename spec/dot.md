@@ -99,6 +99,7 @@ required. Node IDs match `[A-Za-z0-9_-]{1,64}`. A graph has at most 256 nodes.
 | `limits` | no | The package's `limits` |
 | `actions` | no | The package's `actions`, each optionally with `assets` |
 | `nodes` | no | Per node ID, the node's non-routing fields |
+| `inputSchema` | no | The package's `inputSchema`: the shape a run's input must have ([schema.md](schema.md) §4) |
 
 `name`, `start`, a node's `kind` and its `outcomes` come from `workflow.dot` and are
 not allowed here. Any other top-level field is an error.
@@ -125,6 +126,12 @@ Either may use the authoring form, `$defs` and `$ref` (schema.md §2). The build
 every schema into the package in its package form: read from its file, every `$ref`
 inlined, checked against the subset. The package never holds a path or a `$ref`;
 the manifest records each schema file as a `source` entry.
+
+`inputSchema` is written the same way: one schema inline, or a file reference to a
+JSON file holding one, either in the authoring form. The build puts it into the
+package in its package form, checked against the subset at its place (the second
+level) and for an object root (schema.md §4). A run started from the artifact has its
+input checked against it; a folder without one accepts any input.
 
 An `activity` node's `input` may hold the marker `{"$outputSchemas": {}}` wherever a
 mapping is evaluated: as the input itself, or inside its plain objects and arrays,
@@ -169,12 +176,13 @@ it becomes an entry of each. No reference may name `workflow.dot` or `settings.j
 5. Check and strip the file references, and collect the files they name: each
    `instructions` file as an `instructions` entry owned by its node, each asset and
    each `./` probe, watch and stop program as an `asset` entry owned by its action,
-   each schema file as a `source` entry. Read each `outputSchemas` file, inline the
-   `$ref`s and check every schema against the subset at its place in the package
-   (schema.md §1); then replace each `$outputSchemas` marker, checking that the copy
-   still fits the package's depth limit where it lands.
-6. Produce the package: `format`, `name` and `start` from the files above, `limits`
-   and `actions` from the settings, and each node as its DOT `kind`, its settings
+   each schema file as a `source` entry. Read each `outputSchemas` file and the
+   `inputSchema` file, inline the `$ref`s and check every schema against the subset
+   at its place in the package (schema.md §1), the input schema also for its object
+   root (schema.md §4); then replace each `$outputSchemas` marker, checking that the
+   copy still fits the package's depth limit where it lands.
+6. Produce the package: `format`, `name` and `start` from the files above, `limits`,
+   `actions` and `inputSchema` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
    `on` to its target. The package then passes the kernel's validation (kernel.md
    §2) like any other, including W12 (loop limits), W14 (every node is reachable
@@ -207,4 +215,4 @@ validation after the build names the folder.
 | `settings.mismatch` | A node is in one file and missing from the other |
 | `settings.reference` | A file reference that is absolute, escapes the folder, names no file, or names `workflow.dot` or `settings.json` |
 | `settings.invalid` | Also: a `$outputSchemas` marker on a node with no `outputSchemas`, or not written as `{"$outputSchemas": {}}` |
-| `workflow.invalid-schema` | A schema file that is not JSON in the canonical domain, or a schema outside the subset, too deep, too large or with a bad `$ref` ([schema.md](schema.md)). The message names `nodes.<id>.outputSchemas.<outcome>`, the schema file when there is one, and the JSON Pointer of the keyword |
+| `workflow.invalid-schema` | A schema file that is not JSON in the canonical domain, a schema outside the subset, too deep, too large or with a bad `$ref`, or an `inputSchema` whose root is not `"type": "object"` ([schema.md](schema.md)). The message names `nodes.<id>.outputSchemas.<outcome>` or `inputSchema`, the schema file when there is one, and the JSON Pointer of the keyword |

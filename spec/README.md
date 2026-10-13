@@ -26,6 +26,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 | Graph | `activity`, `await-signal`, `complete`, `fail`; routing by named outcome; bounded loops through back edges |
 | Data | Run input, latest result per node, `$get` projection and `$literal` in mappings |
 | Output schemas | 0.2: a schema per outcome on a node; every result, signal and resolution checked against it |
+| Input schema | 0.2: one schema per workflow, part of the package; a run's input is checked against it when the run starts |
 | Effects | `pure`, `read-only`, `idempotent` repeat after an unknown outcome; `unsafe` pauses for an operator |
 | Stuck steps | 0.2: a step that gives up with no `failed` route pauses the run for a person, who retries, completes or fails it |
 | Loop limits | 0.2: `loopLimits` bounds how many times in a row a step routes an outcome; the next one takes the step's `exhausted` edge. Every node is reachable from the start, and an end from every node |
@@ -86,7 +87,7 @@ crates/runspore-wasmtime      Reducer implemented by running that component
 crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
 crates/runspore-build         Build: workflow folder (DOT and settings) to package and workflow artifact
-crates/runspore-schema        Output schemas: the subset, its checks, data checks
+crates/runspore-schema        Schemas: the subset, its checks, data checks for outputs and input
 crates/runspore-cli           the spore binary and crash-recovery tests
 conformance/traces            golden kernel traces
 conformance/js                Node and Bun trace runners

@@ -1,4 +1,4 @@
-use runspore_schema::Misfit;
+use runspore_schema::{InputMisfit, Misfit};
 use runspore_types::reducer::Failure;
 use runspore_types::store::StoreFailure;
 
@@ -18,6 +18,10 @@ pub enum HostError {
     /// recorded.
     #[error("output.invalid: {0}")]
     OutputInvalid(Misfit),
+    /// `input.invalid`: a run's input that does not fit the workflow's `inputSchema`;
+    /// no run was created.
+    #[error("input.invalid: {0}")]
+    InputInvalid(InputMisfit),
 }
 
 impl HostError {
@@ -35,6 +39,7 @@ impl HostError {
             Self::Kernel(f) => &f.code,
             Self::Invalid { code, .. } => code,
             Self::OutputInvalid(_) => runspore_schema::OUTPUT_INVALID,
+            Self::InputInvalid(_) => runspore_schema::INPUT_INVALID,
         }
     }
 }

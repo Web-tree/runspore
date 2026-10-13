@@ -1103,6 +1103,7 @@ dependencies = [
  "runspore-build",
  "runspore-host",
  "runspore-kernel",
+ "runspore-schema",
  "runspore-store-sqlite",
  "runspore-types",
  "runspore-wasmtime",

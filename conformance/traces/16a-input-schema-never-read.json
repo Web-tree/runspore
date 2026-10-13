@@ -1,0 +1,92 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "input-schema-never-read",
+  "description": "A 0.2 document carries inputSchema; the kernel never reads it: a run whose input does not fit (task is an integer, branch is missing) starts exactly as one whose input fits (hosts check the input before the run is created).",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {"description": "The branch to work on.", "type": "string"},
+        "task": {
+          "description": "What this run should build or fix.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": ["task", "branch"],
+      "type": "object"
+    },
+    "name": "input-schema-never-read",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
+      "work": {
+        "action": "work",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"task": 7}, "runId": "run_input_schema", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"task": 7},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "work/1",
+            "attempt": 1,
+            "inputDigest": "sha256:c6299312e06476bee3707d848dbe04c07d46d9e63fcb36ab52f8cde293d91ea2",
+            "invocationId": "inv_325db3b5d06cb17ab5c2c358ada67030",
+            "nodeId": "work",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "work/1", "nodeId": "work", "visit": 1},
+          "result": null,
+          "runId": "run_input_schema",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:c640a124d25017040487fac262148ebb58f8d96468c4a41670453c4e20631968",
+        "commands": [
+          {
+            "commandId": "cmd_a8e0a448d6248555233c906fa57bfcb6",
+            "activationId": "work/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "work/1",
+              "attempt": 1,
+              "effectKey": "inv_325db3b5d06cb17ab5c2c358ada67030",
+              "input": {"task": 7},
+              "invocationId": "inv_325db3b5d06cb17ab5c2c358ada67030",
+              "nodeId": "work",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:b36daca39884eda6c1312226a462728e9714ea810e7e7a6394534d628b73953e"
+      }
+    }
+  ]
+}

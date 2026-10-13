@@ -31,6 +31,7 @@ The rules marked 0.2 so far:
 | `from` as a path's first step; `default` beside `$get` | §4, W10 | documents in format `runspore.workflow/0.2`, under either semantics |
 | A step that cannot recover is stuck and waits for a person instead of failing the run | §3, §7.3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
 | Nodes may carry `outputSchemas`, which no transition reads | §2, W01, W13 | documents in format `runspore.workflow/0.2`, under either semantics |
+| The document may carry `inputSchema`, which no transition reads | §2, W01 | documents in format `runspore.workflow/0.2`, under either semantics |
 | Loop limits: `loopLimits`, the reserved outcome `exhausted`, `streaks`, *Route* | §2 (W07–W09, W12), §3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
 | Every node is reachable from `start`, and an end from every node | §2 (W14, W15) | documents in format `runspore.workflow/0.2`, under either semantics |
 
@@ -112,7 +113,8 @@ of their IDs; the first violation is reported.
 A violation is `invalid-input` / `workflow.invalid`; its details name the node. An
 action with effect `reconcilable` is `incompatible-version` /
 `workflow.unsupported-effect`, checked as part of W07. In a `runspore.workflow/0.1`
-document, a node that carries `outputSchemas` violates W01.
+document, a node that carries `outputSchemas`, or a document that carries
+`inputSchema`, violates W01.
 
 `loopLimits` is an object from outcome to integer: `"loopLimits": {"red": 3}` lets the
 node route `red` at most 3 times in a row; the next `red` takes the node's `exhausted`
@@ -136,6 +138,15 @@ before it is recorded ([host.md](host.md) §2, §3) and check the schemas themse
 against the subset (`workflow.invalid-schema`). `{"$outputSchemas": {}}` left in a
 mapping is a `$` key, so W10 already refuses it. `exhausted` takes no schema: the
 output it records is the real result's, which fits that outcome's schema.
+
+**Input schema (0.2).** A `runspore.workflow/0.2` document may carry `inputSchema` at
+top level: a JSON object, the schema a run's input must fit ([schema.md](schema.md)
+§4). It is part of the document, so the package digest covers it: two workflows that
+differ only in their input schema are two packages. The kernel never reads it: a run
+whose input does not fit is started exactly as one whose input fits. Hosts check the
+input before the run is created ([host.md](host.md) §2) and check the schema itself
+(`workflow.invalid-schema`). A value that is not a JSON object does not decode as a
+workflow (`workflow.invalid`).
 
 ## 3. State
 

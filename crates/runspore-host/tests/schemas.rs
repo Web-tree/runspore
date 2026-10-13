@@ -216,3 +216,92 @@ async fn a_schema_outside_the_subset_is_refused_before_a_run_starts() {
     let good = workflow(true, json!({"type": "string"}));
     validate_workflow(&NativeReducer, &registry, Limits::default(), &good).unwrap();
 }
+
+/// The `work` workflow with `schema` as its `inputSchema`.
+fn with_input_schema(schema: Value) -> Vec<u8> {
+    let mut package: Value =
+        serde_json::from_slice(&workflow(true, json!({"type": "string"}))).unwrap();
+    package["inputSchema"] = schema;
+    serde_json::to_vec(&package).unwrap()
+}
+
+fn registry() -> ActivityRegistry {
+    ActivityRegistry::with_builtins(work(json!("x"), Arc::new(AtomicUsize::new(0))))
+}
+
+/// H21: `start` checks the input against the package's `inputSchema` before anything
+/// is created; a package without one accepts any input.
+#[tokio::test]
+async fn start_checks_the_input_against_the_input_schema() {
+    let package = with_input_schema(json!({
+        "type": "object", "required": ["task"], "additionalProperties": false,
+        "properties": {"task": {"type": "string", "minLength": 1,
+                                "description": "What should this run build or fix?"}}
+    }));
+    validate_workflow(&NativeReducer, &registry(), Limits::default(), &package).unwrap();
+    let engine = engine("schemas-input", json!("x"), Arc::new(AtomicUsize::new(0)));
+
+    let refused = engine
+        .start(&package, json!({"task": "", "extra": 1}), "k")
+        .await;
+    let Err(HostError::InputInvalid(misfit)) = refused else {
+        panic!("accepted: {refused:?}");
+    };
+    let paths: Vec<&str> = misfit.errors.iter().map(|e| e.path.as_str()).collect();
+    assert_eq!(paths, ["/extra", "/task"]);
+    assert_eq!(
+        misfit.errors[1].message,
+        "expected at least 1 characters, got 0"
+    );
+    let missing = engine.start(&package, Value::Null, "k").await;
+    assert_eq!(missing.unwrap_err().code(), "input.invalid");
+    let runs = engine.list_runs(None, 10).await.unwrap();
+    assert!(runs.items.is_empty(), "a refused start creates nothing");
+
+    let started = engine
+        .start(&package, json!({"task": "t"}), "k")
+        .await
+        .unwrap();
+    assert!(started.created);
+    let plain = workflow(true, json!({"type": "string"}));
+    engine.start(&plain, Value::Null, "k2").await.unwrap();
+}
+
+/// H21: an `inputSchema` whose root is not an object is refused like any schema
+/// outside the subset, by `validate_workflow` and by `start`.
+#[tokio::test]
+async fn an_input_schema_root_must_be_an_object() {
+    let engine = engine(
+        "schemas-input-root",
+        json!("x"),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    for root in [
+        json!({"type": "string"}),
+        json!({"anyOf": [{"type": "object"}]}),
+    ] {
+        let bad = with_input_schema(root.clone());
+        let refused = validate_workflow(&NativeReducer, &registry(), Limits::default(), &bad);
+        let Err(HostError::Invalid { code, message }) = refused else {
+            panic!("accepted {root}: {refused:?}");
+        };
+        assert_eq!(code, "workflow.invalid-schema");
+        assert_eq!(
+            message,
+            "inputSchema: /type: an input schema's root must be `\"type\": \"object\"`"
+        );
+        let started = engine.start(&bad, json!({}), "k").await;
+        assert_eq!(started.unwrap_err().code(), "workflow.invalid-schema");
+    }
+    let subset =
+        with_input_schema(json!({"type": "object", "properties": {"n": {"type": "number"}}}));
+    let refused = validate_workflow(&NativeReducer, &registry(), Limits::default(), &subset);
+    let Err(HostError::Invalid { code, message }) = refused else {
+        panic!("accepted: {refused:?}");
+    };
+    assert_eq!(code, "workflow.invalid-schema");
+    assert!(
+        message.starts_with("inputSchema: /properties/n/type: "),
+        "{message}"
+    );
+}
