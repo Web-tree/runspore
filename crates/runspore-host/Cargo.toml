@@ -12,6 +12,7 @@ homepage.workspace = true
 [dependencies]
 runspore-types.workspace = true
 runspore-schema.workspace = true
+runspore-wasmtime = { path = "../runspore-wasmtime" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,10 +26,10 @@ libproc = "0.14.11"
 sysctl = "0.7.1"
 
 [dev-dependencies]
+runspore-build = { path = "../runspore-build" }
 runspore-store-sqlite = { path = "../runspore-store-sqlite" }
 runspore-store-conformance = { path = "../runspore-store-conformance" }
 runspore-kernel.workspace = true
-runspore-wasmtime = { path = "../runspore-wasmtime" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [lints]

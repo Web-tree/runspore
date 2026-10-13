@@ -9,6 +9,7 @@ mod arrival;
 mod command;
 mod engine;
 mod error;
+mod files;
 pub mod guard;
 pub mod process;
 
@@ -18,5 +19,9 @@ pub use activity::{
 };
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
-pub use engine::{validate_workflow, Engine, EngineConfig, RunIds, StartOutcome, TickReport};
+pub use engine::{
+    validate_workflow, Engine, EngineConfig, RunIds, StartOutcome, TickReport, ARTIFACT_UNREADABLE,
+    FILES_DIR_MISSING, FILES_UNWRITABLE,
+};
 pub use error::HostError;
+pub use files::StepFiles;

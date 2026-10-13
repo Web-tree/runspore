@@ -339,9 +339,26 @@ impl ActivityRunner for CommandRunner {
             if let Some(db) = &ctx.db {
                 command.env("RUNSPORE_DB", db);
             }
+            // After `env` too; one the step lacks is removed, so a value the worker
+            // inherited never reaches it.
+            let files = ctx.files.as_ref();
+            let instructions = files.and_then(|f| f.instructions.as_ref());
+            for (name, value) in [
+                ("RUNSPORE_STEP_FILES", files.map(|f| &f.dir)),
+                ("RUNSPORE_INSTRUCTIONS", instructions),
+                ("RUNSPORE_WORK_DIR", ctx.work_dir.as_ref()),
+            ] {
+                match value {
+                    Some(path) => command.env(name, path),
+                    None => command.env_remove(name),
+                };
+            }
         };
-        let mut guarded = match Guarded::spawn(&ctx.guard, ctx.stop_grace, &spec.argv, setup).await
-        {
+        let mut argv = spec.argv.clone();
+        if let Some(program) = ctx.files.as_ref().and_then(|f| f.program(&argv[0])) {
+            argv[0] = program.to_string_lossy().into_owned();
+        }
+        let mut guarded = match Guarded::spawn(&ctx.guard, ctx.stop_grace, &argv, setup).await {
             Ok(guarded) => guarded,
             Err(e) => return failure("command.spawn", e, Value::Null, true),
         };

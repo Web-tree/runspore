@@ -1,12 +1,14 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
+use std::fs::File;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use runspore_types::artifact::Artifact;
+use nix::fcntl::Flock;
+use runspore_types::artifact::{Artifact, Manifest};
 use runspore_types::canonical;
 use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
@@ -16,6 +18,7 @@ use runspore_types::model::{
 };
 use runspore_types::reducer::{Envelope, Identity, Limits, Reducer, TransitionRequest};
 use runspore_types::store::*;
+use runspore_wasmtime::ArtifactReader;
 use serde_json::{json, Map, Value};
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinSet;
@@ -23,8 +26,18 @@ use tokio::task::JoinSet;
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::arrival::{Arrival, Trail};
 use crate::error::HostError;
+use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
 use crate::process::{self, Leftover};
+
+/// Quarantine code of a run whose stored artifact cannot be read.
+pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
+/// Refusal and quarantine code of an artifact with files on an engine without `files_dir`.
+pub const FILES_DIR_MISSING: &str = "host.files-dir-missing";
+/// Quarantine code of a run whose step files or work folder cannot be written.
+pub const FILES_UNWRITABLE: &str = "host.files-unwritable";
+/// How often the sweep looks for step files no unfinished run needs.
+const FILES_SWEEP_EVERY: Duration = Duration::from_secs(30);
 
 /// Engine settings. Defaults are those of the host specification.
 #[derive(Debug, Clone)]
@@ -50,6 +63,9 @@ pub struct EngineConfig {
     /// The executable whose guard mode runs in front of every command; by default this
     /// process's own. Its `main` must call `guard::main_if_requested` first.
     pub guard: PathBuf,
+    /// Where step files and work folders go. Required for a workflow artifact that
+    /// declares files; without it, steps get neither.
+    pub files_dir: Option<PathBuf>,
 }
 
 impl Default for EngineConfig {
@@ -69,6 +85,7 @@ impl Default for EngineConfig {
             run_ids: RunIds::random(),
             stop_grace_ms: DEFAULT_STOP_GRACE_MS,
             guard: guard::own_executable(),
+            files_dir: None,
         }
     }
 }
@@ -171,6 +188,30 @@ struct Runnable {
     package: Arc<Package>,
 }
 
+/// What `dispatch` did with a due invocation.
+enum Dispatched {
+    Started,
+    Quarantined,
+    Not,
+}
+
+/// What a due invocation is given before it is claimed: its step files, its work
+/// folder, and the artifact's lock, held shared until the try ends.
+#[derive(Default)]
+struct Delivery {
+    files: Option<StepFiles>,
+    work_dir: Option<PathBuf>,
+    _lock: Option<Flock<File>>,
+}
+
+/// Why a due invocation is not claimed.
+enum Undeliverable {
+    /// The run was quarantined instead.
+    Quarantined,
+    /// Nothing to do now: the run or its invocation is gone.
+    Skip,
+}
+
 /// Why a claimed attempt cannot start.
 enum Unrunnable {
     /// The run or its package could not be read. Nothing is reported: the lease
@@ -234,6 +275,11 @@ struct Inner {
     nonce: String,
     counter: AtomicU64,
     packages: Mutex<HashMap<String, Arc<Package>>>,
+    /// Manifests of stored artifacts, by artifact digest.
+    manifests: Mutex<HashMap<String, Arc<Manifest>>>,
+    files: Option<FilesDir>,
+    /// When the sweep last looked at the step files.
+    files_swept: Mutex<Option<Instant>>,
     inflight: Mutex<HashSet<(RunKey, String)>>,
     tasks: Mutex<JoinSet<()>>,
     settled: Notify,
@@ -436,10 +482,13 @@ impl Engine {
                 store,
                 reducer,
                 activities,
+                files: config.files_dir.as_deref().map(FilesDir::new),
                 config,
                 nonce: process_nonce(),
                 counter: AtomicU64::new(0),
                 packages: Mutex::new(HashMap::new()),
+                manifests: Mutex::new(HashMap::new()),
+                files_swept: Mutex::new(None),
                 inflight: Mutex::new(HashSet::new()),
                 tasks: Mutex::new(JoinSet::new()),
                 settled: Notify::new(),
@@ -477,6 +526,12 @@ impl Engine {
         input: Value,
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
+        if self.inner.files.is_none() && files::declares_files(&artifact.manifest) {
+            return Err(HostError::invalid(
+                FILES_DIR_MISSING,
+                "the workflow declares instructions or assets, and the engine has no files_dir",
+            ));
+        }
         let stored = StoredArtifact {
             digest: artifact.digest.clone(),
             bytes: artifact.bytes.clone(),
@@ -809,6 +864,7 @@ impl Engine {
                 }
             }
         }
+        inner.sweep_files().await;
         let mut cursor = None;
         loop {
             let page = retry(false, || inner.store.scan_ready(cursor.clone(), PAGE)).await?;
@@ -828,8 +884,10 @@ impl Engine {
                 break;
             }
             if let DueItem::Outbox { key, invocation_id } = item {
-                if Inner::dispatch(inner, key, invocation_id).await? {
-                    report.dispatched += 1;
+                match Inner::dispatch(inner, key, invocation_id).await? {
+                    Dispatched::Started => report.dispatched += 1,
+                    Dispatched::Quarantined => report.quarantined += 1,
+                    Dispatched::Not => {}
                 }
             }
         }
@@ -1014,14 +1072,26 @@ impl Inner {
     }
 
     async fn quarantine(&self, turn: &Turn, code: &str, details: &str) -> Result<(), HostError> {
+        self.quarantine_at(&turn.key, turn.revision, code, details)
+            .await
+    }
+
+    /// Quarantines the run at `revision`; a run that has moved on is left alone.
+    async fn quarantine_at(
+        &self,
+        key: &RunKey,
+        revision: u64,
+        code: &str,
+        details: &str,
+    ) -> Result<(), HostError> {
         let request = QuarantineRun {
             mutation: mutation(
                 "quarantine_run",
-                self.unique(&format!("quarantine/{}", turn.revision)),
-                json!([turn.key, turn.revision, code, details]),
+                self.unique(&format!("quarantine/{revision}")),
+                json!([key, revision, code, details]),
             )?,
-            key: turn.key.clone(),
-            expected_revision: turn.revision,
+            key: key.clone(),
+            expected_revision: revision,
             code: code.to_string(),
             details: details.to_string(),
         };
@@ -1135,17 +1205,22 @@ impl Inner {
         Ok(())
     }
 
-    /// Claims one due invocation and starts its attempt in the background, unless the
-    /// engine is shutting down.
+    /// Gives one due invocation its files, claims it and starts its attempt in the
+    /// background, unless the engine is shutting down.
     async fn dispatch(
         this: &Arc<Self>,
         key: RunKey,
         invocation_id: String,
-    ) -> Result<bool, HostError> {
+    ) -> Result<Dispatched, HostError> {
         let slot = (key.clone(), invocation_id.clone());
         if this.closing.load(Ordering::SeqCst) || lock(&this.inflight).contains(&slot) {
-            return Ok(false);
+            return Ok(Dispatched::Not);
         }
+        let delivery = match this.deliver(&key, &invocation_id).await? {
+            Ok(delivery) => delivery,
+            Err(Undeliverable::Quarantined) => return Ok(Dispatched::Quarantined),
+            Err(Undeliverable::Skip) => return Ok(Dispatched::Not),
+        };
         let request = ClaimAttempt {
             mutation: mutation(
                 "claim_attempt",
@@ -1165,7 +1240,7 @@ impl Inner {
         let receipt = match retry(true, || this.store.claim_attempt(request.clone())).await {
             Ok(receipt) => receipt,
             Err(f) if matches!(f.kind, StoreFailureKind::Conflict | StoreFailureKind::Stale) => {
-                return Ok(false)
+                return Ok(Dispatched::Not)
             }
             Err(f) => return Err(f.into()),
         };
@@ -1173,21 +1248,176 @@ impl Inner {
         if receipt.disposition == Disposition::Duplicate {
             match this.heartbeat(&claim.attempt).await {
                 Ok(hb) if hb.disposition == Disposition::Applied => {}
-                _ => return Ok(false),
+                _ => return Ok(Dispatched::Not),
             }
         }
         lock(&this.inflight).insert(slot.clone());
         let task = this.clone();
         lock(&this.tasks).spawn(async move {
-            task.attempt(claim).await;
+            task.attempt(claim, delivery).await;
             lock(&task.inflight).remove(&slot);
             task.settled.notify_waiters();
         });
-        Ok(true)
+        Ok(Dispatched::Started)
+    }
+
+    /// The step files and work folder of a due invocation (host §3, Step files and
+    /// work folders): checked, or made again, before every dispatch. A run whose files
+    /// cannot be made is quarantined.
+    async fn deliver(
+        &self,
+        key: &RunKey,
+        invocation_id: &str,
+    ) -> Result<Result<Delivery, Undeliverable>, HostError> {
+        if self.files.is_none() {
+            // Nothing to deliver; `resolve_action` catches an artifact with files.
+            return Ok(Ok(Delivery::default()));
+        }
+        let Some(view) = retry(false, || self.store.get_run(key)).await? else {
+            return Ok(Err(Undeliverable::Skip));
+        };
+        let invocations = retry(false, || self.store.list_invocations(key)).await?;
+        let Some(invocation) = invocations
+            .iter()
+            .find(|i| i.invocation_id == invocation_id)
+        else {
+            return Ok(Err(Undeliverable::Skip));
+        };
+        match self.make_files(&view, invocation).await {
+            Ok(delivery) => Ok(Ok(delivery)),
+            Err(unmade) => self.undeliverable(&view, unmade).await.map(Err),
+        }
+    }
+
+    async fn undeliverable(
+        &self,
+        view: &RunView,
+        unmade: Unmade,
+    ) -> Result<Undeliverable, HostError> {
+        let (code, details) = match unmade {
+            Unmade::Unreadable(details) => (ARTIFACT_UNREADABLE, details),
+            Unmade::Unwritable(details) => (FILES_UNWRITABLE, details),
+            Unmade::DirMissing => (
+                FILES_DIR_MISSING,
+                "the run's workflow declares files, and the engine has no files_dir".into(),
+            ),
+        };
+        self.quarantine_at(&view.key, view.revision, code, &details)
+            .await?;
+        Ok(Undeliverable::Quarantined)
+    }
+
+    /// Checks the invocation's step files, making them again when the check fails, and
+    /// creates its work folder.
+    async fn make_files(
+        &self,
+        view: &RunView,
+        invocation: &InvocationView,
+    ) -> Result<Delivery, Unmade> {
+        let dir = self.files.as_ref().expect("checked by the caller");
+        let work_dir = Some(dir.work_dir(&view.key.run, &invocation.invocation_id)?);
+        let Some(artifact) = view.artifact_digest.as_deref() else {
+            return Ok(Delivery {
+                work_dir,
+                ..Delivery::default()
+            });
+        };
+        let manifest = self.manifest(artifact).await?;
+        let node = &invocation.node_id;
+        let (wanted, instructions, assets) =
+            files::wanted(&manifest, node, Some(&invocation.action_id));
+        let step_dir = dir.step_dir(artifact, node)?;
+        let lock = loop {
+            // A sweep holds the lock exclusive only while it reads the runs.
+            match dir.try_lock_shared(artifact)? {
+                Some(lock) => break lock,
+                None => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        };
+        if !files::intact(&step_dir, &wanted) {
+            let bytes = self.artifact_bytes(artifact).await?;
+            let mut reader = ArtifactReader::open(&bytes)?;
+            files::make(&step_dir, &wanted, |digest| reader.entry(digest))?;
+        }
+        Ok(Delivery {
+            files: Some(StepFiles {
+                instructions: instructions.map(|path| step_dir.join(path)),
+                dir: step_dir,
+                assets,
+            }),
+            work_dir,
+            _lock: Some(lock),
+        })
+    }
+
+    /// The stored artifact's bytes, checked against its digest.
+    async fn artifact_bytes(&self, artifact: &str) -> Result<Vec<u8>, Unmade> {
+        let stored = retry(false, || self.store.get_artifact(artifact))
+            .await
+            .map_err(|f| Unmade::Unreadable(format!("{}: {}", f.code, f.message)))?;
+        let bytes = stored
+            .ok_or_else(|| Unmade::Unreadable(format!("the store holds no artifact {artifact}")))?;
+        if digest::artifact(&bytes) != artifact {
+            return Err(Unmade::Unreadable(format!(
+                "the stored artifact {artifact} does not match its digest"
+            )));
+        }
+        Ok(bytes)
+    }
+
+    /// The manifest of a stored artifact, read once per engine.
+    async fn manifest(&self, artifact: &str) -> Result<Arc<Manifest>, Unmade> {
+        if let Some(manifest) = lock(&self.manifests).get(artifact) {
+            return Ok(manifest.clone());
+        }
+        let bytes = self.artifact_bytes(artifact).await?;
+        let manifest = Arc::new(Manifest::decode(
+            &ArtifactReader::open(&bytes)?.manifest()?,
+        )?);
+        lock(&self.manifests).insert(artifact.to_string(), manifest.clone());
+        Ok(manifest)
+    }
+
+    /// Removes the step files of artifacts no unfinished run of this tenant pins, at
+    /// most once every `FILES_SWEEP_EVERY`. Its failures wait for the next sweep.
+    async fn sweep_files(&self) {
+        let Some(dir) = &self.files else {
+            return;
+        };
+        {
+            let mut swept = lock(&self.files_swept);
+            if swept.is_some_and(|at| at.elapsed() < FILES_SWEEP_EVERY) {
+                return;
+            }
+            *swept = Some(Instant::now());
+        }
+        let _ = dir
+            .sweep(|candidates| async move {
+                let mut unpinned: BTreeSet<String> = candidates.into_iter().collect();
+                let mut cursor = None;
+                loop {
+                    let tenant = &self.config.tenant;
+                    let page = retry(false, || self.store.list_runs(tenant, cursor.clone(), PAGE))
+                        .await
+                        .ok()?;
+                    for run in &page.items {
+                        let finished = serde_json::from_value::<RunStatus>(json!(run.status))
+                            .is_ok_and(RunStatus::is_terminal);
+                        if let (false, Some(artifact)) = (finished, &run.artifact_digest) {
+                            unpinned.remove(artifact);
+                        }
+                    }
+                    cursor = page.next;
+                    if cursor.is_none() {
+                        return Some(unpinned);
+                    }
+                }
+            })
+            .await;
     }
 
     /// Runs one claimed attempt to its reported result.
-    async fn attempt(self: &Arc<Self>, claim: Claim) {
+    async fn attempt(self: &Arc<Self>, claim: Claim, delivery: Delivery) {
         failpoint::hit("host.attempt.after-claim");
         let attempt = claim.attempt.clone();
         let (stop, stop_rx) = watch::channel(false);
@@ -1216,6 +1446,8 @@ impl Inner {
                     stop_rx,
                 );
                 ctx.db = self.config.db_path.clone();
+                ctx.files = delivery.files.clone();
+                ctx.work_dir = delivery.work_dir.clone();
                 ctx.guard = self.config.guard.clone();
                 ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
                 let (inner, held) = (self.clone(), attempt.clone());
@@ -1256,6 +1488,8 @@ impl Inner {
                 })
             }
         };
+        // The try is over: a sweep may take the artifact's step files from here on.
+        drop(delivery);
         failpoint::hit("host.attempt.after-effect");
         let (status, outcome, output, error, retryable) = match output {
             ActivityOutput::Success { outcome, output } => {
@@ -1332,6 +1566,18 @@ impl Inner {
         let Ok(Some(view)) = retry(false, || self.store.get_run(key)).await else {
             return Err(Unrunnable::Abandon);
         };
+        if let (None, Some(artifact)) = (&self.files, view.artifact_digest.as_deref()) {
+            // A run started by an engine with a files folder: its steps cannot get
+            // their files here. The lease runs out, as after a crash.
+            if self
+                .manifest(artifact)
+                .await
+                .is_ok_and(|m| files::declares_files(&m))
+            {
+                let _ = self.undeliverable(&view, Unmade::DirMissing).await;
+                return Err(Unrunnable::Abandon);
+            }
+        }
         let package = self
             .package(&view.package_digest)
             .await

@@ -44,6 +44,13 @@ pub fn database(given: Option<&Path>, cwd: &Path) -> PathBuf {
     }
 }
 
+/// The folder of step files and work folders: `<database path>.files`.
+pub fn files_dir(db: &Path) -> PathBuf {
+    let mut path = db.as_os_str().to_owned();
+    path.push(".files");
+    PathBuf::from(path)
+}
+
 /// `<dir>` when `db` is `<dir>/.spore/runspore.db`, however that path was given.
 pub fn root_of(db: &Path) -> Option<&Path> {
     let folder = db.parent()?;

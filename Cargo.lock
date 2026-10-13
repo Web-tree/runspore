@@ -1144,6 +1144,7 @@ dependencies = [
  "getrandom",
  "libproc",
  "nix",
+ "runspore-build",
  "runspore-kernel",
  "runspore-schema",
  "runspore-store-conformance",

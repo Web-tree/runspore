@@ -589,6 +589,7 @@ fn engine(cli: &Cli, db: &Path, base_dir: PathBuf) -> Result<Engine, Fail> {
     let mut config = EngineConfig {
         base_dir,
         db_path: Some(db.to_path_buf()),
+        files_dir: Some(project::files_dir(db)),
         ..EngineConfig::default()
     };
     config.lease_ms = cli.lease_ms.unwrap_or(config.lease_ms);
