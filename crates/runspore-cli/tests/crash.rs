@@ -288,11 +288,18 @@ fn check(dir: &Case, reference: &Reference, crash: &Crash) -> Result<(), String>
             ));
         }
     }
+    let events = events(dir);
+    let retried = operator_retries(&events);
     for node in ["prep", "build"] {
         let runs = by_node.get(node).cloned().unwrap_or_default();
         let attempts: BTreeSet<u32> = runs.iter().map(|e| e.attempt).collect();
         let keys: BTreeSet<&str> = runs.iter().map(|e| e.key.as_str()).collect();
-        if runs.is_empty() || runs.len() > 3 || attempts.len() != runs.len() || keys.len() != 1 {
+        let allowed = 3 + retried.get(node).copied().unwrap_or(0);
+        if runs.is_empty()
+            || runs.len() > allowed
+            || attempts.len() != runs.len()
+            || keys.len() != 1
+        {
             return Err(format!(
                 "{node} executions break the retry contract: {runs:?}"
             ));
@@ -303,7 +310,6 @@ fn check(dir: &Case, reference: &Reference, crash: &Crash) -> Result<(), String>
             "unsafe deploy did not run exactly once: {by_node:?}"
         ));
     }
-    let events = events(dir);
     let mut revisions = Vec::new();
     for (i, event) in events.iter().enumerate() {
         if event["sequence"].as_str() != Some((i + 1).to_string().as_str()) {
@@ -321,6 +327,35 @@ fn check(dir: &Case, reference: &Reference, crash: &Crash) -> Result<(), String>
         return Err(format!("revisions not gapless 1..={last}: {revisions:?}"));
     }
     Ok(())
+}
+
+/// The `--retry` resolutions per node. An operator's retry ignores `maxAttempts`
+/// (kernel §7), so each one may run a step once more: under load all three leases of
+/// an idempotent step can run out, the step is stuck, and `drive` retries it.
+fn operator_retries(events: &[Value]) -> BTreeMap<String, usize> {
+    let mut parked: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut retries = BTreeMap::new();
+    for event in events {
+        for diagnostic in event["diagnostics"].as_array().into_iter().flatten() {
+            let code = diagnostic["code"].as_str();
+            if !matches!(code, Some("invocation.stuck" | "invocation.unknown")) {
+                continue;
+            }
+            if let (Some(invocation), Some(node)) = (
+                diagnostic["details"]["invocationId"].as_str(),
+                diagnostic["nodeId"].as_str(),
+            ) {
+                parked.insert(invocation, node);
+            }
+        }
+        let payload = &event["payload"];
+        if event["kind"] == "invocation.resolved" && payload["resolution"]["action"] == "retry" {
+            if let Some(node) = payload["invocationId"].as_str().and_then(|i| parked.get(i)) {
+                *retries.entry(node.to_string()).or_default() += 1;
+            }
+        }
+    }
+    retries
 }
 
 fn crashed(dir: &Case) -> Crash {

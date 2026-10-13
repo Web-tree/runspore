@@ -39,6 +39,25 @@ fn max_attempts(package: &Value, action_id: &str) -> Value {
     declared.cloned().unwrap_or(json!(1))
 }
 
+/// The state's `streaks`, each with its node's loop limit for that outcome from the
+/// package (null without it).
+fn streaks_json(state: &State, package: Option<&Value>) -> Value {
+    let streaks = state.streaks.iter().map(|(node_id, streak)| {
+        let limit = package
+            .and_then(|p| {
+                p.get("nodes")?
+                    .get(node_id)?
+                    .get("loopLimits")?
+                    .get(&streak.outcome)
+            })
+            .cloned()
+            .unwrap_or(Value::Null);
+        let entry = json!({"outcome": streak.outcome, "count": streak.count, "limit": limit});
+        (node_id.clone(), entry)
+    });
+    Value::Object(streaks.collect())
+}
+
 /// The `status` object of spec/cli.md, plus `startKey` and the latest result per node.
 /// With the run's `package`, the invocation carries its action's `maxAttempts`; it shows
 /// the process record of its latest attempt, from `invocations`.
@@ -73,6 +92,7 @@ pub fn status_json(
         "revision": view.revision.to_string(),
         "position": position,
         "invocation": invocation,
+        "streaks": state.as_ref().map_or(Value::Null, |s| streaks_json(s, package)),
         "result": field(|s| json!(s.result)),
         "end": arrival.end.as_ref().map(|end| json!({
             "nodeId": end.node_id, "from": arrow_json(end.from.as_ref())})),
@@ -140,6 +160,14 @@ pub fn status_text(
                 p["host"].as_str().unwrap_or_default()
             );
         }
+    }
+    for (node, streak) in s["streaks"].as_object().into_iter().flatten() {
+        text += &format!(
+            "streak     {node} {} {} of {} in a row\n",
+            streak["outcome"].as_str().unwrap_or_default(),
+            streak["count"],
+            streak["limit"]
+        );
     }
     if !s["result"].is_null() {
         text += &format!("result     {}\n", s["result"]);

@@ -10,6 +10,7 @@ mod json_lines;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use runspore_types::model::{OUTCOME_EXHAUSTED, OUTCOME_FAILED};
 use serde_json::{Map, Value};
 
 pub use dot::KINDS;
@@ -292,10 +293,19 @@ impl Settings<'_> {
     ) -> Result<Map<String, Value>, BuildError> {
         let (allowed, required): (&[&str], Option<&str>) = match node.kind {
             "activity" => (
-                &["action", "input", "instructions", "outputSchemas"],
+                &[
+                    "action",
+                    "input",
+                    "instructions",
+                    "outputSchemas",
+                    "loopLimits",
+                ],
                 Some("action"),
             ),
-            "await-signal" => (&["signal", "instructions", "outputSchemas"], Some("signal")),
+            "await-signal" => (
+                &["signal", "instructions", "outputSchemas", "loopLimits"],
+                Some("signal"),
+            ),
             "complete" => (&["output"], None),
             _ => (&["error"], Some("error")),
         };
@@ -463,7 +473,8 @@ impl Settings<'_> {
     }
 
     /// Step 4 of spec/dot.md §5 for one activity node: its action exists, each declared
-    /// outcome has an edge, and each edge routes a declared outcome or `failed`.
+    /// outcome has an edge, and each edge routes a declared outcome, `failed`, or
+    /// `exhausted` when the node has `loopLimits`.
     fn routes(
         &self,
         graph: &dot::Graph,
@@ -488,6 +499,7 @@ impl Settings<'_> {
             Some(_) => return Ok(()),
         };
         let edges: Vec<&dot::Edge> = graph.edges.iter().filter(|e| e.from == id).collect();
+        let limited = fields.contains_key("loopLimits");
         for outcome in &declared {
             if !edges.iter().any(|e| e.on == *outcome) {
                 return Err(error(
@@ -503,7 +515,24 @@ impl Settings<'_> {
             }
         }
         for e in edges {
-            if e.on != runspore_types::model::OUTCOME_FAILED && !declared.contains(&e.on.as_str()) {
+            if e.on == OUTCOME_EXHAUSTED && !limited {
+                return Err(error(
+                    "dot.graph",
+                    self.dot_path,
+                    e.line,
+                    format!(
+                        "edge `{} -> {}` routes `{OUTCOME_EXHAUSTED}`, which only a node with \
+                         `nodes.{id}.loopLimits` in {} routes",
+                        e.from,
+                        e.to,
+                        self.path.display()
+                    ),
+                ));
+            }
+            if e.on != OUTCOME_FAILED
+                && e.on != OUTCOME_EXHAUSTED
+                && !declared.contains(&e.on.as_str())
+            {
                 return Err(error(
                     "dot.graph",
                     self.dot_path,

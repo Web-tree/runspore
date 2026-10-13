@@ -96,6 +96,7 @@ impl Reducer for Toy {
                 input: started.input,
                 nodes: BTreeMap::new(),
                 visits: BTreeMap::new(),
+                streaks: BTreeMap::new(),
                 activations: 0,
                 position: None,
                 invocation: None,

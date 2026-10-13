@@ -1,0 +1,57 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W12-loop-limits",
+  "description": "W12: a loop limit of 16 with maxVisitsPerNode 16 can never be used up (limit + 1 must be at most maxVisitsPerNode), so the document fails with invalid-input / workflow.invalid; a 0.1 document refuses loopLimits and the exhausted route.",
+  "workflow": {
+    "actions": {
+      "test": {
+        "argv": ["test"],
+        "effect": "read-only",
+        "kind": "command",
+        "outcomes": ["ok", "red"]
+      },
+      "work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.2",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "validation-W12-loop-limits",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "implement"},
+        "signal": "approval"
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "test", "output"]}},
+      "implement": {
+        "action": "work",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "test"}
+      },
+      "test": {
+        "action": "test",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "loopLimits": {"red": 16},
+        "outcomes": {"exhausted": "done", "ok": "approve", "red": "implement"}
+      }
+    },
+    "start": "implement"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": {"task": "t-1"},
+          "runId": "run_validation_W12_loop_limits",
+          "tenant": "default"
+        }
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}

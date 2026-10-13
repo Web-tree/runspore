@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runspore_types::canonical;
 use runspore_types::model::{
-    code, ActionPolicy, Effect, Node, Workflow, WorkflowLimits, MAX_NODES, OUTCOME_FAILED,
-    WORKFLOW_FORMATS, WORKFLOW_FORMAT_0_2,
+    code, ActionPolicy, Effect, Node, Workflow, WorkflowLimits, MAX_NODES, OUTCOME_EXHAUSTED,
+    OUTCOME_FAILED, WORKFLOW_FORMATS, WORKFLOW_FORMAT_0_2,
 };
 use runspore_types::reducer::Failure;
 use serde::Deserialize;
@@ -25,8 +25,9 @@ pub(crate) struct Graph {
 }
 
 impl Graph {
-    /// Decodes a canonical workflow document and applies rules W01–W11 and W13 in order.
-    /// Within W10, a 0.2 document's mappings may use `from` and `default`.
+    /// Decodes a canonical workflow document and applies rules W01–W15 in order.
+    /// Within W10, a 0.2 document's mappings may use `from` and `default`; W12 admits
+    /// `loopLimits` only in a 0.2 document, and W14 and W15 apply only to one.
     pub(crate) fn load(bytes: &[u8]) -> Result<Self, Failure> {
         let workflow: Workflow = canonical::decode(bytes).map_err(|error| {
             failure::invalid(
@@ -61,8 +62,17 @@ impl Graph {
     /// Whether a step that gives up with no `failed` route is stuck (a 0.2 document)
     /// rather than ending the run (0.1).
     pub(crate) fn parks_stuck_steps(&self) -> bool {
-        self.workflow.format == WORKFLOW_FORMAT_0_2
+        is_0_2(&self.workflow)
     }
+
+    /// Whether `exhausted` is reserved, so no signal takes it (a 0.2 document).
+    pub(crate) fn reserves_exhausted(&self) -> bool {
+        is_0_2(&self.workflow)
+    }
+}
+
+fn is_0_2(workflow: &Workflow) -> bool {
+    workflow.format == WORKFLOW_FORMAT_0_2
 }
 
 fn violation(rule: &str, details: impl AsRef<str>) -> Failure {
@@ -141,10 +151,14 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
         ));
     }
 
+    let v0_2 = is_0_2(workflow);
     let mut policies = BTreeMap::new();
     for (id, action) in &workflow.actions {
-        policies.insert(id.clone(), action_policy(id, action)?);
+        policies.insert(id.clone(), action_policy(id, action, v0_2)?);
     }
+
+    // In a 0.2 document, a node routes `exhausted` only when it has loop limits.
+    let may_route_exhausted = |node: &Node| v0_2 && node.loop_limits().is_some();
 
     for (id, node) in nodes {
         if let Node::Activity {
@@ -167,10 +181,11 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
                     format!("node {id:?} does not route outcome {outcome:?}"),
                 ));
             }
-            if let Some(extra) = outcomes
-                .keys()
-                .find(|key| *key != OUTCOME_FAILED && !policy.outcomes.contains(key))
-            {
+            if let Some(extra) = outcomes.keys().find(|key| {
+                *key != OUTCOME_FAILED
+                    && !(*key == OUTCOME_EXHAUSTED && may_route_exhausted(node))
+                    && !policy.outcomes.contains(key)
+            }) {
                 return Err(violation(
                     "W08",
                     format!("node {id:?} routes {extra:?}, which its action does not declare"),
@@ -198,6 +213,12 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
                 return Err(violation(
                     "W09",
                     format!("node {id:?}: outcome {key:?} must match [a-z0-9][a-z0-9-]{{0,63}}"),
+                ));
+            }
+            if v0_2 && outcomes.contains_key(OUTCOME_EXHAUSTED) && !may_route_exhausted(node) {
+                return Err(violation(
+                    "W09",
+                    format!("node {id:?} routes {OUTCOME_EXHAUSTED:?} but has no loopLimits"),
                 ));
             }
             targets_exist("W09", id, outcomes, workflow)?;
@@ -233,7 +254,15 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
         }
     }
 
+    for (id, node) in nodes {
+        loop_limits(id, node, workflow, v0_2)?;
+    }
+
     output_schemas_fit(workflow, &policies)?;
+
+    if v0_2 {
+        reachability(workflow)?;
+    }
 
     Ok(policies)
 }
@@ -265,7 +294,7 @@ fn output_schemas_fit(
                 Node::AwaitSignal { outcomes, .. } => outcomes.contains_key(outcome),
                 Node::Complete { .. } | Node::Fail { .. } => false,
             };
-            if !produced || outcome == OUTCOME_FAILED {
+            if !produced || outcome == OUTCOME_FAILED || outcome == OUTCOME_EXHAUSTED {
                 return Err(violation(
                     "W13",
                     format!(
@@ -313,9 +342,114 @@ fn output_schemas_fit(
     Ok(())
 }
 
+/// Rule W12 for one node.
+fn loop_limits(id: &str, node: &Node, workflow: &Workflow, v0_2: bool) -> Result<(), Failure> {
+    // An end node cannot carry the field at all: it does not decode.
+    let (Some(limits), Some(outcomes)) = (node.loop_limits(), node.outcomes()) else {
+        return Ok(());
+    };
+    if !v0_2 {
+        return Err(violation(
+            "W12",
+            format!("node {id:?}: loopLimits needs format {WORKFLOW_FORMAT_0_2:?}"),
+        ));
+    }
+    if limits.is_empty() {
+        return Err(violation(
+            "W12",
+            format!("node {id:?}: loopLimits is empty"),
+        ));
+    }
+    let ceiling = workflow.limits.max_visits_per_node;
+    for (outcome, limit) in limits {
+        if outcome == OUTCOME_EXHAUSTED || !outcomes.contains_key(outcome) {
+            return Err(violation(
+                "W12",
+                format!("node {id:?}: loopLimits names {outcome:?}, which the node does not route"),
+            ));
+        }
+        if *limit == 0 || limit.saturating_add(1) > ceiling {
+            return Err(violation(
+                "W12",
+                format!(
+                    "node {id:?}: loop limit {limit} for {outcome:?} must be at least 1 and \
+                     at most maxVisitsPerNode - 1 ({})",
+                    ceiling.saturating_sub(1)
+                ),
+            ));
+        }
+    }
+    if !outcomes.contains_key(OUTCOME_EXHAUSTED) {
+        return Err(violation(
+            "W12",
+            format!("node {id:?} has loopLimits but routes no {OUTCOME_EXHAUSTED:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Rules W14 and W15: every node is reachable from `start`, and from every node some
+/// path reaches a `complete` or `fail` node. Each reports the first node in byte order
+/// that breaks it.
+fn reachability(workflow: &Workflow) -> Result<(), Failure> {
+    let nodes = &workflow.nodes;
+    fn targets(node: &Node) -> Vec<&String> {
+        node.outcomes()
+            .map(|outcomes| outcomes.values().collect())
+            .unwrap_or_default()
+    }
+
+    let mut reached = BTreeSet::from([workflow.start.as_str()]);
+    let mut frontier = vec![workflow.start.as_str()];
+    while let Some(id) = frontier.pop() {
+        for target in nodes.get(id).map(targets).unwrap_or_default() {
+            if reached.insert(target) {
+                frontier.push(target);
+            }
+        }
+    }
+    if let Some(id) = nodes.keys().find(|id| !reached.contains(id.as_str())) {
+        return Err(violation(
+            "W14",
+            format!(
+                "node {id:?} is not reachable from start {:?}",
+                workflow.start
+            ),
+        ));
+    }
+
+    // Walk the arrows backwards from the ends.
+    let mut into: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (id, node) in nodes {
+        for target in targets(node) {
+            into.entry(target.as_str()).or_default().push(id.as_str());
+        }
+    }
+    let mut ends: BTreeSet<&str> = nodes
+        .iter()
+        .filter(|(_, node)| node.outcomes().is_none())
+        .map(|(id, _)| id.as_str())
+        .collect();
+    let mut frontier: Vec<&str> = ends.iter().copied().collect();
+    while let Some(id) = frontier.pop() {
+        for source in into.get(id).into_iter().flatten() {
+            if ends.insert(source) {
+                frontier.push(source);
+            }
+        }
+    }
+    if let Some(id) = nodes.keys().find(|id| !ends.contains(id.as_str())) {
+        return Err(violation(
+            "W15",
+            format!("node {id:?} reaches no complete or fail node"),
+        ));
+    }
+    Ok(())
+}
+
 /// The mapping dialect of a document whose format passed W01.
 fn dialect(workflow: &Workflow) -> Dialect {
-    if workflow.format == WORKFLOW_FORMAT_0_2 {
+    if is_0_2(workflow) {
         Dialect::V0_2
     } else {
         Dialect::V0_1
@@ -324,7 +458,11 @@ fn dialect(workflow: &Workflow) -> Dialect {
 
 /// Rule W07 for one action. An effect this semantics version does not support is
 /// reported as soon as the action parses, ahead of the action's other requirements.
-fn action_policy(id: &str, action: &serde_json::Value) -> Result<ActionPolicy, Failure> {
+fn action_policy(
+    id: &str,
+    action: &serde_json::Value,
+    v0_2: bool,
+) -> Result<ActionPolicy, Failure> {
     let policy = ActionPolicy::deserialize(action)
         .map_err(|error| violation("W07", format!("action {id:?}: {error}")))?;
     if policy.effect == Effect::Reconcilable {
@@ -347,10 +485,10 @@ fn action_policy(id: &str, action: &serde_json::Value) -> Result<ActionPolicy, F
                 format!("action {id:?}: outcome {outcome:?} must match [a-z0-9][a-z0-9-]{{0,63}}"),
             ));
         }
-        if outcome == OUTCOME_FAILED {
+        if outcome == OUTCOME_FAILED || (v0_2 && outcome == OUTCOME_EXHAUSTED) {
             return Err(violation(
                 "W07",
-                format!("action {id:?}: outcome {OUTCOME_FAILED:?} is reserved"),
+                format!("action {id:?}: outcome {outcome:?} is reserved"),
             ));
         }
         if !seen.insert(outcome.as_str()) {

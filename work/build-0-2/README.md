@@ -68,8 +68,11 @@ python3 -c 'import json; print(json.load(open(".spore/build-state/engine.json"))
   answer it. Fix the cause and run `spore --db <db> resolve <run> --retry` for a new
   try, `--complete ok` if the step's work is done, or `--fail "<why>"` to end that
   run. Or finish the ticket by hand and close the issue.
-- A ticket run that fails (over its visit limit) is tried once more. After that the
-  wave comments on the issue and waits; finish the ticket by hand and close the issue.
+- A ticket whose checks or CI stay red through three fixes in a row (the `test` and
+  `ship` steps' loop limits) goes to the `stuck` step, which waits for you; the wave
+  comments on the issue with the last failure. `spore --db <db> signal <run> stuck
+  --outcome keep-going` runs the checks again with a fresh count, `--outcome stop`
+  ends that run. Or finish the ticket by hand and close the issue.
 - If the build run itself fails, `work/build-0-2/bin/build --restart` starts a new
   try in the same database. Merged waves pass at once, and every checkpoint you
   answered `go` gets that answer again up front.
@@ -82,5 +85,4 @@ its own acceptance criteria, so the build uses each fix from the next upgrade on
 | Workaround here | Gap | Where it is fixed |
 | --- | --- | --- |
 | The step scripts `cd` into the worktree from their input | `cwd` is fixed per action | R25 |
-| Over the visit limit the ticket run fails; the wave tries once more, then asks you | No limit arrow | R11 |
 | A wave step starts ticket runs and polls them | No child runs or parallel steps | later map (Temporal child workflows, n8n Execute Workflow) |

@@ -1,0 +1,474 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "loop-signal-exhausted-unrouted",
+  "description": "A 0.2 document: a signal with outcome exhausted is unrouted even at a node that routes exhausted; a second rejected in a row at approve (loopLimits rejected 1) takes its exhausted route and the run fails at stopped.",
+  "workflow": {
+    "actions": {
+      "test": {
+        "argv": ["test"],
+        "effect": "read-only",
+        "kind": "command",
+        "outcomes": ["ok", "red"]
+      },
+      "work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.2",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "loop-signal-exhausted-unrouted",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "loopLimits": {"rejected": 1},
+        "outcomes": {"approved": "done", "exhausted": "stopped", "rejected": "implement"},
+        "signal": "approval"
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "test", "output"]}},
+      "implement": {
+        "action": "work",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "test"}
+      },
+      "report": {
+        "action": "work",
+        "input": {"from": {"$get": ["from"]}, "lastTest": {"$get": ["nodes", "test"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "stuck"}
+      },
+      "stopped": {"error": {"code": "loop.stopped", "message": "stopped"}, "kind": "fail"},
+      "stuck": {
+        "kind": "await-signal",
+        "outcomes": {"keep-going": "implement", "stop": "stopped"},
+        "signal": "tests-stuck"
+      },
+      "test": {
+        "action": "test",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "loopLimits": {"red": 2},
+        "outcomes": {"exhausted": "report", "ok": "approve", "red": "implement"}
+      }
+    },
+    "start": "implement"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"task": "t-1"}, "runId": "run_loop_signal", "tenant": "default"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "implement/1",
+            "attempt": 1,
+            "inputDigest": "sha256:3afe9ecf9680a214d8e64f216bf8dc7e69a83fa4ae38647fb103f30abf981c3a",
+            "invocationId": "inv_ab7a472a8a18e151b061354002a6f607",
+            "nodeId": "implement",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "implement/1", "nodeId": "implement", "visit": 1},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"implement": 1}
+        },
+        "snapshotDigest": "sha256:c98dc974763e6aa2759d50ea209f1d8c3e62f61ea40a3cc9e3d5814cc14c6ad2",
+        "commands": [
+          {
+            "commandId": "cmd_13d0ce94a0b1f3b5526d361f6bfc4b82",
+            "activationId": "implement/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "implement/1",
+              "attempt": 1,
+              "effectKey": "inv_ab7a472a8a18e151b061354002a6f607",
+              "input": {"task": "t-1"},
+              "invocationId": "inv_ab7a472a8a18e151b061354002a6f607",
+              "nodeId": "implement",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:2171dc3aea9871f7299a600f29cd22764b46d56c2469fdad4ca13ed1cc644d43"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_ab7a472a8a18e151b061354002a6f607.1",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_ab7a472a8a18e151b061354002a6f607.1",
+          "invocationId": "inv_ab7a472a8a18e151b061354002a6f607",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": {
+            "actionId": "test",
+            "activationId": "test/1",
+            "attempt": 1,
+            "inputDigest": "sha256:3afe9ecf9680a214d8e64f216bf8dc7e69a83fa4ae38647fb103f30abf981c3a",
+            "invocationId": "inv_5a6f32dc001281288b2923e9637a8d9f",
+            "nodeId": "test",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {"implement": {"outcome": "ok", "output": null, "visit": 1}},
+          "position": {"activationId": "test/1", "nodeId": "test", "visit": 1},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"implement": 1, "test": 1}
+        },
+        "snapshotDigest": "sha256:3a8757dcf6f7bb411da42456cf819e13849b69c4ed3ac1902c3ebf750bba758a",
+        "commands": [
+          {
+            "commandId": "cmd_701779205add1c138f6fae8e2eb121dd",
+            "activationId": "test/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "test",
+              "activationId": "test/1",
+              "attempt": 1,
+              "effectKey": "inv_5a6f32dc001281288b2923e9637a8d9f",
+              "input": {"task": "t-1"},
+              "invocationId": "inv_5a6f32dc001281288b2923e9637a8d9f",
+              "nodeId": "test",
+              "notBeforeMs": "1100"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:65388fb8fe08cddab5445a494b71c42fa0729901d8b6a3d4a856c14e1aff6348"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_5a6f32dc001281288b2923e9637a8d9f.1",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_5a6f32dc001281288b2923e9637a8d9f.1",
+          "invocationId": "inv_5a6f32dc001281288b2923e9637a8d9f",
+          "outcome": "ok",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {
+            "implement": {"outcome": "ok", "output": null, "visit": 1},
+            "test": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": {"activationId": "approve/1", "nodeId": "approve", "visit": 1},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"approve": 1, "implement": 1, "test": 1}
+        },
+        "snapshotDigest": "sha256:124cc0da58676c55ad6ff2c5d685d6d9a46fb517e4f5181295290e837f461ad1",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:e5291b9968f40bb7d9fd7f9eb7b314b5e8718d36db926c7990cca55dfc2f8f83"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig-1",
+        "sequence": "4",
+        "acceptedAtMs": "1300",
+        "kind": "signal.received",
+        "payload": {"name": "approval", "outcome": "exhausted"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1300",
+          "lastSequence": "4",
+          "nodes": {
+            "implement": {"outcome": "ok", "output": null, "visit": 1},
+            "test": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": {"activationId": "approve/1", "nodeId": "approve", "visit": 1},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"approve": 1, "implement": 1, "test": 1}
+        },
+        "snapshotDigest": "sha256:bc6991a98fe80ddda5e44c7313cb22a50d5cd85be6d930fdd381d6e285e6d825",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "signal.outcome-unrouted",
+            "nodeId": "approve",
+            "details": {"eventId": "sig-1", "outcome": "exhausted"}
+          }
+        ],
+        "decisionDigest": "sha256:00b7fe8880f3ee72849e4962d22d43c31cb129a6513ac08b876f9a5dbb4381b6"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig-2",
+        "sequence": "5",
+        "acceptedAtMs": "1400",
+        "kind": "signal.received",
+        "payload": {"name": "approval", "outcome": "rejected"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 4,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": {
+            "actionId": "work",
+            "activationId": "implement/2",
+            "attempt": 1,
+            "inputDigest": "sha256:3afe9ecf9680a214d8e64f216bf8dc7e69a83fa4ae38647fb103f30abf981c3a",
+            "invocationId": "inv_deefd9ca9ac6a79015ff8afadf1b05b5",
+            "nodeId": "implement",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1400",
+          "lastSequence": "5",
+          "nodes": {
+            "approve": {"outcome": "rejected", "output": null, "visit": 1},
+            "implement": {"outcome": "ok", "output": null, "visit": 1},
+            "test": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": {"activationId": "implement/2", "nodeId": "implement", "visit": 2},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "streaks": {"approve": {"count": 1, "outcome": "rejected"}},
+          "tenant": "default",
+          "visits": {"approve": 1, "implement": 2, "test": 1}
+        },
+        "snapshotDigest": "sha256:2db3c0fa229a05ff4c9d351fdf39fb1a75b6ad9a4df3e9fe190ed4d974cf5758",
+        "commands": [
+          {
+            "commandId": "cmd_b42709f1688825ede77f1b5b97482735",
+            "activationId": "implement/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "work",
+              "activationId": "implement/2",
+              "attempt": 1,
+              "effectKey": "inv_deefd9ca9ac6a79015ff8afadf1b05b5",
+              "input": {"task": "t-1"},
+              "invocationId": "inv_deefd9ca9ac6a79015ff8afadf1b05b5",
+              "nodeId": "implement",
+              "notBeforeMs": "1400"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:fa545c7d220d40df9f7f387726d0a56b54e6218ccebd4bbe8047e17b4daa58e5"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_deefd9ca9ac6a79015ff8afadf1b05b5.1",
+        "sequence": "6",
+        "acceptedAtMs": "1500",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_deefd9ca9ac6a79015ff8afadf1b05b5.1",
+          "invocationId": "inv_deefd9ca9ac6a79015ff8afadf1b05b5",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 5,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": {
+            "actionId": "test",
+            "activationId": "test/2",
+            "attempt": 1,
+            "inputDigest": "sha256:3afe9ecf9680a214d8e64f216bf8dc7e69a83fa4ae38647fb103f30abf981c3a",
+            "invocationId": "inv_4520fa9373d1956fbb64322e3ed06d3a",
+            "nodeId": "test",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1500",
+          "lastSequence": "6",
+          "nodes": {
+            "approve": {"outcome": "rejected", "output": null, "visit": 1},
+            "implement": {"outcome": "ok", "output": null, "visit": 2},
+            "test": {"outcome": "ok", "output": null, "visit": 1}
+          },
+          "position": {"activationId": "test/2", "nodeId": "test", "visit": 2},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "running",
+          "streaks": {"approve": {"count": 1, "outcome": "rejected"}},
+          "tenant": "default",
+          "visits": {"approve": 1, "implement": 2, "test": 2}
+        },
+        "snapshotDigest": "sha256:15e7128ba056f167107a0147a89a3b7f7d2573b05fc669b4d47c004e514a257e",
+        "commands": [
+          {
+            "commandId": "cmd_5cfee20751273de050a11bcc48dcefc7",
+            "activationId": "test/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "test",
+              "activationId": "test/2",
+              "attempt": 1,
+              "effectKey": "inv_4520fa9373d1956fbb64322e3ed06d3a",
+              "input": {"task": "t-1"},
+              "invocationId": "inv_4520fa9373d1956fbb64322e3ed06d3a",
+              "nodeId": "test",
+              "notBeforeMs": "1500"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:1144d82322d995c92cd3ab51862b83f351cb2074ad1736bb91248d24644cde5a"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_4520fa9373d1956fbb64322e3ed06d3a.1",
+        "sequence": "7",
+        "acceptedAtMs": "1600",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_4520fa9373d1956fbb64322e3ed06d3a.1",
+          "invocationId": "inv_4520fa9373d1956fbb64322e3ed06d3a",
+          "outcome": "ok",
+          "status": "success"
+        }
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 6,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1600",
+          "lastSequence": "7",
+          "nodes": {
+            "approve": {"outcome": "rejected", "output": null, "visit": 1},
+            "implement": {"outcome": "ok", "output": null, "visit": 2},
+            "test": {"outcome": "ok", "output": null, "visit": 2}
+          },
+          "position": {"activationId": "approve/2", "nodeId": "approve", "visit": 2},
+          "result": null,
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "waiting",
+          "streaks": {"approve": {"count": 1, "outcome": "rejected"}},
+          "tenant": "default",
+          "visits": {"approve": 2, "implement": 2, "test": 2}
+        },
+        "snapshotDigest": "sha256:d3f8991b94e5e0ac2c894e59b571e9cff270cabc331bdd4260ffd74cc0652715",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:901c900463da2c9c8aec094093ff5073ae38b6596db85b85ab1a512214bc32f6"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig-3",
+        "sequence": "8",
+        "acceptedAtMs": "1700",
+        "kind": "signal.received",
+        "payload": {"name": "approval", "outcome": "rejected"}
+      },
+      "expect": {
+        "snapshot": {
+          "activations": 7,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1700",
+          "lastSequence": "8",
+          "nodes": {
+            "approve": {"outcome": "rejected", "output": null, "visit": 2},
+            "implement": {"outcome": "ok", "output": null, "visit": 2},
+            "test": {"outcome": "ok", "output": null, "visit": 2}
+          },
+          "position": null,
+          "result": {
+            "error": {
+              "code": "loop.stopped",
+              "details": null,
+              "message": "stopped",
+              "nodeId": "stopped"
+            }
+          },
+          "runId": "run_loop_signal",
+          "semantics": "0.1",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"approve": 2, "implement": 2, "stopped": 1, "test": 2}
+        },
+        "snapshotDigest": "sha256:8755a95705603ea5aa1d292af3888baa99a35740cb09d322e719b1af21ca09fc",
+        "commands": [],
+        "diagnostics": [
+          {
+            "code": "loop.exhausted",
+            "nodeId": "approve",
+            "details": {"limit": 1, "outcome": "rejected"}
+          }
+        ],
+        "decisionDigest": "sha256:9d3571934a40ac38073e557a2f767158c78d167b532fe9fddf7af10bd834e9b3"
+      }
+    }
+  ]
+}

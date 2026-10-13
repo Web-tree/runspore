@@ -162,21 +162,30 @@ pub fn review_loop() -> Value {
 /// One activity `work` bound to action `act`, completing with the node's latest result.
 /// With `failed_route` the node routes `failed` to a second complete node, `recover`.
 pub fn single_activity(effect: &str, retry: Value, failed_route: bool) -> Value {
-    let mut outcomes = json!({"ok": "done"});
-    if failed_route {
-        set(&mut outcomes, "/failed", json!("recover"));
-    }
-    json!({
+    let mut workflow = json!({
         "format": WORKFLOW_FORMAT_0_2,
         "name": "single-activity",
         "start": "work",
         "actions": {"act": {"effect": effect, "retry": retry}},
         "nodes": {
-            "work": {"kind": "activity", "action": "act", "outcomes": outcomes},
-            "done": {"kind": "complete", "output": {"$get": ["nodes", "work"]}},
-            "recover": {"kind": "complete", "output": {"$get": ["nodes", "work"]}}
+            "work": {"kind": "activity", "action": "act", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete", "output": {"$get": ["nodes", "work"]}}
         }
-    })
+    });
+    // W14: `recover` exists only where something routes to it.
+    if failed_route {
+        set(
+            &mut workflow,
+            "/nodes/work/outcomes/failed",
+            json!("recover"),
+        );
+        set(
+            &mut workflow,
+            "/nodes/recover",
+            json!({"kind": "complete", "output": {"$get": ["nodes", "work"]}}),
+        );
+    }
+    workflow
 }
 
 /// A run driven one event at a time. A failed transition commits nothing.

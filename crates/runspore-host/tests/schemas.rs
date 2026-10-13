@@ -26,7 +26,7 @@ fn workflow(failed_route: bool, summary: Value) -> Vec<u8> {
     if failed_route {
         outcomes["failed"] = json!("fallback");
     }
-    serde_json::to_vec(&json!({
+    let mut workflow = json!({
         "format": "runspore.workflow/0.2",
         "name": "schemas",
         "start": "work",
@@ -43,11 +43,15 @@ fn workflow(failed_route: bool, summary: Value) -> Vec<u8> {
                         "outputSchemas": {"rejected": {
                             "type": "object", "required": ["reason"],
                             "properties": {"reason": {"type": "string", "minLength": 1}}}}},
-            "fallback": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}},
             "done": {"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}}
         }
-    }))
-    .unwrap()
+    });
+    // Only a `failed` arrow reaches `fallback` (W14).
+    if failed_route {
+        workflow["nodes"]["fallback"] =
+            json!({"kind": "complete", "output": {"$get": ["nodes", "work", "output"]}});
+    }
+    serde_json::to_vec(&workflow).unwrap()
 }
 
 /// A function `work` that answers `{"summary": <summary>}` and counts its calls.

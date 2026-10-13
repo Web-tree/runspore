@@ -10,9 +10,11 @@
 # `gh pr merge` squash-merges into their bare origins). Checks: the first
 # `build --upgrade` runs the fast lane and asks checkpoint 0; `go` runs waves 1-2
 # (R9 goes red once and is fixed; R10's implement step can't recover, is stuck,
-# and `spore resolve --retry` gets it merged) and checkpoint A asks; spore refuses
-# answers that do not fit its schema; a `changes` answer builds two feedback tickets
-# and asks again; `go` moves on to checkpoint B;
+# and `spore resolve --retry` gets it merged; R12's checks stay red past the fix
+# loop's limit, its run waits at the stuck step, and `spore signal ... keep-going`
+# gets it merged) and checkpoint A asks; spore refuses answers that do not fit its
+# schema; a `changes` answer builds two feedback tickets and asks again; `go` moves
+# on to checkpoint B;
 # upgrading to a newer commit starts a new database and replays to B without
 # asking again.
 set -euo pipefail
@@ -48,6 +50,7 @@ export BUILD_REPOS="{\"Web-tree/runspore\": \"$E/runspore\", \"Max-Levitskiy/ski
 export BUILD_CHECKS='{"Web-tree/runspore": [["bash", "-c", "test ! -f BROKEN"]], "Max-Levitskiy/skills": [["true"]]}'
 export FAKE_GH_STATE="$E/gh.json"
 export FAKE_CLAUDE_STUCK=R10 FAKE_CLAUDE_UNSTICK="$E/r10-unstick"
+export FAKE_CLAUDE_RED=R12 FAKE_CLAUDE_UNRED="$E/r12-unred"
 export FAKE_GH_BARES="{\"Web-tree/runspore\": \"$E/bare-runspore.git\", \"Max-Levitskiy/skills\": \"$E/bare-skills.git\"}"
 bin="$orch/work/build-0-2/bin"
 worker=""
@@ -98,11 +101,33 @@ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b
 assert b.spore("resolve", sys.argv[2], "--retry")["disposition"] == "applied"' "$bin" "$stuck_run"
 echo "ok: R10's implement step could not recover, so its ticket run is stuck and the wave asked; resolve --retry"
 
+r12="Web-tree/runspore#62"
+for _ in $(seq 1 300); do
+  python3 -c "import json,sys; s=json.load(open('$FAKE_GH_STATE'))
+sys.exit(0 if any('loop limit' in c for c in s['issues'].get('$r12', {}).get('comments', [])) else 1)" 2>/dev/null && break
+  sleep 1
+done
+check "any('signal' in c and 'keep-going' in c for c in s['issues']['$r12']['comments'])"
+red_run="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b
+r = [r for r in b.runs() if r["startKey"] == "ticket:" + sys.argv[2] + ":1"][0]
+d = b.spore("status", r["runId"]); p = d["position"]
+assert d["status"] == "waiting" and p["nodeId"] == "stuck", d
+assert p["from"] == {"nodeId": "test", "outcome": "exhausted"}, d
+assert d["nodes"]["test"]["outcome"] == "red" and d["nodes"]["test"]["visit"] == 4, d
+assert d["streaks"] == {}, d
+assert not [r for r in b.runs() if r["startKey"] == "ticket:" + sys.argv[2] + ":2"], "a second try started"
+print(r["runId"])' "$bin" "$r12")" || { echo "FAIL: R12's ticket run did not take its exhausted arrow"; exit 1; }
+touch "$FAKE_CLAUDE_UNRED"
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import buildlib as b
+b.spore("signal", sys.argv[2], "stuck", "--outcome", "keep-going")' "$bin" "$red_run"
+echo "ok: R12's checks stayed red, so its fix loop took the exhausted arrow to the stuck step and the wave asked; keep-going"
+
 wait_for waiting checkpoint_a 1
 check "sum(1 for p in s['prs'].values() if p['state'] == 'MERGED') == 11"
 check "s['issues']['Web-tree/runspore#59']['state'] == 'CLOSED'"
 test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R9: ')" = 1 || { echo "FAIL: R9 not merged once"; exit 1; }
 test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R10: ')" = 1 || { echo "FAIL: R10 not merged once"; exit 1; }
+test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R12: ')" = 1 || { echo "FAIL: R12 not merged once"; exit 1; }
 echo "ok: waves 1-2 merged, checkpoint A asked"
 
 refused="$("$bin/answer" a changes 2>&1)" && { echo "FAIL: a changes answer with no change was accepted"; exit 1; }

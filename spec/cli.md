@@ -167,6 +167,7 @@ decimal strings. `status` output:
  "invocation": {"invocationId": "inv_…", "attempt": 3, "maxAttempts": 3, "state": "stuck",
                 "error": {"code": "command.exit", "message": "exit code 1", "nodeId": "deploy",
                           "details": {…}}},
+ "streaks": {"test": {"outcome": "red", "count": 2, "limit": 3}},
  "result": null, "end": null, "quarantine": null}
 ```
 
@@ -194,6 +195,13 @@ kept error. `run` and `worker --until-parked` print the same object.
 **0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
 the absolute path of the database the command used (§Project folder). `list` prints
 `{"db", "runs": [...]}`.
+
+**0.2:** `streaks` is the kernel state's `streaks` (kernel.md §3), each entry with the
+node's `limit` for that outcome from its `loopLimits`: `test` above has routed `red`
+twice in a row, and its fourth `red` in a row would take the `exhausted` edge. It is
+`{}` when no node has a streak. After an `exhausted` edge, `position.from` shows
+outcome `exhausted`, the edge the run took; the mapping's `from` shows the outcome the
+node returned (kernel.md §4).
 
 **0.2:** `invocation.process` is the process record of the invocation's latest attempt
 (store.md §2 `set_process`): `{"host", "boot", "pgid", "started"}`, or null when the
