@@ -11,6 +11,7 @@ homepage.workspace = true
 
 [dependencies]
 runspore-types.workspace = true
+runspore-schema.workspace = true
 serde_json.workspace = true
 
 [lints]

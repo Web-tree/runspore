@@ -136,6 +136,10 @@ struct Settings<'a> {
 }
 
 const TOP_LEVEL: [&str; 4] = ["format", "limits", "actions", "nodes"];
+/// The build-only marker a node's input uses for a copy of its schemas.
+const MARKER: &str = "$outputSchemas";
+/// The level of a node's `input` in the package: the package, `nodes`, the node, `input`.
+const INPUT_LEVEL: usize = 4;
 
 impl Settings<'_> {
     /// An error in `settings.json` at the line of `path` (or its nearest parent).
@@ -333,15 +337,129 @@ impl Settings<'_> {
         if let Some(instructions) = fields.remove("instructions") {
             self.reference(&["nodes", id, "instructions"], &instructions)?;
         }
-        if let Some(schemas) = fields.remove("outputSchemas") {
-            if !schemas.is_object() {
-                return Err(self.invalid(
-                    &["nodes", id, "outputSchemas"],
-                    "an object keyed by outcome",
-                ));
-            }
+        let schemas = match fields.remove("outputSchemas") {
+            Some(schemas) => Some(self.output_schemas(id, &schemas)?),
+            None => None,
+        };
+        if let Some(input) = fields.get_mut("input") {
+            self.markers(id, input, schemas.as_ref(), INPUT_LEVEL)?;
+        }
+        if let Some(schemas) = schemas {
+            fields.insert("outputSchemas".into(), Value::Object(schemas));
         }
         Ok(fields)
+    }
+
+    /// A node's `outputSchemas` in package form: files read, `$ref`s inlined, each
+    /// schema checked against the subset (spec/schema.md).
+    fn output_schemas(&self, id: &str, value: &Value) -> Result<Map<String, Value>, BuildError> {
+        let Value::Object(schemas) = value else {
+            return Err(self.invalid(
+                &["nodes", id, "outputSchemas"],
+                "an object keyed by outcome",
+            ));
+        };
+        let mut packaged = Map::new();
+        for (outcome, schema) in schemas {
+            let path = ["nodes", id, "outputSchemas", outcome];
+            let mut place = path.join(".");
+            let authored = match schema {
+                Value::Object(_) => schema.clone(),
+                Value::String(file) => {
+                    let target = self.reference(&path, schema)?;
+                    place = format!("{place} ({file})");
+                    let bytes = std::fs::read(&target).map_err(|e| {
+                        self.at(
+                            runspore_schema::INVALID_SCHEMA,
+                            &path,
+                            format!("{place}: {e}"),
+                        )
+                    })?;
+                    runspore_types::canonical::parse(&bytes).map_err(|e| {
+                        self.at(
+                            runspore_schema::INVALID_SCHEMA,
+                            &path,
+                            format!("{place}: not JSON in the canonical domain: {e}"),
+                        )
+                    })?
+                }
+                _ => {
+                    return Err(self.invalid(
+                        &path,
+                        "a schema object, or the path of a JSON file holding one",
+                    ))
+                }
+            };
+            let schema = runspore_schema::inline(&authored)
+                .and_then(|schema| {
+                    runspore_schema::check(&schema, runspore_schema::ROOT_LEVEL).map(|()| schema)
+                })
+                .map_err(|e| {
+                    self.at(
+                        runspore_schema::INVALID_SCHEMA,
+                        &path,
+                        format!("{place}: {e}"),
+                    )
+                })?;
+            packaged.insert(outcome.clone(), schema);
+        }
+        Ok(packaged)
+    }
+
+    /// Replaces each `{"$outputSchemas": {}}` in an evaluated position of a node's
+    /// input, at package `level`, with a `$literal` copy of the node's schemas.
+    fn markers(
+        &self,
+        id: &str,
+        value: &mut Value,
+        schemas: Option<&Map<String, Value>>,
+        level: usize,
+    ) -> Result<(), BuildError> {
+        let path = ["nodes", id, "input"];
+        match value {
+            Value::Object(map) if map.contains_key(MARKER) => {
+                if map.len() != 1 || map[MARKER] != Value::Object(Map::new()) {
+                    return Err(self.invalid(
+                        &path,
+                        format!("the marker is written {{\"{MARKER}\": {{}}}} and stands alone"),
+                    ));
+                }
+                let Some(schemas) = schemas else {
+                    return Err(self.invalid(
+                        &path,
+                        format!("`{MARKER}` copies the node's outputSchemas, and it has none"),
+                    ));
+                };
+                let copy = Value::Object(schemas.clone());
+                let depth = level + runspore_schema::nesting(&copy);
+                if depth > runspore_types::canonical::MAX_DEPTH {
+                    return Err(self.at(
+                        runspore_schema::INVALID_SCHEMA,
+                        &path,
+                        format!(
+                            "{}: the copy of outputSchemas that `{MARKER}` makes here reaches \
+                             level {depth} of the package, past its limit of 32",
+                            path.join(".")
+                        ),
+                    ));
+                }
+                *value = serde_json::json!({ "$literal": copy });
+            }
+            // `$literal`, `$get` and any other operation: their contents are data.
+            Value::Object(map) if map.keys().any(|k| k.starts_with('$')) => {}
+            Value::Object(map) => {
+                for item in map.values_mut() {
+                    self.markers(id, item, schemas, level + 1)?;
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.markers(id, item, schemas, level + 1)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Step 4 of spec/dot.md §5 for one activity node: its action exists, each declared
@@ -407,7 +525,7 @@ impl Settings<'_> {
 
     /// A file reference: a relative path to a regular file that stays inside the folder
     /// once `..` and symbolic links are resolved (spec/dot.md §4).
-    fn reference(&self, path: &[&str], value: &Value) -> Result<(), BuildError> {
+    fn reference(&self, path: &[&str], value: &Value) -> Result<PathBuf, BuildError> {
         let refuse = |why: String| self.at("settings.reference", path, why);
         let Some(reference) = value.as_str().filter(|s| !s.is_empty()) else {
             return Err(self.invalid(path, "a file reference is a non-empty relative path"));
@@ -432,7 +550,7 @@ impl Settings<'_> {
         if !target.is_file() {
             return Err(refuse(format!("`{reference}` is not a regular file")));
         }
-        Ok(())
+        Ok(target)
     }
 }
 
