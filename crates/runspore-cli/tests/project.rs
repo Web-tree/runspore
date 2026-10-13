@@ -286,7 +286,9 @@ fn a_step_reaches_the_run_database_through_runspore_db() {
     let inner = root.join("a/b");
     std::fs::create_dir_all(inner.join(".spore/workflows")).unwrap();
     let seen = dir.file("seen.json");
-    let script = format!("'{BIN}' --json list > '{}'", seen.display());
+    // The native kernel: compiling the Wasmtime one takes seconds in a debug build,
+    // longer than the step's 500 ms lease when a heartbeat is slow.
+    let script = format!("'{BIN}' --native-kernel --json list > '{}'", seen.display());
     workflow(
         &root.join(".spore/workflows/nested"),
         "nested",
