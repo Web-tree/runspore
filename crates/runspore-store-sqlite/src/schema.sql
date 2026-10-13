@@ -21,6 +21,7 @@ CREATE TABLE runs (
     quarantine_at_ms INTEGER,
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL,
+    base_dir TEXT,
     PRIMARY KEY (tenant, run_id),
     UNIQUE (tenant, start_key)
 );

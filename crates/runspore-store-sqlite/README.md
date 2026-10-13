@@ -14,16 +14,17 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
   of the eight operations named in spec section 3.
 
-## Schema (version 2, in `PRAGMA user_version`)
+## Schema (version 3, in `PRAGMA user_version`)
 
-An empty file is initialized from `src/schema.sql`. A version 1 file is upgraded in
-place, in one transaction: `attempts.process` and `audit.kind` are added. A file with a
-newer version is refused with `incompatible` / `schema.too-new`.
+An empty file is initialized from `src/schema.sql`. An older file is upgraded in
+place, in one transaction: version 1 to 2 adds `attempts.process` and `audit.kind`,
+version 2 to 3 adds `runs.base_dir`. A file with a newer version is refused with
+`incompatible` / `schema.too-new`.
 
 | Table | Key | Invariant the constraints enforce |
 | --- | --- | --- |
 | `packages` | `digest` | packages are content-addressed |
-| `runs` | `(tenant, run_id)`; unique `(tenant, start_key)` | one run per start key; holds revision, applied and next sequence, last accepted time, fence counter, quarantine |
+| `runs` | `(tenant, run_id)`; unique `(tenant, start_key)` | one run per start key; holds revision, applied and next sequence, last accepted time, fence counter, quarantine, base folder |
 | `events` | `(tenant, run_id, sequence)`; unique `(tenant, run_id, event_id)` | one event per ID per run (I2); one event per sequence; one `activity.result` per attempt, since its ID derives from the attempt ID |
 | `transitions` | `(tenant, run_id, revision)`; unique `(tenant, run_id, consumed_sequence)` | one commit per revision and per consumed event |
 | `commands` | `(tenant, run_id, command_id)` | a command ID exists once per run (I3) |
@@ -60,6 +61,6 @@ may share a file; SQLite's file locks serialize their writers.
 
 ## Tests
 
-`tests/conformance.rs` runs S01–S16 from `runspore-store-conformance`. S01, S03 and S15
+`tests/conformance.rs` runs S01–S17 from `runspore-store-conformance`. S01, S03 and S15
 race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01 and
-Q03–Q06. Q03 runs `examples/crash.rs` as a child process at every failpoint.
+Q03–Q07. Q03 runs `examples/crash.rs` as a child process at every failpoint.

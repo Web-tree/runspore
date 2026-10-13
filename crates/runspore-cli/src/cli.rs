@@ -19,7 +19,7 @@ use runspore_wasmtime::WasmtimeReducer;
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
-use crate::view;
+use crate::{project, view};
 
 pub const FORMAT: &str = "runspore.cli/0.1";
 
@@ -30,14 +30,10 @@ const EXIT_INTERRUPTED: u8 = 130;
 #[derive(Parser)]
 #[command(name = "spore", version, about = "Embedded durable workflow runtime")]
 pub struct Cli {
-    /// Database file.
-    #[arg(
-        long,
-        global = true,
-        env = "RUNSPORE_DB",
-        default_value = "./runspore.db"
-    )]
-    pub db: PathBuf,
+    /// Database file. Without it and `$RUNSPORE_DB`, the `.spore/runspore.db` of the
+    /// nearest project folder at or above the current folder, else `./runspore.db`.
+    #[arg(long, global = true, env = "RUNSPORE_DB")]
+    pub db: Option<PathBuf>,
     /// Print one JSON object on stdout instead of text.
     #[arg(long, global = true)]
     pub json: bool,
@@ -60,6 +56,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Create the project folder `.spore/` at the repository root.
+    Init,
     /// Build a workflow and check it and its actions without touching the database.
     Validate { workflow: PathBuf },
     /// Create a run and return.
@@ -114,8 +112,13 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct StartArgs {
-    /// A workflow folder, its workflow.dot, or a JSON workflow document.
+    /// A workflow folder, its workflow.dot, a JSON workflow document, or the name of a
+    /// workflow in the project folder.
     workflow: PathBuf,
+    /// The run's base folder, where its commands run. Default: the folder holding the
+    /// database's project folder, else the current folder.
+    #[arg(long)]
+    base_dir: Option<PathBuf>,
     #[arg(long, conflicts_with = "input_file")]
     input: Option<String>,
     #[arg(long)]
@@ -179,35 +182,55 @@ fn done(json: Value, text: String) -> Result<Output, Fail> {
 }
 
 pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
-    if let Command::Validate { workflow } = &cli.command {
-        return validate(cli, workflow);
-    }
-    let engine = engine(cli)?;
+    let cwd = std::env::current_dir()
+        .map_err(|e| Fail::internal("cwd", format!("current folder: {e}")))?;
+    let given = cli.db.as_deref().filter(|db| !db.as_os_str().is_empty());
+    let db = project::database(given, &cwd);
+    // A start is read in full before the database is opened, so a bad one creates nothing.
+    let request = match &cli.command {
+        Command::Start(args) | Command::Run(args) => Some(StartRequest::read(args, &db, &cwd)?),
+        _ => None,
+    };
     match &cli.command {
-        Command::Validate { .. } => unreachable!("handled above"),
-        Command::Start(args) => {
-            let (start_key, outcome) = start(&engine, args).await?;
-            let run = &outcome.key.run;
-            let text = format!(
-                "{} run {run} (start key {start_key})",
-                started(outcome.created)
-            );
-            done(
-                json!({"runId": run, "startKey": start_key, "created": outcome.created}),
-                text,
-            )
+        Command::Init => return project::init(&cwd),
+        Command::Validate { workflow } => {
+            return validate(cli, &project::workflow(workflow, &cwd)?)
         }
-        Command::Run(args) => {
-            let (_, outcome) = start(&engine, args).await?;
-            let mut out = until_parked(&engine, &outcome.key).await?;
-            if let Value::Object(map) = &mut out.json {
-                map.insert("created".into(), json!(outcome.created));
-            }
-            Ok(out)
+        Command::Status { .. } | Command::List | Command::Events { .. } if !db.exists() => {
+            return missing_database(&cli.command, &db);
+        }
+        Command::Status { .. } | Command::List | Command::Events { .. } => {}
+        _ => project::before_write(&db)?,
+    }
+    let base_dir = match &request {
+        Some(request) => request.base_dir.clone(),
+        None => project::base_dir(None, &db, &cwd)?,
+    };
+    let engine = engine(cli, &db, base_dir)?;
+    if let Some(request) = &request {
+        let outcome = request.start(&engine).await?;
+        if let Command::Run(_) = &cli.command {
+            let mut out = until_parked(&engine, &outcome.key, &db).await?;
+            out.json["created"] = json!(outcome.created);
+            return Ok(out);
+        }
+        let (run, start_key) = (&outcome.key.run, &request.start_key);
+        let text = format!(
+            "{} run {run} (start key {start_key})",
+            started(outcome.created)
+        );
+        return done(
+            json!({"runId": run, "startKey": start_key, "created": outcome.created}),
+            text,
+        );
+    }
+    match &cli.command {
+        Command::Init | Command::Validate { .. } | Command::Start(_) | Command::Run(_) => {
+            unreachable!("handled above")
         }
         Command::Worker { run: Some(run), .. } => {
             let key = existing(&engine, run).await?.key;
-            until_parked(&engine, &key).await
+            until_parked(&engine, &key, &db).await
         }
         Command::Worker { run: None, .. } => {
             let mut stop = Interrupts::install()?;
@@ -223,12 +246,14 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             let arrival = engine.arrival(&view).await?;
             let package = package(&engine, &view).await?;
             let invocations = engine.list_invocations(&view.key).await?;
+            let mut json = view::status_json(&view, &arrival, package.as_ref(), &invocations);
+            json["db"] = json!(db);
             done(
-                view::status_json(&view, &arrival, package.as_ref(), &invocations),
+                json,
                 view::status_text(&view, &arrival, package.as_ref(), &invocations),
             )
         }
-        Command::List => list(&engine).await,
+        Command::List => list(&engine, &db).await,
         Command::Events { run_id } => events(&engine, run_id).await,
         Command::Signal {
             run_id,
@@ -341,10 +366,29 @@ fn validate(cli: &Cli, workflow: &Path) -> Result<Output, Fail> {
     )
 }
 
-fn engine(cli: &Cli) -> Result<Engine, Fail> {
-    let store =
-        SqliteStore::open(&cli.db).map_err(|f| Fail::internal(&f.code, f.message.clone()))?;
-    let mut config = EngineConfig::default();
+/// A read-only command on a database that does not exist sees no runs, and leaves no
+/// file behind.
+fn missing_database(command: &Command, db: &Path) -> Result<Output, Fail> {
+    match command {
+        Command::List => done(json!({"db": db, "runs": []}), String::new()),
+        Command::Status { run_id } | Command::Events { run_id } => Err(Fail::usage(
+            "run.not-found",
+            format!(
+                "run {run_id} does not exist ({} does not exist)",
+                db.display()
+            ),
+        )),
+        _ => unreachable!("only read-only commands"),
+    }
+}
+
+fn engine(cli: &Cli, db: &Path, base_dir: PathBuf) -> Result<Engine, Fail> {
+    let store = SqliteStore::open(db).map_err(|f| Fail::internal(&f.code, f.message.clone()))?;
+    let mut config = EngineConfig {
+        base_dir,
+        db_path: Some(db.to_path_buf()),
+        ..EngineConfig::default()
+    };
     config.lease_ms = cli.lease_ms.unwrap_or(config.lease_ms);
     config.heartbeat_ms = cli.heartbeat_ms.unwrap_or(config.heartbeat_ms);
     config.poll_ms = cli.poll_ms.unwrap_or(config.poll_ms);
@@ -370,28 +414,45 @@ fn started(created: bool) -> &'static str {
     }
 }
 
-async fn start(engine: &Engine, args: &StartArgs) -> Result<(String, StartOutcome), Fail> {
-    let source = Source::read(&args.workflow)?;
-    let input = match (&args.input, &args.input_file) {
-        (Some(text), _) => parse_json("--input", text)?,
-        (None, Some(path)) => {
-            let bytes = read_file(path)?;
-            serde_json::from_slice(&bytes)
-                .map_err(|e| Fail::usage("json.invalid", format!("{}: {e}", path.display())))?
-        }
-        (None, None) => json!({}),
-    };
-    let start_key = args.key.clone().unwrap_or_else(|| generated("key"));
-    let outcome = engine
-        .start(&source.bytes, input, &start_key)
-        .await
-        .map_err(|e| source.fail(e))?;
-    Ok((start_key, outcome))
+/// What `start` and `run` were asked to start.
+struct StartRequest {
+    source: Source,
+    input: Value,
+    start_key: String,
+    base_dir: PathBuf,
+}
+
+impl StartRequest {
+    fn read(args: &StartArgs, db: &Path, cwd: &Path) -> Result<Self, Fail> {
+        let source = Source::read(&project::workflow(&args.workflow, cwd)?)?;
+        let input = match (&args.input, &args.input_file) {
+            (Some(text), _) => parse_json("--input", text)?,
+            (None, Some(path)) => {
+                let bytes = read_file(path)?;
+                serde_json::from_slice(&bytes)
+                    .map_err(|e| Fail::usage("json.invalid", format!("{}: {e}", path.display())))?
+            }
+            (None, None) => json!({}),
+        };
+        Ok(Self {
+            source,
+            input,
+            start_key: args.key.clone().unwrap_or_else(|| generated("key")),
+            base_dir: project::base_dir(args.base_dir.as_deref(), db, cwd)?,
+        })
+    }
+
+    async fn start(&self, engine: &Engine) -> Result<StartOutcome, Fail> {
+        engine
+            .start(&self.source.bytes, self.input.clone(), &self.start_key)
+            .await
+            .map_err(|e| self.source.fail(e))
+    }
 }
 
 /// `run_until_parked`, or on SIGINT/SIGTERM/SIGHUP `Engine::shutdown`, which applies the
 /// results of the attempts it drains and leaves the rest of the run to the next worker.
-async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
+async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output, Fail> {
     let mut stop = Interrupts::install()?;
     let parked = tokio::select! {
         view = engine.run_until_parked(key) => Some(view?),
@@ -411,6 +472,7 @@ async fn until_parked(engine: &Engine, key: &RunKey) -> Result<Output, Fail> {
     let package = package(engine, &view).await?;
     let invocations = engine.list_invocations(&view.key).await?;
     let mut json = view::status_json(&view, &arrival, package.as_ref(), &invocations);
+    json["db"] = json!(db);
     if exit == EXIT_INTERRUPTED {
         json["interrupted"] = json!(true);
     }
@@ -451,7 +513,7 @@ async fn existing(engine: &Engine, run: &str) -> Result<RunView, Fail> {
         .ok_or_else(|| Fail::usage("run.not-found", format!("run {run} does not exist")))
 }
 
-async fn list(engine: &Engine) -> Result<Output, Fail> {
+async fn list(engine: &Engine, db: &Path) -> Result<Output, Fail> {
     let mut runs = Vec::new();
     let mut cursor = None;
     loop {
@@ -483,7 +545,7 @@ async fn list(engine: &Engine) -> Result<Output, Fail> {
                    "revision": r.revision.to_string(), "quarantined": r.quarantine.is_some()})
         })
         .collect();
-    done(json!({"runs": json}), text.join("\n"))
+    done(json!({"db": db, "runs": json}), text.join("\n"))
 }
 
 async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {

@@ -90,26 +90,35 @@ pub fn entry(path: &Path) -> Result<Entry, BuildError> {
     Ok(Entry::Document(path.to_path_buf()))
 }
 
+fn read_file(path: &Path) -> Result<String, BuildError> {
+    std::fs::read_to_string(path).map_err(|e| BuildError {
+        code: "workflow.folder",
+        file: path.to_path_buf(),
+        line: None,
+        message: if e.kind() == std::io::ErrorKind::NotFound {
+            "a workflow folder needs this file".to_string()
+        } else {
+            e.to_string()
+        },
+    })
+}
+
+fn read_graph(dot_path: &Path) -> Result<dot::Graph, BuildError> {
+    dot::read(&read_file(dot_path)?)
+        .map_err(|(code, line, message)| error(code, dot_path, line, message))
+}
+
+/// The workflow's name: the graph id of the folder's `workflow.dot`.
+pub fn name(folder: &Path) -> Result<String, BuildError> {
+    Ok(read_graph(&folder.join(DOT_FILE))?.name)
+}
+
 /// Builds the folder into its package, a JSON value ready for the kernel's validation.
 pub fn build(folder: &Path) -> Result<Value, BuildError> {
     let dot_path = folder.join(DOT_FILE);
     let settings_path = folder.join(SETTINGS_FILE);
-    let read = |path: &Path| {
-        std::fs::read_to_string(path).map_err(|e| BuildError {
-            code: "workflow.folder",
-            file: path.to_path_buf(),
-            line: None,
-            message: if e.kind() == std::io::ErrorKind::NotFound {
-                "a workflow folder needs this file".to_string()
-            } else {
-                e.to_string()
-            },
-        })
-    };
-    let dot_text = read(&dot_path)?;
-    let graph = dot::read(&dot_text)
-        .map_err(|(code, line, message)| error(code, &dot_path, line, message))?;
-    let settings_text = read(&settings_path)?;
+    let graph = read_graph(&dot_path)?;
+    let settings_text = read_file(&settings_path)?;
     let settings = Settings {
         path: &settings_path,
         dot_path: &dot_path,

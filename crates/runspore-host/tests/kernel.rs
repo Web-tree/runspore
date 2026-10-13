@@ -691,6 +691,59 @@ async fn a_command_gets_the_visit_of_its_activation() {
     );
 }
 
+/// H19: a run's commands run in the base folder recorded at `start`, whichever engine
+/// works the run, and get the engine's database as `RUNSPORE_DB`, whatever `env` says.
+#[tokio::test]
+async fn a_command_runs_in_the_recorded_base_folder_and_gets_the_database() {
+    let path = temp_db("base-dir");
+    let dir = path.parent().unwrap().canonicalize().unwrap();
+    let (starter, worker) = (dir.join("starter"), dir.join("worker"));
+    std::fs::create_dir_all(&starter).unwrap();
+    std::fs::create_dir_all(&worker).unwrap();
+    let script =
+        r#"printf '{"outcome":"ok","output":{"cwd":"%s","db":"%s"}}' "$(pwd -P)" "$RUNSPORE_DB""#;
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.2",
+        "name": "where",
+        "start": "where",
+        "actions": {
+            "where": {"kind": "command", "effect": "read-only", "output": "result",
+                      "outcomes": ["ok"], "argv": ["/bin/sh", "-c", script],
+                      "env": {"RUNSPORE_DB": "/elsewhere.db"}}
+        },
+        "nodes": {
+            "where": {"kind": "activity", "action": "where", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete", "output": {"$get": ["nodes", "where", "output"]}}
+        }
+    }))
+    .unwrap();
+    let engine_in = |base_dir: &Path, db_path: Option<&Path>| {
+        kernel_engine(
+            store(&path, None),
+            Arc::new(NativeReducer),
+            NativeRunner::new(),
+            EngineConfig {
+                base_dir: base_dir.to_path_buf(),
+                db_path: db_path.map(Path::to_path_buf),
+                ..EngineConfig::default()
+            },
+        )
+    };
+    let key = engine_in(&starter, None)
+        .start(&workflow, json!({}), "where")
+        .await
+        .unwrap()
+        .key;
+    let engine = engine_in(&worker, Some(&path));
+    let view = engine.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.base_dir.as_deref(), starter.to_str());
+    assert_eq!(view.status, "completed");
+    assert_eq!(
+        state(&view)["result"]["output"],
+        json!({"cwd": starter.to_str().unwrap(), "db": path.to_str().unwrap()})
+    );
+}
+
 #[tokio::test]
 async fn validate_workflow_checks_what_start_checks_without_a_store() {
     let registry = ActivityRegistry::with_builtins(work(Arc::default(), |_| ok(Value::Null)));

@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q06 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q07 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -259,6 +259,7 @@ async fn q06_a_version_1_file_is_upgraded() {
     conn.execute_batch(
         "ALTER TABLE attempts DROP COLUMN process;
          ALTER TABLE audit DROP COLUMN kind;
+         ALTER TABLE runs DROP COLUMN base_dir;
          PRAGMA user_version = 1;",
     )
     .unwrap();
@@ -290,4 +291,37 @@ async fn q06_a_version_1_file_is_upgraded() {
         audits(&path, "attempt.expired"),
         [json!({"reason": "lease"})]
     );
+}
+
+#[tokio::test]
+async fn q07_a_version_2_file_is_upgraded() {
+    let path = fresh_path();
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let old = RunKey::new(DEFAULT_TENANT, "old");
+    store
+        .create_run(create_run(&old, "create", 0))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE runs DROP COLUMN base_dir;
+         PRAGMA user_version = 2;",
+    )
+    .unwrap();
+    drop(conn);
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let version: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, runspore_store_sqlite::SCHEMA_VERSION);
+    let kept = store.get_run(&old).await.unwrap().expect("old run kept");
+    assert_eq!((kept.revision, kept.base_dir), (0, None));
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    let mut request = create_run(&new, "create-new", 0);
+    request.base_dir = Some("/repo".into());
+    store.create_run(request).await.unwrap();
+    let run = store.get_run(&new).await.unwrap().expect("new run");
+    assert_eq!(run.base_dir.as_deref(), Some("/repo"));
 }

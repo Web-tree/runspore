@@ -62,8 +62,10 @@ pub struct ActivityContext {
     pub visit: u32,
     /// Identical on every attempt of one invocation.
     pub effect_key: String,
-    /// Base for relative working directories.
+    /// Base for relative working directories: the run's base folder.
     pub base_dir: PathBuf,
+    /// The database's absolute path, given to every program as `RUNSPORE_DB`.
+    pub db: Option<PathBuf>,
     /// The executable whose guard mode runs in front of every process an attempt
     /// starts. Defaults to this process's own executable.
     pub guard: PathBuf,
@@ -86,6 +88,7 @@ impl std::fmt::Debug for ActivityContext {
             .field("visit", &self.visit)
             .field("effect_key", &self.effect_key)
             .field("base_dir", &self.base_dir)
+            .field("db", &self.db)
             .field("guard", &self.guard)
             .field("stop_grace", &self.stop_grace)
             .finish_non_exhaustive()
@@ -115,6 +118,7 @@ impl ActivityContext {
             visit,
             effect_key,
             base_dir,
+            db: None,
             guard: crate::guard::own_executable(),
             stop_grace: Duration::from_millis(DEFAULT_STOP_GRACE_MS),
             process: Arc::new(|_| Box::pin(async { Ok(()) })),

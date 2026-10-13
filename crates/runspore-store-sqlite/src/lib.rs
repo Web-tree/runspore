@@ -19,12 +19,14 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 const SCHEMA: &str = include_str!("schema.sql");
 /// Upgrades a version 1 database to version 2: the attempt's process record and the
 /// audit record's kind.
 const UPGRADE_1: &str = "ALTER TABLE attempts ADD COLUMN process BLOB;
     ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'late-evidence';";
+/// Upgrades a version 2 database to version 3: the run's base folder.
+const UPGRADE_2: &str = "ALTER TABLE runs ADD COLUMN base_dir TEXT;";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
 
@@ -290,7 +292,7 @@ fn cursor_u64(value: &Value, index: usize) -> R<i64> {
 
 const RUN_VIEW: &str = "SELECT tenant, run_id, start_key, package_digest, status, revision,
     applied_sequence, next_sequence, snapshot, snapshot_digest, quarantine_code,
-    quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms FROM runs";
+    quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms, base_dir FROM runs";
 
 fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
     let code: Option<String> = r.get(10)?;
@@ -314,6 +316,7 @@ fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
         },
         created_at_ms: r.get::<_, i64>(13)? as u64,
         updated_at_ms: r.get::<_, i64>(14)? as u64,
+        base_dir: r.get(15)?,
     })
 }
 
@@ -358,7 +361,11 @@ impl SqliteStore {
         }
         match version {
             0 => tx.execute_batch(SCHEMA).map_err(db)?,
-            1 => tx.execute_batch(UPGRADE_1).map_err(db)?,
+            1 => {
+                tx.execute_batch(UPGRADE_1).map_err(db)?;
+                tx.execute_batch(UPGRADE_2).map_err(db)?;
+            }
+            2 => tx.execute_batch(UPGRADE_2).map_err(db)?,
             _ => {}
         }
         if version < SCHEMA_VERSION {
@@ -754,8 +761,8 @@ impl Store for SqliteStore {
             )
             .map_err(db)?;
             c.execute(
-                "INSERT INTO runs VALUES (?1, ?2, ?3, ?4, ?5, 'created', 0, 0, 1, 0, NULL, NULL, 0, NULL, NULL, NULL, ?6, ?6)",
-                params![q.key.tenant, q.key.run, q.start_key, q.package_digest, q.started.digest, i(now)],
+                "INSERT INTO runs VALUES (?1, ?2, ?3, ?4, ?5, 'created', 0, 0, 1, 0, NULL, NULL, 0, NULL, NULL, NULL, ?6, ?6, ?7)",
+                params![q.key.tenant, q.key.run, q.start_key, q.package_digest, q.started.digest, i(now), q.base_dir],
             )
             .map_err(db)?;
             push_event(c, &q.key, ids::EVENT_STARTED, "run.started", &q.started.body, now)?;

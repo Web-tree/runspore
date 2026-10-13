@@ -3,6 +3,7 @@
 //! `spec/cli.md`.
 
 mod cli;
+mod project;
 mod view;
 
 use std::process::ExitCode;

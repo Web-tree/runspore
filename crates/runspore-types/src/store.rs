@@ -192,6 +192,9 @@ pub struct CreateRun {
     pub package: Vec<u8>,
     /// Canonical `RunStarted` payload; becomes event sequence 1 with ID `start`.
     pub started: Evidence,
+    /// The run's base folder, where its commands run. Not part of the run's identity:
+    /// a repeat with another folder is a duplicate and keeps the first.
+    pub base_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -453,6 +456,8 @@ pub struct RunView {
     pub quarantine: Option<Quarantine>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+    /// The base folder recorded at `create_run`.
+    pub base_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

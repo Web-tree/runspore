@@ -28,7 +28,8 @@ a scan cursor the store did not issue.
 Failure codes are part of the contract. `kind` is in parentheses.
 
 Protocol 0.2 adds `find_run`, an attempt's process record with `set_process`, the
-audit record of an expiry, and scenarios S15 and S16; everything else is as in 0.1.
+audit record of an expiry, the run's base folder, and scenarios S15 to S17; everything
+else is as in 0.1.
 
 ## 2. Operations
 
@@ -44,6 +45,11 @@ disposition `duplicate`.
 Writes: the package, content-addressed, if absent; the run at revision 0, applied
 sequence 0, status `created`; event sequence 1 with ID `start`, kind `run.started`,
 body `started.body`, accepted at now. Returns `{key, startedSequence: 1}`.
+
+**0.2:** the request carries `baseDir`, the run's base folder (host §2), a string or
+null. It is stored with the run and shown by `get_run` and `list_runs`. It is not part
+of the run's identity: a repeat with another `baseDir` is a `duplicate`, and the run
+keeps the folder it was created with.
 
 Run IDs are chosen by the caller and random (host §2), so `run.start-key-mismatch` is
 how a store answers the second of two starts that raced with one start key.
@@ -207,7 +213,8 @@ and are idempotent on an already matching state.
 - The schema carries a version. Opening a newer version fails with `incompatible` /
   `schema.too-new`. An empty file is initialized. An older version is upgraded in place
   in one transaction: version 1 to 2 adds the attempt's process record and the audit
-  record's kind.
+  record's kind; version 2 to 3 adds the run's base folder, null for runs created
+  before.
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
@@ -244,6 +251,7 @@ Written once, generic over a store factory and a manual clock, in
 | S14 | Reserved kinds and oversize bodies in `append_event` | `event.reserved-kind`; `event.too-large` |
 | S15 | Two `create_run` calls carry one start key and two run IDs, from two instances at once (0.2) | One is `applied`, the other `run.start-key-mismatch`; `find_run` returns the winner; `find_run` of an unknown key, or of the key in another tenant, is `None` |
 | S16 | `set_process` on a running attempt, then with another owner or fence, at and after the deadline, and after expiry (0.2) | The record shows in `list_invocations` and in the `Lease` item of `scan_due`; null clears it; the lease is not extended; a replay is `duplicate` with the historical record; every other call is `lease.lost` and changes nothing; an expiry with `processUnchecked` is applied |
+| S17 | `create_run` with a base folder, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first folder; the repeat is `duplicate`; a run created with null shows null |
 
 SQLite-specific, in the adapter crate:
 
@@ -254,4 +262,5 @@ SQLite-specific, in the adapter crate:
 | Q03 | A child process aborts at each store failpoint | After reopen the mutation is either wholly absent or wholly present; a retry of the same request converges to one applied mutation |
 | Q04 | Open a file with a newer schema version | `schema.too-new` |
 | Q05 | Expire one attempt plainly and one with `processUnchecked` (0.2) | Each writes one `attempt.expired` audit record with reason `lease`; only the second notes `process.unchecked` |
-| Q06 | Open a version 1 file (0.2) | Upgraded to version 2; its records are kept; process records and audit kinds work |
+| Q06 | Open a version 1 file (0.2) | Upgraded to version 3; its records are kept; process records and audit kinds work |
+| Q07 | Open a version 2 file (0.2) | Upgraded to version 3; its runs are kept with a null base folder; a new run records its folder |
