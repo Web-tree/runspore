@@ -1,0 +1,9 @@
+── Working folder from input not a JSON Pointer ── command.cwd-not-pointer/settings.json:8  command.cwd-not-pointer
+"checkout" in "cwd" of action "build" is not a JSON Pointer into the step's input; a pointer is empty or starts with "/".
+
+  8 │       "cwd": { "fromInput": "checkout" }
+    │                             ^^^^^^^^^^
+
+To fix: write where the step's input holds the folder, starting with "/", such as "/checkout".
+
+1 problem in release. Nothing was run.

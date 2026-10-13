@@ -23,6 +23,9 @@ const ERROR_CODE: &str = "^[a-z0-9][a-z0-9.-]{0,63}$";
 const SIGNAL: &str = "^[A-Za-z0-9_.-]{1,64}$";
 /// A count of milliseconds as a canonical decimal string.
 const DECIMAL: &str = "^(0|[1-9][0-9]{0,18})$";
+/// A JSON Pointer (RFC 6901): empty, or `/` and its steps, each `~` followed by `0`
+/// or `1`.
+const POINTER: &str = "^(/([^~/]|~[01])*)*$";
 
 /// The settings of a workflow folder: the package's own shape minus its topology,
 /// which `workflow.dot` holds.
@@ -97,10 +100,11 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "Vec<String>", length(min = 1))]
     pub argv: Option<Vec<String>>,
-    /// `command`: the folder to run in, relative to the run's base folder.
+    /// `command`: the folder to run in, relative to the run's base folder, or the
+    /// one the step's input holds.
     #[serde(default)]
-    #[schemars(with = "String")]
-    pub cwd: Option<String>,
+    #[schemars(with = "Cwd")]
+    pub cwd: Option<Value>,
     /// `command`: extra environment variables.
     #[serde(default)]
     #[schemars(with = "BTreeMap<String, String>")]
@@ -206,6 +210,23 @@ fn millis(schema: &mut schemars::Schema) {
         "type": ["integer", "string"],
         "minimum": 0,
         "pattern": DECIMAL
+    });
+}
+
+/// A folder: a path relative to the run's base folder, or `{"fromInput": "<JSON
+/// Pointer>"}`, the one the step's input holds there.
+#[derive(JsonSchema)]
+#[schemars(transform = cwd)]
+#[allow(dead_code)]
+struct Cwd(String);
+
+fn cwd(schema: &mut schemars::Schema) {
+    *schema = schemars::json_schema!({
+        "description": "A folder: a path relative to the run's base folder, or {\"fromInput\": \"<JSON Pointer>\"}, the one the step's input holds there.",
+        "type": ["string", "object"],
+        "properties": {"fromInput": {"type": "string", "pattern": POINTER}},
+        "required": ["fromInput"],
+        "additionalProperties": false
     });
 }
 
@@ -546,6 +567,7 @@ fn diagnose(
             let code = match pattern.as_str() {
                 SIGNAL => "node.bad-signal",
                 ERROR_CODE => "node.bad-error-code",
+                POINTER => "command.cwd-not-pointer",
                 _ => "settings.not-decimal",
             };
             let mut d = Diagnostic::new(code, At::value(at)).arg("value", input());

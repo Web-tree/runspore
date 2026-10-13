@@ -967,6 +967,15 @@ example = "command.exit-outcome"
 also = ["dot.undeclared-outcome"]
 
 [[code]]
+code = "command.cwd-not-pointer"
+severity = "problem"
+title = '''Working folder from input not a JSON Pointer'''
+message = '''{value} in "cwd" of action {action} is not a JSON Pointer into the step's input; a pointer is empty or starts with "/".'''
+fix = '''write where the step's input holds the folder, starting with "/", such as "/checkout".'''
+args = { value = "input" }
+example = "command.cwd-not-pointer"
+
+[[code]]
 code = "command.argv-spaces"
 severity = "warning"
 title = '''Program name with spaces'''

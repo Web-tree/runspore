@@ -20,6 +20,7 @@ Every problem and warning `spore validate` can report, with its help page. `spor
 | [`action.unsupported-effect`](action.unsupported-effect.md) | problem | Effect this spore cannot run |
 | [`command.argv-spaces`](command.argv-spaces.md) | warning | Program name with spaces |
 | [`command.bad-exit-code`](command.bad-exit-code.md) | problem | Not an exit code |
+| [`command.cwd-not-pointer`](command.cwd-not-pointer.md) | problem | Working folder from input not a JSON Pointer |
 | [`command.exit-outcome`](command.exit-outcome.md) | problem | Exit code for an outcome the action does not list |
 | [`command.no-argv`](command.no-argv.md) | problem | Missing "argv" |
 | [`command.program-not-found`](command.program-not-found.md) | warning | Program not found |

@@ -61,8 +61,8 @@
           "type": "object"
         },
         "cwd": {
-          "description": "`command`: the folder to run in, relative to the run's base folder.",
-          "type": "string"
+          "$ref": "#/$defs/Cwd",
+          "description": "`command`: the folder to run in, relative to the run's base folder, or the\none the step's input holds."
         },
         "effect": {
           "$ref": "#/$defs/Effect",
@@ -113,6 +113,23 @@
         "effect"
       ],
       "type": "object"
+    },
+    "Cwd": {
+      "additionalProperties": false,
+      "description": "A folder: a path relative to the run's base folder, or {\"fromInput\": \"<JSON Pointer>\"}, the one the step's input holds there.",
+      "properties": {
+        "fromInput": {
+          "pattern": "^(/([^~/]|~[01])*)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromInput"
+      ],
+      "type": [
+        "string",
+        "object"
+      ]
     },
     "Decimal": {
       "description": "A count of milliseconds written as a string of digits, such as `\"500\"`.",
