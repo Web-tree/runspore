@@ -15,8 +15,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use runspore_types::artifact::{self, EntryKind, Manifest, Owner};
-use runspore_types::{canonical, digest};
 use runspore_types::model::{OUTCOME_EXHAUSTED, OUTCOME_FAILED};
+use runspore_types::{canonical, digest};
 use serde_json::{Map, Value};
 
 pub use component::encode as encode_artifact;
