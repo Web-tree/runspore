@@ -9,7 +9,8 @@ digraph "build-0-2" {
   wave_2 [label="Wave 2\nR2 R10\nR12 R17", shape=box];
   wave_3 [label="Wave 3\nR4 R6 R8\nR11 R13", shape=box];
   wave_4 [label="Wave 4\nR5 R7 R14\nR18 R25", shape=box];
-  wave_5 [label="Wave 5\nR19 P3", shape=box];
+  wave_5 [label="Wave 5\nR19 P3 D1", shape=box];
+  wave_5b [label="Wave 5b\nD2: plain spore", shape=box];
   wave_6 [label="Wave 6\nR20 R21 R22\nP8", shape=box];
   wave_7 [label="Wave 7\nR23 R24 P2\nP4", shape=box];
   wave_8 [label="Wave 8\nR27 P5", shape=box];
@@ -44,7 +45,8 @@ digraph "build-0-2" {
   wave_3 -> checkpoint_b;
   checkpoint_b -> wave_4 [on="go"];
   wave_4 -> wave_5;
-  wave_5 -> checkpoint_c;
+  wave_5 -> wave_5b;
+  wave_5b -> checkpoint_c;
   checkpoint_c -> wave_6 [on="go"];
   wave_6 -> checkpoint_d;
   checkpoint_d -> wave_7 [on="go"];

@@ -1,6 +1,6 @@
 # Checkpoint C: Claude does a step
 
-Comes after wave 5 (R4, R15, R18, P1, P3).
+Comes after wave 5 (R19, P3, D1) and wave 5b (D2). From here on the build runs with plain `spore` commands (#106).
 
 **Try:** From a plain terminal: `spore run coding-loop --key try-c --input '{"task": …}'` with the real `claude-spore run` as `implement`. Kill it mid-step, run the same command again (the same `--key` names the same run), and the conversation resumes. Its answer is held to the schema.
 
