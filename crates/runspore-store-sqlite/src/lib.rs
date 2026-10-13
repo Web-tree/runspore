@@ -716,7 +716,10 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     if now < not_before {
         return Err(conflict("invocation.not-due"));
     }
-    if q.holder.as_ref().is_some_and(|h| h.len() > MAX_HOLDER_BYTES) {
+    if q.holder
+        .as_ref()
+        .is_some_and(|h| h.len() > MAX_HOLDER_BYTES)
+    {
         return Err(fail(
             StoreFailureKind::Quota,
             "holder.too-large",

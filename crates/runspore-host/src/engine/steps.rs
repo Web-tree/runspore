@@ -135,12 +135,10 @@ fn fresh_owner() -> Result<String, HostError> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes)
         .map_err(|e| HostError::invalid("step.owner-unavailable", format!("random source: {e}")))?;
-    Ok(bytes
-        .iter()
-        .fold(String::from("actor-"), |mut id, b| {
-            id.push_str(&format!("{b:02x}"));
-            id
-        }))
+    Ok(bytes.iter().fold(String::from("actor-"), |mut id, b| {
+        id.push_str(&format!("{b:02x}"));
+        id
+    }))
 }
 
 impl Engine {
@@ -330,7 +328,14 @@ impl Engine {
             mutation: mutation(
                 "claim_attempt",
                 format!("step-claim/{invocation_id}/{owner}"),
-                json!([key, invocation_id, owner, external.lease_ms(), holder, external.timeout_ms]),
+                json!([
+                    key,
+                    invocation_id,
+                    owner,
+                    external.lease_ms(),
+                    holder,
+                    external.timeout_ms
+                ]),
             )?,
             key: key.clone(),
             invocation_id: invocation_id.to_string(),

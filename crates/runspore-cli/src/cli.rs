@@ -989,7 +989,10 @@ async fn step(engine: &Engine, command: &StepCommand) -> Result<Output, Fail> {
         done(
             json!({"runId": report.key.run, "invocationId": report.invocation_id,
                    "attempt": report.attempt, "disposition": disposition}),
-            format!("step {} attempt {} {disposition}", report.invocation_id, report.attempt),
+            format!(
+                "step {} attempt {} {disposition}",
+                report.invocation_id, report.attempt
+            ),
         )
     };
     match command {
@@ -1092,7 +1095,10 @@ fn claimed(claim: &StepClaim) -> Result<Output, Fail> {
     text += &format!("  spore step fail {token} --error <message> [--retryable]\n");
     if let Some(instructions) = &claim.instructions {
         let content = std::fs::read_to_string(instructions).map_err(|e| {
-            Fail::internal("file.unreadable", format!("{}: {e}", instructions.display()))
+            Fail::internal(
+                "file.unreadable",
+                format!("{}: {e}", instructions.display()),
+            )
         })?;
         text += &format!("\ninstructions ({}):\n\n{content}", instructions.display());
     }

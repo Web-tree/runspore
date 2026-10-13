@@ -9,8 +9,8 @@ use runspore_store_conformance::{
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
-    ExpireReason, InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact, Turn,
-    DEFAULT_TENANT,
+    ExpireReason, InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact,
+    Turn, DEFAULT_TENANT,
 };
 use serde_json::{json, Value};
 
@@ -471,15 +471,25 @@ async fn q10_a_version_5_file_is_upgraded() {
 
     let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
-    let shown = store.list_invocations(&attempt.key).await.unwrap().remove(0);
+    let shown = store
+        .list_invocations(&attempt.key)
+        .await
+        .unwrap()
+        .remove(0);
     assert_eq!(
         (shown.attempt.as_ref(), shown.holder, shown.deadline_ms),
         (Some(&attempt), None, None)
     );
-    store.expire_attempt(expire(&attempt, "expire")).await.unwrap();
+    store
+        .expire_attempt(expire(&attempt, "expire"))
+        .await
+        .unwrap();
 
     let new = RunKey::new(DEFAULT_TENANT, "new");
-    store.create_run(create_run(&new, "create", 1)).await.unwrap();
+    store
+        .create_run(create_run(&new, "create", 1))
+        .await
+        .unwrap();
     let turn = store.load_turn(&new).await.unwrap().unwrap();
     let (command, invocation) = schedule(&new, "a", 0);
     let commit = runspore_store_conformance::commit(&turn, "commit", 0, vec![command]);

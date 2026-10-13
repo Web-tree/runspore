@@ -265,7 +265,11 @@ pub fn expire(attempt: &AttemptRef, request_id: &str) -> ExpireAttempt {
 /// An `expire_attempt` with the given reason.
 pub fn expire_for(attempt: &AttemptRef, request_id: &str, reason: ExpireReason) -> ExpireAttempt {
     ExpireAttempt {
-        mutation: mutation("expire_attempt", request_id, json!([attempt, false, reason])),
+        mutation: mutation(
+            "expire_attempt",
+            request_id,
+            json!([attempt, false, reason]),
+        ),
         attempt: attempt.clone(),
         process_unchecked: false,
         reason,
@@ -1341,7 +1345,14 @@ pub async fn s19_holder_and_deadline(factory: &dyn StoreFactory) {
     let large = json!("x".repeat(MAX_HOLDER_BYTES));
     let refused = w
         .store()
-        .claim_attempt(claim_held(&w.key, "claim-large", &invocation, 100, Some(large), 250))
+        .claim_attempt(claim_held(
+            &w.key,
+            "claim-large",
+            &invocation,
+            100,
+            Some(large),
+            250,
+        ))
         .await;
     assert_eq!(
         failure(refused),
@@ -1356,7 +1367,14 @@ pub async fn s19_holder_and_deadline(factory: &dyn StoreFactory) {
     let holder = json!({"pid": 7});
     let claimed = w
         .store()
-        .claim_attempt(claim_held(&w.key, "claim", &invocation, 100, Some(holder.clone()), 250))
+        .claim_attempt(claim_held(
+            &w.key,
+            "claim",
+            &invocation,
+            100,
+            Some(holder.clone()),
+            250,
+        ))
         .await
         .unwrap()
         .value;
@@ -1385,7 +1403,10 @@ pub async fn s19_holder_and_deadline(factory: &dyn StoreFactory) {
         .heartbeat(heartbeat(&claimed.attempt, "renew-2", 200))
         .await
         .unwrap();
-    assert_eq!(capped.value.lease_until_ms, 1_250, "never past the deadline");
+    assert_eq!(
+        capped.value.lease_until_ms, 1_250,
+        "never past the deadline"
+    );
     w.clock.set(1_250);
     let at = w
         .store()
@@ -1450,8 +1471,14 @@ pub async fn s20_expire_reasons(factory: &dyn StoreFactory) {
             failure(renewed),
             (StoreFailureKind::Stale, "lease.lost".into())
         );
-        let late = w.store().finish_attempt(finish(&attempt, "finish", 1)).await;
-        assert_eq!(failure(late), (StoreFailureKind::Stale, "lease.lost".into()));
+        let late = w
+            .store()
+            .finish_attempt(finish(&attempt, "finish", 1))
+            .await;
+        assert_eq!(
+            failure(late),
+            (StoreFailureKind::Stale, "lease.lost".into())
+        );
         let kept = w
             .store()
             .record_late_evidence(RecordLateEvidence {
@@ -1462,7 +1489,11 @@ pub async fn s20_expire_reasons(factory: &dyn StoreFactory) {
             .await
             .unwrap();
         assert_eq!(kept.disposition, Disposition::Applied);
-        assert_eq!(w.events().await.len(), events.len(), "late evidence appends nothing");
+        assert_eq!(
+            w.events().await.len(),
+            events.len(),
+            "late evidence appends nothing"
+        );
     }
 }
 

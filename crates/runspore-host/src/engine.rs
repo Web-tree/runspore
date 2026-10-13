@@ -24,9 +24,9 @@ use tokio::sync::{watch, Notify};
 use tokio::task::JoinSet;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
-use crate::external;
 use crate::arrival::{Arrival, Trail};
 use crate::error::HostError;
+use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
 use crate::process::{self, Leftover};

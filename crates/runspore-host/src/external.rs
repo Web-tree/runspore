@@ -40,7 +40,9 @@ pub(crate) fn is_label(text: &str) -> bool {
     !bytes.is_empty()
         && bytes.len() <= 64
         && allowed(&bytes[0])
-        && bytes[1..].iter().all(|b| allowed(b) || *b == b'.' || *b == b'-')
+        && bytes[1..]
+            .iter()
+            .all(|b| allowed(b) || *b == b'.' || *b == b'-')
 }
 
 /// A positive count of milliseconds written as a canonical decimal string.
@@ -51,7 +53,9 @@ fn millis(async_spec: &Value, field: &str) -> Result<Option<u64>, String> {
     let text = value.as_str().unwrap_or_default();
     let canonical = !text.is_empty() && !text.starts_with('0') && text.len() <= 19;
     match text.parse::<u64>() {
-        Ok(ms) if canonical && ms <= i64::MAX as u64 && text.bytes().all(|b| b.is_ascii_digit()) => {
+        Ok(ms)
+            if canonical && ms <= i64::MAX as u64 && text.bytes().all(|b| b.is_ascii_digit()) =>
+        {
             Ok(Some(ms))
         }
         _ => Err(format!(
@@ -174,7 +178,13 @@ mod tests {
             fence: 7,
         };
         assert_eq!(token.to_string().parse::<StepToken>(), Ok(token));
-        for bad in ["", "a~b", "run~inv~x~owner~1", "run~inv~1~owner~", "~inv~1~o~1"] {
+        for bad in [
+            "",
+            "a~b",
+            "run~inv~x~owner~1",
+            "run~inv~1~owner~",
+            "~inv~1~o~1",
+        ] {
             assert!(bad.parse::<StepToken>().is_err(), "{bad}");
         }
     }
@@ -182,7 +192,10 @@ mod tests {
     #[test]
     fn the_fields_are_checked() {
         let defaults = parse(&json!({"kind": "external"})).unwrap();
-        assert_eq!((defaults.timeout_ms, defaults.lease_ms), (DEFAULT_TIMEOUT_MS, None));
+        assert_eq!(
+            (defaults.timeout_ms, defaults.lease_ms),
+            (DEFAULT_TIMEOUT_MS, None)
+        );
         let set = parse(&json!({"kind": "external", "actor": "reviewer",
                                 "async": {"timeoutMs": "60000", "leaseMs": "5000"}}))
         .unwrap();
