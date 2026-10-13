@@ -54,4 +54,7 @@ if [ -z "${BUILD_NO_LABELS:-}" ]; then
   gh label create ready-for-agent --repo Max-Levitskiy/skills >/dev/null 2>&1 || true
 fi
 echo "build run: $("$bin/start-run" "$@")"
+# The ticket steps run in their worktree (`cwd` from the step input), so they find
+# `ticket-step` on PATH: this checkout's copy, not the one in the worktree.
+export PATH="$PWD/$bin:$PATH"
 exec "$SPORE" --db "$db" worker

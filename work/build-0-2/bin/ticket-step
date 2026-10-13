@@ -61,7 +61,6 @@ def setup(inp):
 
 
 def implement(inp, raw):
-    os.chdir(inp["worktree"]["dir"])
     step = ROOT / ".spore/workflows/ticket/steps"
     # A file, not a pipe: a fix input with long failures can outgrow a pipe's buffer,
     # and nothing reads the pipe until the exec below.
@@ -89,7 +88,6 @@ def checks(repo, d):
 def test(inp):
     wt = inp["worktree"]
     d = Path(wt["dir"])
-    os.chdir(d)
     dirty = sh("git", "status", "--porcelain")
     if dirty.strip():
         red(f"The worktree has uncommitted changes; commit or remove them:\n{dirty}")
@@ -144,7 +142,6 @@ def ship(inp):
     global REPO
     wt = inp["worktree"]
     REPO = wt["repo"]
-    os.chdir(wt["dir"])
     branch = wt["branch"]
     prs = gh_json("pr", "list", "--repo", REPO, "--head", branch, "--state", "all",
                   "--json", "number,state,url") or []

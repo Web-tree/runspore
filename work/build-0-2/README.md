@@ -84,5 +84,4 @@ its own acceptance criteria, so the build uses each fix from the next upgrade on
 
 | Workaround here | Gap | Where it is fixed |
 | --- | --- | --- |
-| The step scripts `cd` into the worktree from their input | `cwd` is fixed per action | R25 |
 | A wave step starts ticket runs and polls them | No child runs or parallel steps | later map (Temporal child workflows, n8n Execute Workflow) |
