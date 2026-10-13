@@ -201,6 +201,13 @@ the absolute path of the database the worker uses (host.md §3). A `spore` call 
 inside a step therefore reaches the run's own database, even in a git worktree with
 its own `.spore/`, because `$RUNSPORE_DB` comes before walk-up.
 
+**Step files and work folders.** The files folder is `<database path>.files`, beside
+the database, so `--db x.db` uses `x.db.files/` and the ignore rules above cover it.
+It holds each step's read-only step files and each visit's work folder (host.md §3,
+Step files and work folders). Only commands that dispatch steps (`run`, `worker`)
+write it. A run whose stored artifact cannot be read stops quarantined with code
+`artifact.unreadable` (exit 5); `release` after repairing the database lets it go on.
+
 ## Databases from another version (0.2)
 
 A database records which `spore` wrote its schema (store.md §3). Every command that
