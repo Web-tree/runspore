@@ -173,8 +173,8 @@ One bounded pass. It never blocks on an activity.
    read back through `scan_due`, is dispatched.
 3. **Dispatch.** For each `Outbox` item, while fewer than `max_concurrent_activities`
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
-   **0.2:** before the claim, the host makes or checks the step's files and its work
-   folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
+   **0.2:** with `files_dir` set, before the claim, the host makes or checks the
+   step's files and its work folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
    no attempt is spent and no lease runs out on a try that never started.
 
 `serve(shutdown)` repeats `tick`, sleeping `poll_ms` when a tick did nothing. On
@@ -474,9 +474,11 @@ for a node that declares no files.
    the attempt. It quarantines the run with code `artifact.unreadable`. A broken store
    is not a business failure: no attempt is spent, and the host never falls back to the
    source folder. `release` (§2) lets the next tick try again, after the store has
-   been repaired. When `S` cannot be written, the quarantine code is
-   `host.files-unwritable`; when the run's artifact has files and `files_dir` is
-   unset, it is `host.files-dir-missing`.
+   been repaired. When `S` or `W` cannot be written, the quarantine code is
+   `host.files-unwritable`. An engine without `files_dir` does none of this before
+   the claim; when it claims a step of a run whose artifact has files (a run started
+   by another engine), it quarantines the run with `host.files-dir-missing`, starts
+   nothing, and leaves the attempt to its lease, as after a crash.
 
 **Work folder.** Each invocation gets `W = <files_dir>/work/<runId>/<invocationId>/`,
 created with mode `0700` before its first try. Every try of the invocation gets the same
