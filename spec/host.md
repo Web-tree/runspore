@@ -54,7 +54,8 @@ process on its own.
 | `max_concurrent_activities` | 4 | In-flight attempts |
 | `turns_per_run` | 32 | Transitions per run per tick |
 | `limits` | `Limits::default()` | Frozen kernel budget |
-| `base_dir` | current directory | Base for relative `cwd` of command actions |
+| `base_dir` | current directory | Base for relative `cwd` of command actions. **0.2:** `start` records it as the run's base folder, and dispatch uses the run's recorded folder; it serves only runs that have none |
+| `db_path` | none | **0.2.** Absolute path of the database, given to every program the host starts as `RUNSPORE_DB`; unset when none |
 | `run_ids` | the operating system's random source | Where the ID of each new run comes from; tests give a fixed sequence |
 | `stop_grace_ms` | 5000 | **0.2.** Time between SIGTERM and SIGKILL when a process group is stopped (§3) |
 | `guard` | the host's own executable | **0.2.** The executable whose guard mode runs in front of every process (§3) |
@@ -69,7 +70,8 @@ process on its own.
   2. Build the `run.started` evidence with that run ID; canonicalize the workflow;
      reject it if any action's `kind` has no registered runner or the runner's
      `validate` fails; run a dry `run.started` transition and reject on failure.
-  3. `create_run` with request ID `start/<start_key>`. `applied` is a new run;
+  3. `create_run` with request ID `start/<start_key>` and, in 0.2, `base_dir` as the
+     run's base folder. `applied` is a new run;
      `duplicate` is the run found, not new; `run.exists` (the key names a run with
      another workflow or input) is returned as the error. `run.start-key-mismatch`
      means another start with this key created its run after step 1: go back to
@@ -195,7 +197,9 @@ action's `kind` to a runner.
 ```
 
 - `argv` is executed directly, never through a shell. `cwd` is resolved against
-  `base_dir`. The child inherits the engine's environment plus `env`.
+  the run's base folder (**0.2**; 0.1: `base_dir`), recorded at `start`, so every
+  dispatch of a run uses one folder whichever engine runs it. A run with no recorded
+  folder uses `base_dir`. The child inherits the engine's environment plus `env`.
 - Stdin receives the canonical input JSON, then EOF.
 - The child also gets `RUNSPORE_RUN_ID`, `RUNSPORE_NODE_ID`, `RUNSPORE_INVOCATION_ID`,
   `RUNSPORE_ATTEMPT`, `RUNSPORE_VISIT`, and `RUNSPORE_EFFECT_KEY`. The effect key is
@@ -203,6 +207,9 @@ action's `kind` to a runner.
   whatever it calls. `RUNSPORE_VISIT` is the visit number of the invocation's
   activation (`<nodeId>/<visit>`, kernel §1), so a command can tell a first visit of
   its node from a return to it.
+- **0.2:** with `db_path` set, every program the host starts gets `RUNSPORE_DB` set to
+  it, after `env`, so a workflow cannot point it elsewhere. A `spore` call from inside a
+  step reaches the run's own database (cli.md §Project folder).
 - **0.2** (replaces 0.1's "It runs in its own process group. On timeout or stop the
   whole group is killed."): it runs under a guard, below.
 - A command never learns the action's outcome names. The workflow maps its result to
@@ -372,3 +379,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H15 | **0.2.** SIGKILL the worker while a command that traps SIGTERM runs | The command writes its file before the group goes |
 | H13 | **0.2.** SIGKILL the worker and its guard together while the command's group runs, with its leader and without it | The next sweep stops the recorded group before it expires the attempt; the next try starts only after the group is gone |
 | H16 | **0.2.** A process record with another host name | The attempt is expired by its lease; the audit record says `process.unchecked` |
+| H19 | **0.2.** A run started by an engine with one `base_dir` is worked by an engine with another and a `db_path` | The command runs in the folder recorded at `start` and sees `RUNSPORE_DB` equal to `db_path`, also when the action's `env` sets it |

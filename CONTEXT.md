@@ -70,6 +70,10 @@ _Avoid_: parameters (node parameters belong to one node), arguments
 The `.spore/` folder at a repository's root. It holds the repository's workflows, which are committed, and its run database, which is not.
 _Avoid_: workspace, config dir
 
+**Base folder**:
+The folder a run's commands run from, recorded when the run starts: the folder holding the project folder, unless the person starting it names another. A run keeps it wherever it is continued from.
+_Avoid_: working directory (that is one command's), project root
+
 ### Steps and their actors
 
 **Step**:

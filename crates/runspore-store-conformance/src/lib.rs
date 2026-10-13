@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S16 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S17 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::fmt::Debug;
@@ -90,6 +90,7 @@ pub fn create_run(key: &RunKey, request_id: &str, variant: u32) -> CreateRun {
         package_digest,
         package,
         started,
+        base_dir: None,
     }
 }
 
@@ -1213,6 +1214,44 @@ pub async fn s16_process_record(factory: &dyn StoreFactory) {
     );
 }
 
+/// S17: the run keeps the base folder it was created with; a repeat with another is a
+/// duplicate, and a run created without one shows none.
+pub async fn s17_base_dir(factory: &dyn StoreFactory) {
+    let fixture = factory.fresh(ManualClock::new(1_000));
+    let store = fixture.store.as_ref();
+    let key = RunKey::new(DEFAULT_TENANT, "s17");
+    let mut first = create_run(&key, "create", 0);
+    first.base_dir = Some("/repo".into());
+    store.create_run(first.clone()).await.unwrap();
+    let mut moved = first.clone();
+    moved.base_dir = Some("/repo/sub".into());
+    let again = store.create_run(moved.clone()).await.unwrap();
+    assert_eq!(again.disposition, Disposition::Duplicate);
+    moved.mutation = mutation(
+        "create_run",
+        "create-elsewhere",
+        json!([key, "start", first.package_digest, first.started.digest]),
+    );
+    let elsewhere = store.create_run(moved).await.unwrap();
+    assert_eq!(elsewhere.disposition, Disposition::Duplicate);
+    let run = store.get_run(&key).await.unwrap().expect("run");
+    assert_eq!(run.base_dir.as_deref(), Some("/repo"));
+    let listed = store
+        .list_runs(DEFAULT_TENANT, None, 10)
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(listed[0].base_dir.as_deref(), Some("/repo"));
+
+    let bare = RunKey::new(DEFAULT_TENANT, "s17-none");
+    store
+        .create_run(create_run(&bare, "create-none", 0))
+        .await
+        .unwrap();
+    let run = store.get_run(&bare).await.unwrap().expect("run");
+    assert_eq!(run.base_dir, None);
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1222,7 +1261,7 @@ macro_rules! store_conformance_tests {
             s04_result_after_expiry s05_heartbeat_deadline s06_event_id_conflict
             s07_concurrent_appends s08_atomic_commit s09_not_before s10_fences
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
-            s15_start_key_race s16_process_record);
+            s15_start_key_race s16_process_record s17_base_dir);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

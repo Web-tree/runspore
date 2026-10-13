@@ -7,7 +7,7 @@ engine. It never listens on a network.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--db <path>` | `$RUNSPORE_DB`, else `./runspore.db` | Database file |
+| `--db <path>` | `$RUNSPORE_DB`, else the project folder's database, else `./runspore.db` (§Project folder) | Database file |
 | `--json` | off | One JSON object on stdout instead of text |
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
 | `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
@@ -17,9 +17,10 @@ engine. It never listens on a network.
 
 | Command | Does |
 | --- | --- |
+| `init` | **0.2.** Creates the project folder (§Project folder) |
 | `validate <workflow>` | Builds the workflow and checks it and its actions without touching the database |
-| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database |
-| `run <workflow> [--input …] [--key …]` | `start`, then works until the run is terminal or parked |
+| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder |
+| `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation |
 | `list` | All runs with status |
@@ -33,6 +34,13 @@ as [dot.md](dot.md) describes, or a JSON workflow document. JSON documents are s
 accepted until the cut-over to 0.2. A build error exits 2 and names the file and line
 (dot.md §6).
 
+**0.2.** A `<workflow>` may also be a bare workflow name: an argument that is not an
+existing path and contains no `/`. It names the folder under `.spore/workflows/` of the
+project folder found by walking up from the current folder (§Project folder) whose
+`workflow.dot` has that graph id. No project folder, or no folder with that graph id,
+is `workflow.not-found`; two folders with it are `workflow.ambiguous`. Both exit 2,
+and `workflow.not-found` lists the names that exist.
+
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
 Run IDs are random (host §2): `start` and `run` print the run ID the engine returned,
 and the same key in another database names another run.
@@ -45,6 +53,75 @@ try of the same invocation, with the same effect key, even past the action's
 `maxAttempts`. `--complete <outcome>` continues as if the step had returned that
 outcome. `--fail <message>` ends the run as failed with the step's kept error; the
 message is recorded in the event only, and the run never pauses on that step again.
+
+## Project folder (0.2)
+
+A repository keeps its workflows and its runs in one project folder, `.spore/`, at its
+root:
+
+```text
+.spore/
+├── .gitignore              # written by spore
+├── workflows/
+│   └── coding-loop/        # a workflow folder (dot.md), committed
+├── runspore.db             # not committed
+└── runspore.db.files/      # not committed
+```
+
+**Database.** Every command uses the first of:
+
+1. `--db`;
+2. `$RUNSPORE_DB`;
+3. `<dir>/.spore/runspore.db`, where `<dir>` is the nearest folder at or above the
+   current one that holds a `.spore/` directory;
+4. `./runspore.db`, when no `.spore/` exists up to the filesystem root.
+
+A relative path is taken from the current folder. Every command, from any subfolder of
+the repository, therefore reaches the same database. `status --json` and `list --json`
+print the database used as `"db"`, an absolute path.
+
+**Base folder.** `start` and `run` record the run's base folder with the run (store
+§2 `create_run`). It is `<dir>` whenever the database path is
+`<dir>/.spore/runspore.db`, however that path was given: walk-up, `--db` or
+`$RUNSPORE_DB`. Otherwise it is the current folder. `--base-dir` overrides both. The
+recorded folder is absolute. Every dispatch of the run, by any later command started
+from any folder, runs the run's commands from it (host §2), so a run continued from a
+subfolder runs where its first try ran. A `start` whose key names an existing run keeps
+the folder recorded first.
+
+**`spore init`.** It creates `.spore/`, `.spore/workflows/` and `.spore/.gitignore` at
+the repository root: the nearest folder at or above the current one that holds `.git`
+(a folder, or the file of a git worktree), or the current folder when there is none. It
+prints the root and the paths it created, `{"root", "created": [...]}`. It never
+overwrites a file, and running it twice changes nothing. It refuses with exit 2, and
+creates nothing, when:
+
+- `project.nested`: a `.spore/` exists at or above the current folder at another level
+  than the root;
+- `project.legacy-database`: a 0.1 database (`runspore.db`, `runspore.db-wal`,
+  `runspore.db-shm` or `runspore.db.files/`) exists at the root. The message says the
+  file belongs to 0.1 and must be finished with the 0.1 binary or moved aside;
+- `project.unusable`: one of the three paths exists but is not of its kind (a file
+  where a folder belongs, or the reverse), or it cannot be created.
+
+`init` opens no database and ignores `--db` and `$RUNSPORE_DB`; the first writing
+command creates the database.
+
+**The ignore file.** `.spore/.gitignore` must hold the lines `runspore.db`,
+`runspore.db-*` and `runspore.db.files/`. `init`, and every writing command whose
+database is `<dir>/.spore/runspore.db`, add whichever of these lines are missing, keep
+every other line, and create the file if it is absent.
+
+**Only writing commands create a database.** The writing commands are `start`, `run`,
+`worker`, `signal`, `resolve` and `release`. The read-only commands `status`, `list`
+and `events` treat a missing database as empty: `list` shows no runs, and `status` and
+`events` exit 2 with `run.not-found`. They never create the file. `validate` and
+`init` open no database.
+
+**Steps reach the run's database.** Every program the host starts gets `RUNSPORE_DB`,
+the absolute path of the database the worker uses (host.md §3). A `spore` call from
+inside a step therefore reaches the run's own database, even in a git worktree with
+its own `.spore/`, because `$RUNSPORE_DB` comes before walk-up.
 
 ## Exit codes
 
@@ -94,6 +171,10 @@ until it reaches the new node. The cost is one transition per event of the run.
 (kernel.md §3), plus `maxAttempts` from its action's retry policy (1 when it has
 none). `state` is `scheduled`, `unknown` or `stuck`; at a stuck step `error` is the
 kept error. `run` and `worker --until-parked` print the same object.
+
+**0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
+the absolute path of the database the command used (§Project folder). `list` prints
+`{"db", "runs": [...]}`.
 
 **0.2:** `invocation.process` is the process record of the invocation's latest attempt
 (store.md §2 `set_process`): `{"host", "boot", "pgid", "started"}`, or null when the

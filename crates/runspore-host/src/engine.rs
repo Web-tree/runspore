@@ -37,7 +37,12 @@ pub struct EngineConfig {
     pub max_concurrent_activities: usize,
     pub turns_per_run: u32,
     pub limits: Limits,
+    /// Recorded as the base folder of every run this engine starts. Dispatch uses the
+    /// run's recorded folder; this one serves only runs that have none.
     pub base_dir: PathBuf,
+    /// The database's absolute path, given to every program a step starts as
+    /// `RUNSPORE_DB`.
+    pub db_path: Option<PathBuf>,
     pub run_ids: RunIds,
     /// SIGTERM to SIGKILL when a command's process group is stopped.
     pub stop_grace_ms: u64,
@@ -59,6 +64,7 @@ impl Default for EngineConfig {
             turns_per_run: 32,
             limits: Limits::default(),
             base_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            db_path: None,
             run_ids: RunIds::random(),
             stop_grace_ms: DEFAULT_STOP_GRACE_MS,
             guard: guard::own_executable(),
@@ -152,6 +158,15 @@ impl TickReport {
     pub fn did_work(&self) -> bool {
         self.expired + self.turns + self.quarantined + self.diverged + self.dispatched > 0
     }
+}
+
+/// What a claimed attempt runs, and where.
+struct Runnable {
+    action: Value,
+    runner: Arc<dyn crate::ActivityRunner>,
+    input: Value,
+    visit: u32,
+    base_dir: PathBuf,
 }
 
 /// Why a claimed attempt cannot start.
@@ -423,6 +438,7 @@ impl Engine {
             package_digest,
             package,
             started,
+            base_dir: Some(inner.config.base_dir.to_string_lossy().into_owned()),
         };
         let receipt = retry(true, || inner.store.create_run(request.clone())).await?;
         Ok(StartOutcome {
@@ -1015,7 +1031,13 @@ impl Inner {
         let output = match self.resolve_action(&attempt.key, &claim).await {
             Err(Unrunnable::Abandon) => return,
             Err(Unrunnable::Fail(output)) => output,
-            Ok((action, runner, input, visit)) => {
+            Ok(Runnable {
+                action,
+                runner,
+                input,
+                visit,
+                base_dir,
+            }) => {
                 let mut ctx = ActivityContext::new(
                     attempt.key.clone(),
                     claim.node_id.clone(),
@@ -1024,9 +1046,10 @@ impl Inner {
                     claim.attempt_number,
                     visit,
                     claim.effect_key.clone(),
-                    self.config.base_dir.clone(),
+                    base_dir,
                     stop_rx,
                 );
+                ctx.db = self.config.db_path.clone();
                 ctx.guard = self.config.guard.clone();
                 ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
                 let (inner, held) = (self.clone(), attempt.clone());
@@ -1128,13 +1151,9 @@ impl Inner {
         let _ = retry(true, || self.store.record_late_evidence(request.clone())).await;
     }
 
-    /// Finds the action, its runner and the input of a claimed attempt.
-    #[allow(clippy::type_complexity)]
-    async fn resolve_action(
-        &self,
-        key: &RunKey,
-        claim: &Claim,
-    ) -> Result<(Value, Arc<dyn crate::ActivityRunner>, Value, u32), Unrunnable> {
+    /// Finds the action, its runner, the input and the run's base folder of a claimed
+    /// attempt.
+    async fn resolve_action(&self, key: &RunKey, claim: &Claim) -> Result<Runnable, Unrunnable> {
         let fail = |code: &str, message: String| {
             Unrunnable::Fail(ActivityOutput::Failure {
                 error: ActivityOutput::error(code, message, Value::Null),
@@ -1170,6 +1189,15 @@ impl Inner {
                 claim.attempt.invocation_id.clone(),
             )
         })?;
-        Ok((action, runner, input, visit))
+        let base_dir = view
+            .base_dir
+            .map_or_else(|| self.config.base_dir.clone(), PathBuf::from);
+        Ok(Runnable {
+            action,
+            runner,
+            input,
+            visit,
+            base_dir,
+        })
     }
 }

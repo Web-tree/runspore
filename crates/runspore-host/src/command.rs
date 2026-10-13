@@ -267,6 +267,10 @@ impl ActivityRunner for CommandRunner {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            // After `env`, so a workflow cannot point its steps at another database.
+            if let Some(db) = &ctx.db {
+                command.env("RUNSPORE_DB", db);
+            }
         };
         let mut guarded = match Guarded::spawn(&ctx.guard, ctx.stop_grace, &spec.argv, setup).await
         {
