@@ -61,7 +61,7 @@ jobs:
           cp target/${{ matrix.target }}/release/spore LICENSE "$staging/"
           chmod 0755 "$staging/spore"
           tar -czf spore-${{ matrix.target }}.tar.gz -C "$staging" spore LICENSE
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: spore-${{ matrix.target }}
           path: spore-${{ matrix.target }}.tar.gz
@@ -89,7 +89,7 @@ jobs:
             echo "::error::release $TAG already has $assets assets; delete the release to make it again (spec/release.md section 8)"
             exit 1
           fi
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: spore-*
           path: dist
