@@ -10,7 +10,7 @@ use runspore_types::model::{
     code, command_kind, u64_str, ActionPolicy, ActivityResult, AttemptStatus, BufferedSignal,
     ErrorInfo, InvocationPhase, InvocationResolved, InvocationState, Node, NodeResult, Position,
     Resolution, RetryActivity, RunResult, RunStatus, ScheduleActivity, SignalReceived, State,
-    MAX_BUFFERED_SIGNALS, OUTCOME_FAILED, OUTCOME_OK, OUTCOME_RECEIVED,
+    Streak, MAX_BUFFERED_SIGNALS, OUTCOME_EXHAUSTED, OUTCOME_FAILED, OUTCOME_OK, OUTCOME_RECEIVED,
 };
 use runspore_types::reducer::{Command, Decision, Diagnostic, Envelope, Failure, Limits};
 use serde::Serialize;
@@ -33,22 +33,28 @@ const REASON_MISMATCH: &str = "invocation-mismatch";
 const REASON_NOT_UNKNOWN: &str = "invocation-not-unknown";
 const REASON_OUTCOME_UNDECLARED: &str = "outcome-undeclared";
 
-/// The activity the run is parked at: its node, the visit that owns the outstanding
-/// invocation, its routes, and its action's policy.
-struct Activity<'a> {
+/// The node the run is parked at, as *Route* needs it: the visit, the routes and the
+/// loop limits.
+struct Routes<'a> {
     node_id: &'a str,
     visit: u32,
     outcomes: &'a BTreeMap<String, String>,
+    loop_limits: Option<&'a BTreeMap<String, u32>>,
+}
+
+/// The activity the run is parked at: its routes and its action's policy.
+struct Activity<'a> {
+    node_id: &'a str,
+    routes: Routes<'a>,
     policy: &'a ActionPolicy,
 }
 
-/// The await-signal node the run is parked at: its node, the visit, the signal name
-/// it waits for, and its routes.
+/// The await-signal node the run is parked at: its routes and the signal name it
+/// waits for.
 struct Waiter<'a> {
     node_id: &'a str,
-    visit: u32,
+    routes: Routes<'a>,
     signal: &'a str,
-    outcomes: &'a BTreeMap<String, String>,
 }
 
 pub(crate) struct Machine<'a> {
@@ -448,7 +454,10 @@ impl<'a> Machine<'a> {
         let Some((
             node_id,
             Node::AwaitSignal {
-                signal, outcomes, ..
+                signal,
+                outcomes,
+                loop_limits,
+                ..
             },
         )) = graph.node(&position.node_id)
         else {
@@ -458,14 +467,19 @@ impl<'a> Machine<'a> {
         };
         Ok(Waiter {
             node_id,
-            visit: position.visit,
+            routes: Routes {
+                node_id,
+                visit: position.visit,
+                outcomes,
+                loop_limits: loop_limits.as_ref(),
+            },
             signal,
-            outcomes,
         })
     }
 
-    /// Takes one signal at the waiter for one microstep: it either records the node's
-    /// result and returns the route, or is dropped with `signal.outcome-unrouted`.
+    /// Takes one signal at the waiter for one microstep: it either routes the node and
+    /// returns the node to enter, or is dropped with `signal.outcome-unrouted`. In a 0.2
+    /// document no signal takes the `exhausted` route.
     fn take(
         &mut self,
         waiter: &Waiter<'a>,
@@ -475,46 +489,84 @@ impl<'a> Machine<'a> {
         let outcome = taken
             .outcome
             .unwrap_or_else(|| OUTCOME_RECEIVED.to_string());
-        let Some(target) = waiter.outcomes.get(&outcome) else {
+        let reserved = outcome == OUTCOME_EXHAUSTED && self.graph.reserves_exhausted();
+        if reserved || !waiter.routes.outcomes.contains_key(&outcome) {
             let details = object([
                 ("eventId", Value::String(taken.event_id)),
                 ("outcome", Value::String(outcome)),
             ]);
             self.diagnose(code::SIGNAL_OUTCOME_UNROUTED, Some(waiter.node_id), details)?;
             return Ok(None);
-        };
-        self.state.nodes.insert(
-            waiter.node_id.to_string(),
-            NodeResult {
-                visit: waiter.visit,
-                outcome,
-                output: taken.data,
-            },
-        );
-        Ok(Some(target.as_str()))
+        }
+        self.route(&waiter.routes, outcome, taken.data).map(Some)
     }
 
-    /// A success: record the node's result, clear the invocation, follow the route.
+    /// Route (7.4): records the node's result, counts its streak when the node has loop
+    /// limits, and returns the node to enter: the outcome's route, or the `exhausted`
+    /// route once the outcome's limit is used up.
+    fn route(
+        &mut self,
+        routes: &Routes<'a>,
+        outcome: String,
+        output: Value,
+    ) -> Result<&'a str, Failure> {
+        let node_id = routes.node_id;
+        self.state.nodes.insert(
+            node_id.to_string(),
+            NodeResult {
+                visit: routes.visit,
+                outcome: outcome.clone(),
+                output,
+            },
+        );
+        let mut taken = outcome.as_str();
+        if let Some(limits) = routes.loop_limits {
+            match limits.get(&outcome) {
+                Some(&limit) => {
+                    let count = self
+                        .state
+                        .streaks
+                        .get(node_id)
+                        .filter(|streak| streak.outcome == outcome)
+                        .map_or(0, |streak| streak.count);
+                    if count >= limit {
+                        self.state.streaks.remove(node_id);
+                        let details = object([
+                            ("outcome", Value::String(outcome.clone())),
+                            ("limit", Value::from(limit)),
+                        ]);
+                        self.diagnose(code::LOOP_EXHAUSTED, Some(node_id), details)?;
+                        taken = OUTCOME_EXHAUSTED;
+                    } else {
+                        let streak = Streak {
+                            outcome: outcome.clone(),
+                            count: count + 1,
+                        };
+                        self.state.streaks.insert(node_id.to_string(), streak);
+                    }
+                }
+                None => {
+                    self.state.streaks.remove(node_id);
+                }
+            }
+        }
+        match routes.outcomes.get(taken) {
+            Some(target) => Ok(target.as_str()),
+            None => Err(failure::invariant(format!(
+                "node {node_id:?} has no route for {taken:?}"
+            ))),
+        }
+    }
+
+    /// A success: clear the invocation, route the node, enter where it leads.
     fn complete(
         &mut self,
         activity: &Activity<'a>,
         outcome: String,
         output: Value,
     ) -> Result<(), Failure> {
-        let Some(target) = activity.outcomes.get(&outcome) else {
-            return Err(failure::invariant(format!(
-                "declared outcome {outcome:?} has no route"
-            )));
-        };
-        self.state.nodes.insert(
-            activity.node_id.to_string(),
-            NodeResult {
-                visit: activity.visit,
-                outcome,
-                output,
-            },
-        );
         self.state.invocation = None;
+        let target = self.route(&activity.routes, outcome, output)?;
         self.enter(target, Some(activity.node_id))
     }
 
@@ -574,24 +626,18 @@ impl<'a> Machine<'a> {
         may_park: bool,
     ) -> Result<(), Failure> {
         error.node_id = Some(activity.node_id.to_string());
-        let Some(target) = activity.outcomes.get(OUTCOME_FAILED) else {
+        if !activity.routes.outcomes.contains_key(OUTCOME_FAILED) {
             if may_park && self.graph.parks_stuck_steps() {
                 return self.stick(activity, error);
             }
             self.terminate(error);
             return Ok(());
-        };
+        }
         self.state.invocation = None;
         let error = serde_json::to_value(&error)
             .map_err(|cause| failure::invariant(format!("error is not JSON: {cause}")))?;
-        self.state.nodes.insert(
-            activity.node_id.to_string(),
-            NodeResult {
-                visit: activity.visit,
-                outcome: OUTCOME_FAILED.to_string(),
-                output: object([("error", error)]),
-            },
-        );
+        let output = object([("error", error)]);
+        let target = self.route(&activity.routes, OUTCOME_FAILED.to_string(), output)?;
         self.enter(target, Some(activity.node_id))
     }
 
@@ -660,7 +706,10 @@ impl<'a> Machine<'a> {
         let Some((
             node_id,
             Node::Activity {
-                action, outcomes, ..
+                action,
+                outcomes,
+                loop_limits,
+                ..
             },
         )) = graph.node(&position.node_id)
         else {
@@ -671,8 +720,12 @@ impl<'a> Machine<'a> {
         };
         Ok(Activity {
             node_id,
-            visit: position.visit,
-            outcomes,
+            routes: Routes {
+                node_id,
+                visit: position.visit,
+                outcomes,
+                loop_limits: loop_limits.as_ref(),
+            },
             policy,
         })
     }

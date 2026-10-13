@@ -27,6 +27,7 @@ pub(crate) fn initial(started: &RunStarted, semantics: &str) -> State {
         input: started.input.clone(),
         nodes: BTreeMap::new(),
         visits: BTreeMap::new(),
+        streaks: BTreeMap::new(),
         activations: 0,
         position: None,
         invocation: None,
@@ -66,6 +67,15 @@ pub(crate) fn load(bytes: &[u8], semantics: &str, graph: &Graph) -> Result<State
 fn consistent(state: &State, graph: &Graph) -> Result<(), &'static str> {
     if state.signals.len() > MAX_BUFFERED_SIGNALS {
         return Err("more buffered signals than the buffer holds");
+    }
+    for (node_id, streak) in &state.streaks {
+        let limit = graph
+            .node(node_id)
+            .and_then(|(_, node)| node.loop_limits())
+            .and_then(|limits| limits.get(&streak.outcome));
+        if !limit.is_some_and(|limit| (1..=*limit).contains(&streak.count)) {
+            return Err("a streak the node's loop limits do not allow");
+        }
     }
     if state.status.is_terminal() {
         if state.position.is_some() || state.invocation.is_some() {

@@ -19,7 +19,9 @@
 //!   are present for the kernel to ignore.
 //! - Every outcome routes to a random node, a terminal one about one time in
 //!   seven, so back edges and self loops are common. Half the activity nodes
-//!   also route `failed`. The start node is usually the first activity.
+//!   also route `failed`. The start node is usually the first activity. One
+//!   route of each node then chains the nodes from the start to `done`, and an
+//!   end node nothing routes to is dropped, so the graph passes W14 and W15.
 //! - Inputs and outputs are mappings over `input`, `nodes`, and `run`, with
 //!   `$get`, `$literal`, array indexes, and now and then a path that will not
 //!   resolve.
@@ -51,7 +53,7 @@
 //! must not follow it down. Payloads carry integers at the ±(2^53 − 1) bounds,
 //! escapes, and keys whose UTF-16 order differs from their code point order.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -392,6 +394,7 @@ impl Plan {
         if terminals.len() > 2 {
             nodes.insert("done-alt".to_string(), json!({"kind": "complete"}));
         }
+        reachable(&mut nodes, &start, &inner);
 
         let mut document = Map::new();
         document.insert("format".to_string(), json!(WORKFLOW_FORMAT_0_2));
@@ -417,6 +420,35 @@ impl Plan {
             signals,
         }
     }
+}
+
+/// Makes the graph pass W14 and W15: one route of each inner node, from the start on,
+/// is turned to the next inner node and the last one's to `done`, so every inner node
+/// is reached and reaches an end. An end node no route reaches is then dropped.
+fn reachable(nodes: &mut Map<String, Value>, start: &str, inner: &[String]) {
+    let chain: Vec<&str> = std::iter::once(start)
+        .chain(inner.iter().map(String::as_str).filter(|id| *id != start))
+        .collect();
+    for (i, id) in chain.iter().enumerate() {
+        let next = chain.get(i + 1).copied().unwrap_or("done");
+        let routes = nodes[*id]["outcomes"]
+            .as_object_mut()
+            .expect("an inner node routes");
+        if let Some(target) = routes.values_mut().next() {
+            *target = json!(next);
+        }
+    }
+    let targeted: BTreeSet<String> = nodes
+        .values()
+        .filter_map(|node| node["outcomes"].as_object())
+        .flat_map(|routes| {
+            routes
+                .values()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect();
+    nodes.retain(|id, node| node.get("outcomes").is_some() || targeted.contains(id));
 }
 
 /// An action binding and the outcomes it declares.

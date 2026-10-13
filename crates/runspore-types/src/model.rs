@@ -26,6 +26,9 @@ pub const ABI_VERSION: &str = "runspore:machine@0.1.0";
 
 /// Outcome every activity node may route without the action declaring it.
 pub const OUTCOME_FAILED: &str = "failed";
+/// 0.2 documents: outcome a node with `loopLimits` routes when one of its limits is
+/// used up. No action declares it and no signal takes it.
+pub const OUTCOME_EXHAUSTED: &str = "exhausted";
 /// Outcome of a success result or a signal that names none.
 pub const OUTCOME_OK: &str = "ok";
 pub const OUTCOME_RECEIVED: &str = "received";
@@ -130,6 +133,14 @@ pub enum Node {
             skip_serializing_if = "Option::is_none"
         )]
         output_schemas: Option<BTreeMap<String, Value>>,
+        /// 0.2: how many times in a row the node may route each outcome before it
+        /// routes `exhausted` instead.
+        #[serde(
+            rename = "loopLimits",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        loop_limits: Option<BTreeMap<String, u32>>,
     },
     /// Consumes the earliest buffered signal with this name.
     AwaitSignal {
@@ -142,6 +153,12 @@ pub enum Node {
             skip_serializing_if = "Option::is_none"
         )]
         output_schemas: Option<BTreeMap<String, Value>>,
+        #[serde(
+            rename = "loopLimits",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        loop_limits: Option<BTreeMap<String, u32>>,
     },
     Complete {
         /// Mapping evaluated against the run context to build the run output.
@@ -151,6 +168,26 @@ pub enum Node {
     Fail {
         error: ErrorInfo,
     },
+}
+
+impl Node {
+    /// The routes of an activity or await-signal node; `None` for an end node.
+    pub fn outcomes(&self) -> Option<&BTreeMap<String, String>> {
+        match self {
+            Node::Activity { outcomes, .. } | Node::AwaitSignal { outcomes, .. } => Some(outcomes),
+            Node::Complete { .. } | Node::Fail { .. } => None,
+        }
+    }
+
+    /// The node's `loopLimits`, when it has them.
+    pub fn loop_limits(&self) -> Option<&BTreeMap<String, u32>> {
+        match self {
+            Node::Activity { loop_limits, .. } | Node::AwaitSignal { loop_limits, .. } => {
+                loop_limits.as_ref()
+            }
+            Node::Complete { .. } | Node::Fail { .. } => None,
+        }
+    }
 }
 
 /// The fields of an action binding the kernel depends on. Unknown fields are
@@ -259,6 +296,10 @@ pub struct State {
     pub nodes: BTreeMap<String, NodeResult>,
     /// Entries per node ID so far.
     pub visits: BTreeMap<String, u32>,
+    /// 0.2: per node with `loopLimits`, the limited outcome it routed last and how many
+    /// times in a row. Absent when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub streaks: BTreeMap<String, Streak>,
     pub activations: u32,
     /// The node the run is parked at; `None` once terminal.
     pub position: Option<Position>,
@@ -310,6 +351,13 @@ pub struct NodeResult {
     pub visit: u32,
     pub outcome: String,
     pub output: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Streak {
+    pub outcome: String,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -539,6 +587,7 @@ pub mod code {
     pub const INVOCATION_UNKNOWN: &str = "invocation.unknown";
     pub const INVOCATION_STUCK: &str = "invocation.stuck";
     pub const ACTIVITY_RETRY_SCHEDULED: &str = "activity.retry-scheduled";
+    pub const LOOP_EXHAUSTED: &str = "loop.exhausted";
     // ErrorInfo codes produced by the kernel (business-visible failures)
     pub const LIMIT_VISITS_EXCEEDED: &str = "limit.visits-exceeded";
     pub const LIMIT_ACTIVATIONS_EXCEEDED: &str = "limit.activations-exceeded";
@@ -644,6 +693,7 @@ mod tests {
                 },
             )]),
             visits: BTreeMap::from([("build".to_string(), 1)]),
+            streaks: BTreeMap::new(),
             activations: 1,
             position: Some(Position {
                 node_id: "build".into(),

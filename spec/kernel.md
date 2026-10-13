@@ -31,6 +31,8 @@ The rules marked 0.2 so far:
 | `from` as a path's first step; `default` beside `$get` | §4, W10 | documents in format `runspore.workflow/0.2`, under either semantics |
 | A step that cannot recover is stuck and waits for a person instead of failing the run | §3, §7.3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
 | Nodes may carry `outputSchemas`, which no transition reads | §2, W01, W13 | documents in format `runspore.workflow/0.2`, under either semantics |
+| Loop limits: `loopLimits`, the reserved outcome `exhausted`, `streaks`, *Route* | §2 (W07–W09, W12), §3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
+| Every node is reachable from `start`, and an end from every node | §2 (W14, W15) | documents in format `runspore.workflow/0.2`, under either semantics |
 
 ## 1. Canonical data
 
@@ -69,7 +71,9 @@ bytes are the package; `digest::package` of them is the package digest.
   "nodes": {
     "build":   {"kind": "activity", "action": "build",
                 "input": {"repo": {"$get": ["input", "repo"]}},
-                "outcomes": {"ok": "approve", "red": "build", "failed": "broken"}},
+                "outcomes": {"ok": "approve", "red": "build", "failed": "broken",
+                             "exhausted": "broken"},
+                "loopLimits": {"red": 3}},
     "approve": {"kind": "await-signal", "signal": "approval",
                 "outcomes": {"approved": "done", "rejected": "build"}},
     "done":    {"kind": "complete", "output": {"$get": ["nodes", "build", "output"]}},
@@ -95,15 +99,33 @@ of their IDs; the first violation is reported.
 | W04 | Action IDs match `[A-Za-z0-9_-]{1,64}` |
 | W05 | `start` names a node |
 | W06 | `maxVisitsPerNode` in 1..=1000; `maxActivations` in 1..=10000 |
-| W07 | Each action parses as `ActionPolicy`; outcomes are non-empty, unique, match `[a-z0-9][a-z0-9-]{0,63}`, and none is `failed`; `maxAttempts` in 1..=100 |
-| W08 | Activity node: its action exists; `outcomes` has a key for every action outcome; the only other key allowed is `failed`; every target names a node |
-| W09 | Await-signal node: `signal` matches `[A-Za-z0-9_.-]{1,64}`; `outcomes` is non-empty; keys match the outcome pattern; every target names a node |
+| W07 | Each action parses as `ActionPolicy`; outcomes are non-empty, unique, match `[a-z0-9][a-z0-9-]{0,63}`, and none is `failed` (0.2: nor `exhausted`); `maxAttempts` in 1..=100 |
+| W08 | Activity node: its action exists; `outcomes` has a key for every action outcome; the only other keys allowed are `failed`, and (0.2) `exhausted` when the node has `loopLimits`; every target names a node |
+| W09 | Await-signal node: `signal` matches `[A-Za-z0-9_.-]{1,64}`; `outcomes` is non-empty; keys match the outcome pattern; (0.2) the key `exhausted` only when the node has `loopLimits`; every target names a node |
 | W10 | Mappings are well formed (section 4) |
 | W11 | Fail node: `error.code` matches `[a-z0-9][a-z0-9.-]{0,63}`; `error.nodeId` is null |
-| W13 | 0.2: `outputSchemas` (below) is non-empty; each key is an outcome the node produces, one of its action's `outcomes` for an activity node or a key of its `outcomes` for an await-signal node, and never `failed`; each value is a JSON object. Await-signal nodes that wait for the same `signal` declare equal schemas, or none, for every outcome they both route |
+| W12 | `loopLimits` (0.2 only; no node of a 0.1 document has it) appears only on activity and await-signal nodes and is non-empty. Each key is a key of the node's `outcomes` other than `exhausted`; each value is an integer with value + 1 ≤ `maxVisitsPerNode` (so at most 999). A node with `loopLimits` routes `exhausted` |
+| W13 | 0.2: `outputSchemas` (below) is non-empty; each key is an outcome the node produces, one of its action's `outcomes` for an activity node or a key of its `outcomes` for an await-signal node, and never `failed` or `exhausted`; each value is a JSON object. Await-signal nodes that wait for the same `signal` declare equal schemas, or none, for every outcome they both route |
+| W14 | (0.2) Every node is reachable from `start` by following `outcomes` |
+| W15 | (0.2) From every node, following `outcomes` reaches a `complete` or `fail` node |
 
-W12 is reserved for loop limits. In a `runspore.workflow/0.1` document, a node that
-carries `outputSchemas` violates W01.
+A violation is `invalid-input` / `workflow.invalid`; its details name the node. An
+action with effect `reconcilable` is `incompatible-version` /
+`workflow.unsupported-effect`, checked as part of W07. In a `runspore.workflow/0.1`
+document, a node that carries `outputSchemas` violates W01.
+
+`loopLimits` is an object from outcome to integer: `"loopLimits": {"red": 3}` lets the
+node route `red` at most 3 times in a row; the next `red` takes the node's `exhausted`
+route instead (*Route*, §7.4). In a 0.2 document `exhausted` is a reserved outcome,
+like `failed`: no action declares it and no signal takes it. A 0.1 document keeps
+0.1's rules, so an await-signal node of a 0.1 document may route an outcome named
+`exhausted` as any other.
+
+W14 and W15 look only at routes. A stuck step (§7.4) is not a route, and `loopLimits`
+exempts no loop: a node's `exhausted` target must reach an end like every other node,
+so `a -exhausted-> b -> a` with no other way out fails W15. In W14 the first node in
+byte order that `start` does not reach is reported; in W15 the first that reaches no
+end.
 
 **Output schemas (0.2).** An `activity` or `await-signal` node of a
 `runspore.workflow/0.2` document may carry `outputSchemas`: an object from outcome to
@@ -112,11 +134,8 @@ only the field's shape (W13) and never reads it in a transition: a result or a s
 whose data does not fit is decided exactly as one that fits. Hosts check the data
 before it is recorded ([host.md](host.md) §2, §3) and check the schemas themselves
 against the subset (`workflow.invalid-schema`). `{"$outputSchemas": {}}` left in a
-mapping is a `$` key, so W10 already refuses it.
-
-A violation is `invalid-input` / `workflow.invalid`. An action with effect
-`reconcilable` is `incompatible-version` / `workflow.unsupported-effect`, checked as
-part of W07.
+mapping is a `$` key, so W10 already refuses it. `exhausted` takes no schema: the
+output it records is the real result's, which fits that outcome's schema.
 
 ## 3. State
 
@@ -136,7 +155,14 @@ invocation keeps the error that made it stuck in `error`; no other invocation ha
 of a 0.1 document is `state.invalid`.
 
 `nodes[id]` holds the latest result of a node: `{visit, outcome, output}`. A later
-visit replaces it. `visits[id]` counts admitted entries. `activations` counts admitted
+visit replaces it. `visits[id]` counts admitted entries.
+
+`streaks` (0.2) maps a node ID to `{outcome, count}`: the limited outcome the node
+routed last and how many times in a row (*Route*, §7.4). An entry exists only for a
+node with `loopLimits` whose last routed outcome is one it limits, with `count` in
+1..=its limit; the field is absent when it has no entry. A snapshot whose streak names
+a node without `loopLimits`, an outcome the node does not limit, or a count outside
+1..=limit is `state.invalid`. `activations` counts admitted
 entries across all nodes. `signals` is the buffer of accepted, unconsumed signals in
 acceptance order. `lastSequence` is the sequence of the last event applied.
 `lastAcceptedAtMs` is the maximum accepted time seen: logical time never decreases.
@@ -168,7 +194,8 @@ A mapping is a JSON value evaluated against the run context:
 the node whose result routed there, the outcome it routed on, and the output recorded
 with it, all as `nodes[node]` holds them at that moment. A `failed` arrow shows
 outcome `failed` and output `{"error": ErrorInfo}` (*fail the invocation*); a signal's
-arrow shows the waiter, the signal's outcome and its data. When the node is entered
+arrow shows the waiter, the signal's outcome and its data. An `exhausted` arrow shows
+the outcome the node really returned, as `nodes` records it (*Route*). When the node is entered
 as the start node, `from` is `null`. It exists only while the entered node's mappings
 are evaluated; the state gains no field. `{"$get": ["from"]}` always resolves; a deeper
 path into a `null` `from` does not.
@@ -236,7 +263,7 @@ Refinements of these checks:
   that decodes but contradicts itself or the graph (status against position and
   invocation, a position at a node of the wrong kind, a visit count below the
   position's visit, an invocation ID that is not the derived one, more than 64
-  buffered signals) is `state.invalid`.
+  buffered signals, a streak §3 does not allow) is `state.invalid`.
 
 ### 7.2 Bookkeeping
 
@@ -266,8 +293,8 @@ same `invocationId` and `attempt`, and is `scheduled`: diagnostic `result.stale`
 
 - `success`: the outcome is `result.outcome`, or `ok` when absent. If the action does
   not declare it: *fail the invocation* with `activity.undeclared-outcome` (details
-  `{"outcome"}`). Otherwise record `nodes[node] = {visit, outcome, output}`, clear the
-  invocation, and *enter* `node.outcomes[outcome]`.
+  `{"outcome"}`). Otherwise clear the invocation and *route* the node with that
+  outcome and `result.output`.
 - `failure`: if `result.retryable` and `inv.attempt < maxAttempts`: *retry*. Otherwise
   *fail the invocation* with `result.error`, or with `activity.failed` when it is absent.
 - `unknown` or `expired`: if the action's effect is repeatable (`pure`, `read-only`,
@@ -320,9 +347,29 @@ or `outcome-undeclared`.
 **Consume** (at an await-signal node) — find the earliest buffered signal whose name
 equals `node.signal`. None: stay `waiting`. Otherwise remove it and count one
 microstep (over the budget is the same `budget.microsteps` failure as in *enter*). Its outcome is `signal.outcome`, or `received` when absent. If the node
-does not route that outcome: diagnostic `signal.outcome-unrouted` (details
-`{"eventId", "outcome"}`) and look for the next matching signal. Otherwise record
-`nodes[node] = {visit, outcome, output: signal.data}` and *enter* the target.
+does not route that outcome, or (0.2) the outcome is `exhausted`: diagnostic
+`signal.outcome-unrouted` (details `{"eventId", "outcome"}`) and look for the next
+matching signal. Otherwise *route* the node with that outcome and `signal.data`.
+
+**Route(node, outcome, output)** — every place that records a node's result and moves
+on goes through it: a `success` result (also by `invocation.resolved` with
+`complete`), *consume*, and *fail the invocation* at a node that routes `failed`.
+
+1. Record `nodes[node] = {visit, outcome, output}`.
+2. If the node has `loopLimits` (0.2):
+   - If `outcome` is a key of `loopLimits`: let `n` be `streaks[node].count` when
+     `streaks[node].outcome` equals `outcome`, else 0. If `n + 1 > loopLimits[outcome]`:
+     delete `streaks[node]`, emit diagnostic `loop.exhausted` (details `{"outcome",
+     "limit"}`), *enter* `node.outcomes.exhausted`, and stop. Otherwise set
+     `streaks[node] = {outcome, count: n + 1}`.
+   - Otherwise delete `streaks[node]`.
+3. *Enter* `node.outcomes[outcome]`.
+
+The recorded result stays the real one: after the limit is used up, `nodes[node]`
+holds the outcome the node returned and its output, so the node behind the
+`exhausted` arrow can map them. *Enter*'s limits (the safety net) and mapping errors
+are unchanged and stay terminal; a node entered through `exhausted` counts its visit
+like any other.
 
 **Retry** — increment `inv.attempt`, set `inv.state = scheduled`, status `running`.
 Emit `activity.retry` with the new attempt as command ordinal and
@@ -330,8 +377,8 @@ Emit `activity.retry` with the new attempt as command ordinal and
 Emit diagnostic `activity.retry-scheduled` (details `{"attempt"}`).
 
 **Fail the invocation(error)** — set `error.nodeId` to the node. If the node routes
-`failed`: clear the invocation, record `nodes[node] = {visit, outcome: "failed",
-output: {"error": error}}` and *enter* the target. Otherwise, for a 0.1 document,
+`failed`: clear the invocation and *route* the node with outcome `failed` and output
+`{"error": error}`. Otherwise, for a 0.1 document,
 clear the invocation and end terminal `failed` with `result = {error}`.
 
 For a 0.2 document with no `failed` route the step is **stuck**: set `inv.state =
@@ -373,6 +420,7 @@ Diagnostics appear in the order they were produced. `details` is canonical JSON.
 | `signal.outcome-unrouted` | the await-signal node |
 | `result.stale`, `resolve.not-applicable` | the activity node when the event names the current invocation, else null |
 | `invocation.unknown`, `invocation.stuck`, `activity.retry-scheduled` | the activity node |
+| `loop.exhausted` | the node that used up its loop limit |
 
 `activity.retry-scheduled` details carry the newly authorized attempt and follow the
 retry command. The `message` of an `ErrorInfo` the kernel creates is fixed text and is
@@ -395,6 +443,7 @@ bounded in practice by the size of the workflow document and of the state.
 | K7 | Exceeding a budget commits nothing (C16) |
 | K8 | Keys with supplementary-plane characters keep JCS order and digest (C15) |
 | K9 | Output does not depend on the insertion order of maps in the input documents |
+| K10 | A limited outcome is never routed more than its limit times in a row (0.2) |
 
 ## 9. Golden traces
 
@@ -432,7 +481,13 @@ tests also replay every trace with its `format` switched between `runspore.workf
 and `runspore.workflow/0.2`, and require the same expectations, so a 0.1 document stays
 accepted. The exceptions are the traces of a rule that names a format, which must change:
 the three 0.1 traces above, where a 0.2 step is stuck, which the `14*` traces pin, and
-the 0.2 traces of `from`, `$get` `default`, the stuck step and `outputSchemas`.
+the 0.2 traces of `from`, `$get` `default`, the stuck step, `outputSchemas`, loop limits,
+W12, W14 and W15.
+
+The loop-limit traces: the limit used up takes `exhausted` with the real result
+recorded; another outcome resets the streak; taking `exhausted` resets it; a signal
+with outcome `exhausted` is unrouted; and W07, W08, W09, W12, W14 and W15 each
+refuse a document.
 
 The 0.2 mapping rules have their own traces: the start node sees `from` `null`; a
 loop back sees the judging step's outcome and output; a `failed` arrow shows as

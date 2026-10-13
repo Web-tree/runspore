@@ -588,7 +588,9 @@ async fn a_loop_ends_failed_at_its_visit_limit_without_spinning() {
                      "outcomes": ["again"]}
         },
         "nodes": {
-            "poll": {"kind": "activity", "action": "poll", "outcomes": {"again": "poll"}}
+            "poll": {"kind": "activity", "action": "poll",
+                     "outcomes": {"again": "poll", "failed": "gave-up"}},
+            "gave-up": {"kind": "fail", "error": {"code": "poll.failed", "message": "poll failed"}}
         }
     }))
     .unwrap();

@@ -25,6 +25,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 | Output schemas | 0.2: a schema per outcome on a node; every result, signal and resolution checked against it |
 | Effects | `pure`, `read-only`, `idempotent` repeat after an unknown outcome; `unsafe` pauses for an operator |
 | Stuck steps | 0.2: a step that gives up with no `failed` route pauses the run for a person, who retries, completes or fails it |
+| Loop limits | 0.2: `loopLimits` bounds how many times in a row a step routes an outcome; the next one takes the step's `exhausted` edge. Every node is reachable from the start, and an end from every node |
 | Retry | Kernel-decided delivery retries with exponential backoff, same invocation and effect key |
 | Actions | `command` (argv, no shell) and registered native Rust functions |
 | Store | SQLite, one file, several processes on one host |

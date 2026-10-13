@@ -1,0 +1,57 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W15-end-reachable",
+  "description": "W15 in a 0.2 document: hold only waits again, so no end is reachable from it and the document fails with invalid-input / workflow.invalid.",
+  "workflow": {
+    "actions": {
+      "test": {
+        "argv": ["test"],
+        "effect": "read-only",
+        "kind": "command",
+        "outcomes": ["ok", "red"]
+      },
+      "work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}
+    },
+    "format": "runspore.workflow/0.2",
+    "limits": {"maxActivations": 256, "maxVisitsPerNode": 16},
+    "name": "validation-W15-end-reachable",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "hold"},
+        "signal": "approval"
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "test", "output"]}},
+      "hold": {"kind": "await-signal", "outcomes": {"again": "hold"}, "signal": "hold"},
+      "implement": {
+        "action": "work",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "test"}
+      },
+      "test": {
+        "action": "test",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "approve", "red": "implement"}
+      }
+    },
+    "start": "implement"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": {"task": "t-1"},
+          "runId": "run_validation_W15_end_reachable",
+          "tenant": "default"
+        }
+      },
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}

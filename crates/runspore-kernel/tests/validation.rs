@@ -1,4 +1,4 @@
-//! `spec/kernel.md` section 2: workflow validation rules W01–W11 and W13.
+//! `spec/kernel.md` section 2: workflow validation rules W01–W15.
 
 mod common;
 
@@ -30,11 +30,21 @@ fn edited(pointer: &str, value: Value) -> Value {
     with(review_loop(), pointer, value)
 }
 
-/// `count` complete nodes named `n000`, `n001`, ...; the first is the start.
+/// `count` nodes named `n000`, `n001`, ...: the start `n000` waits for a signal whose
+/// outcomes lead to each of the others, all complete nodes (W14). Alone it is one.
 fn many_nodes(count: usize) -> Value {
-    let nodes: Map<String, Value> = (0..count)
+    let mut nodes: Map<String, Value> = (1..count)
         .map(|i| (format!("n{i:03}"), json!({"kind": "complete"})))
         .collect();
+    let routes: Map<String, Value> = (1..count)
+        .map(|i| (format!("o{i}"), json!(format!("n{i:03}"))))
+        .collect();
+    let start = if count > 1 {
+        json!({"kind": "await-signal", "signal": "pick", "outcomes": routes})
+    } else {
+        json!({"kind": "complete"})
+    };
+    nodes.insert("n000".to_string(), start);
     json!({"format": WORKFLOW_FORMAT_0_2, "name": "wide", "start": "n000", "nodes": nodes})
 }
 
@@ -311,7 +321,8 @@ fn w08_activity_nodes() {
     assert_invalid(&edited("/nodes/build/outcomes/ok", json!("nowhere")));
     assert_invalid(&edited("/nodes/build/outcomes/failed", json!("nowhere")));
     assert_invalid(&without(review_loop(), "/nodes/build/outcomes"));
-    assert_valid(&without(review_loop(), "/nodes/build/outcomes/failed"));
+    let no_failed_route = without(review_loop(), "/nodes/build/outcomes/failed");
+    assert_valid(&without(no_failed_route, "/nodes/broken"));
     assert_valid(&without(review_loop(), "/nodes/build/input"));
 }
 
@@ -483,6 +494,19 @@ fn w13_output_schemas() {
     // Only activity and await-signal nodes carry the field.
     assert_invalid(&edited("/nodes/done/outputSchemas", json!({"ok": object})));
     assert_invalid(&edited("/nodes/build/outputSchemas", json!(["ok"])));
+    // `exhausted` records the real result, so it takes no schema of its own.
+    let limited_signal = with(
+        edited("/nodes/approve/outcomes/exhausted", json!("done")),
+        "/nodes/approve/loopLimits",
+        json!({"rejected": 2}),
+    );
+    let failure = check(&with(
+        limited_signal,
+        "/nodes/approve/outputSchemas",
+        json!({"exhausted": object}),
+    ))
+    .unwrap_err();
+    assert!(failure.details.starts_with("W13"), "{}", failure.details);
 }
 
 #[test]
@@ -539,4 +563,122 @@ fn validation_runs_on_every_transition() {
         2_000,
     );
     assert_failure(result, InvalidInput, code::WORKFLOW_INVALID);
+}
+
+/// The example with a loop limit on `build`: `red` at most 3 times in a row, then the
+/// `exhausted` route to `approve`.
+fn limited() -> Value {
+    let workflow = edited("/nodes/build/loopLimits", json!({"red": 3}));
+    with(
+        workflow,
+        "/nodes/build/outcomes/exhausted",
+        json!("approve"),
+    )
+}
+
+/// W07–W09 in 0.2: `exhausted` is reserved. No action declares it; a node routes it
+/// only with `loopLimits`.
+#[test]
+fn w07_to_w09_reserve_exhausted_in_0_2() {
+    let as_0_1 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT));
+    let declared = edited("/actions/build/outcomes", json!(["ok", "red", "exhausted"]));
+    let declared = with(declared, "/nodes/build/outcomes/exhausted", json!("done"));
+    assert_invalid(&declared);
+    assert_valid(&as_0_1(declared));
+
+    assert_invalid(&edited("/nodes/build/outcomes/exhausted", json!("done")));
+    let signal = edited("/nodes/approve/outcomes/exhausted", json!("done"));
+    assert_invalid(&signal);
+    assert_valid(&as_0_1(signal));
+    let limited_signal = with(
+        edited("/nodes/approve/outcomes/exhausted", json!("done")),
+        "/nodes/approve/loopLimits",
+        json!({"rejected": 2}),
+    );
+    assert_valid(&limited_signal);
+}
+
+#[test]
+fn w12_loop_limits() {
+    assert_valid(&limited());
+    assert_valid(&with(
+        limited(),
+        "/nodes/build/loopLimits",
+        json!({"red": 15, "ok": 1}),
+    ));
+    assert_valid(&with(
+        limited(),
+        "/nodes/build/loopLimits",
+        json!({"failed": 2}),
+    ));
+    for bad in [
+        json!({}),
+        json!({"red": 0}),
+        json!({"red": 16}),
+        json!({"exhausted": 1}),
+        json!({"blue": 1}),
+    ] {
+        assert_invalid(&with(limited(), "/nodes/build/loopLimits", bad));
+    }
+    for undecodable in [json!({"red": -1}), json!({"red": "3"}), json!([3])] {
+        assert_invalid(&with(limited(), "/nodes/build/loopLimits", undecodable));
+    }
+    assert_valid(&with(limited(), "/limits/maxVisitsPerNode", json!(4)));
+    assert_invalid(&with(limited(), "/limits/maxVisitsPerNode", json!(3)));
+    assert_invalid(&without(limited(), "/nodes/build/outcomes/exhausted"));
+    assert_invalid(&edited("/nodes/done/loopLimits", json!({"ok": 1})));
+    assert_invalid(&with(limited(), "/format", json!(WORKFLOW_FORMAT)));
+}
+
+/// W14 and W15 apply to a 0.2 document; the violation names the node.
+#[test]
+fn w14_and_w15_reachability() {
+    let as_0_1 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT));
+    let refused = |workflow: &Value, node: &str| {
+        let failure = check(workflow).expect_err("refused");
+        assert_eq!(failure.code, code::WORKFLOW_INVALID);
+        assert!(
+            failure.details.contains(&format!("{node:?}")),
+            "{}",
+            failure.details
+        );
+    };
+
+    let unreachable = edited("/nodes/orphan", json!({"kind": "complete"}));
+    refused(&unreachable, "orphan");
+    assert!(check(&unreachable).unwrap_err().details.starts_with("W14"));
+    assert_valid(&as_0_1(unreachable));
+
+    // `hold` only ever waits again.
+    let trapped = edited("/nodes/approve/outcomes/rejected", json!("hold"));
+    let trapped = with(
+        trapped,
+        "/nodes/hold",
+        json!({"kind": "await-signal",
+        "signal": "s", "outcomes": {"again": "hold"}}),
+    );
+    refused(&trapped, "hold");
+    assert!(check(&trapped).unwrap_err().details.starts_with("W15"));
+    assert_valid(&as_0_1(trapped));
+
+    // An exhausted route exempts no loop: `a -exhausted-> b -> a` reaches no end.
+    let looped = json!({
+        "format": WORKFLOW_FORMAT_0_2, "name": "looped", "start": "a",
+        "actions": {"act": {"effect": "pure", "outcomes": ["ok", "red"]}},
+        "nodes": {
+            "a": {"kind": "activity", "action": "act", "loopLimits": {"red": 2},
+                  "outcomes": {"ok": "b", "red": "a", "exhausted": "b"}},
+            "b": {"kind": "activity", "action": "act", "outcomes": {"ok": "a", "red": "a"}}
+        }
+    });
+    refused(&looped, "a");
+    assert!(check(&looped).unwrap_err().details.starts_with("W15"));
+    let escapes = with(looped.clone(), "/nodes/b/outcomes/red", json!("end"));
+    let escapes = with(
+        escapes,
+        "/nodes/end",
+        json!({"kind": "fail",
+        "error": {"code": "gave.up", "message": "gave up"}}),
+    );
+    assert_valid(&escapes);
 }
