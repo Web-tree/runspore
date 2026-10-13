@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -23,9 +24,15 @@ const STDERR_TAIL: usize = 4 * 1024;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CommandRunner;
 
+/// Where a command runs: a path, or a JSON Pointer into the node's input naming one.
+enum Cwd {
+    Path(String),
+    FromInput(String),
+}
+
 struct Spec {
     argv: Vec<String>,
-    cwd: Option<String>,
+    cwd: Option<Cwd>,
     env: Vec<(String, String)>,
     timeout_ms: Option<u64>,
     output: String,
@@ -45,8 +52,14 @@ fn parse(action: &Value) -> Result<Spec, String> {
         .ok_or("`argv` must be a non-empty array of strings")?;
     let cwd = match action.get("cwd") {
         None => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(_) => return Err("`cwd` must be a string".into()),
+        Some(Value::String(s)) => Some(Cwd::Path(s.clone())),
+        Some(Value::Object(m)) => match m.get("fromInput") {
+            Some(Value::String(pointer)) if m.len() == 1 && is_pointer(pointer) => {
+                Some(Cwd::FromInput(pointer.clone()))
+            }
+            _ => return Err(CWD_SHAPE.into()),
+        },
+        Some(_) => return Err(CWD_SHAPE.into()),
     };
     let env = match action.get("env") {
         None => Vec::new(),
@@ -109,6 +122,58 @@ fn parse(action: &Value) -> Result<Spec, String> {
         outcomes: outcomes.into_iter().map(str::to_string).collect(),
         exit_outcomes,
     })
+}
+
+const CWD_SHAPE: &str = "`cwd` must be a string or {\"fromInput\": \"<JSON Pointer>\"}";
+
+/// Whether `pointer` is a JSON Pointer (RFC 6901): empty, or `/` and its steps, each
+/// `~` followed by `0` or `1`.
+fn is_pointer(pointer: &str) -> bool {
+    (pointer.is_empty() || pointer.starts_with('/'))
+        && pointer
+            .split('~')
+            .skip(1)
+            .all(|rest| rest.starts_with(['0', '1']))
+}
+
+/// The folder the command runs in: `cwd` against the run's base folder. A `cwd` from
+/// input must name an existing folder, else `command.cwd-invalid`.
+fn working_folder(
+    cwd: Option<&Cwd>,
+    base: &Path,
+    input: &Value,
+) -> Result<PathBuf, ActivityOutput> {
+    let pointer = match cwd {
+        None => return Ok(base.to_path_buf()),
+        Some(Cwd::Path(path)) => return Ok(base.join(path)),
+        Some(Cwd::FromInput(pointer)) => pointer,
+    };
+    let invalid = |message: String, cwd: Option<&str>| {
+        let mut details = json!({ "pointer": pointer });
+        if let Some(cwd) = cwd {
+            details["cwd"] = json!(cwd);
+        }
+        failure("command.cwd-invalid", message, details, false)
+    };
+    match input.pointer(pointer) {
+        None => Err(invalid(
+            format!("the input has nothing at `{pointer}` for `cwd`"),
+            None,
+        )),
+        Some(Value::String(path)) => {
+            let folder = base.join(path);
+            if folder.is_dir() {
+                Ok(folder)
+            } else {
+                let message = format!("`cwd` {} is not an existing folder", folder.display());
+                Err(invalid(message, Some(path)))
+            }
+        }
+        Some(_) => Err(invalid(
+            format!("the input at `{pointer}` for `cwd` is not a string"),
+            None,
+        )),
+    }
 }
 
 /// Reads `reader` to EOF, keeping at most `limit` bytes from the start (`head`) or the
@@ -252,8 +317,11 @@ impl ActivityRunner for CommandRunner {
             Ok(spec) => spec,
             Err(e) => return failure("command.invalid", e, Value::Null, false),
         };
+        let cwd = match working_folder(spec.cwd.as_ref(), &ctx.base_dir, input) {
+            Ok(cwd) => cwd,
+            Err(invalid) => return invalid,
+        };
         let stdin_bytes = canonical::to_vec(input).unwrap_or_default();
-        let cwd = ctx.base_dir.join(spec.cwd.as_deref().unwrap_or("."));
         let setup = |command: &mut Command| {
             command
                 .current_dir(cwd)

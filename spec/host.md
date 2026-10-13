@@ -241,6 +241,19 @@ action's `kind` to a runner.
   the run's base folder (**0.2**; 0.1: `base_dir`), recorded at `start`, so every
   dispatch of a run uses one folder whichever engine runs it. A run with no recorded
   folder uses `base_dir`. The child inherits the engine's environment plus `env`.
+- **0.2: `cwd` from input.** `cwd` is a string, as in 0.1, or
+  `{"fromInput": "<JSON Pointer>"}` (RFC 6901). That form reads the folder from the
+  node's evaluated input at dispatch, the value the command gets on stdin, so a
+  workflow maps a folder an earlier step returned with a plain `$get`. A relative
+  value resolves against the run's base folder like a string `cwd`; an absolute one
+  is used as it is. A pointer that names nothing, a value that is not a string, or a
+  path that is not an existing folder is `Failure`, `command.cwd-invalid`, not
+  retryable, details `{"pointer"}` plus `"cwd"` when the value was a string: another
+  try reads the same input, so the step is stuck or takes its `failed` route
+  (kernel §7.4). Nothing is started. A probe's, watch's or stop's `cwd` takes the same
+  two forms and reads the same node input. The kernel never reads `cwd`. The run's
+  records stay in the database where it started: the command gets `RUNSPORE_DB`
+  (below) even when its folder holds a `.spore/` of its own.
 - Stdin receives the canonical input JSON, then EOF.
 - The child also gets `RUNSPORE_RUN_ID`, `RUNSPORE_NODE_ID`, `RUNSPORE_INVOCATION_ID`,
   `RUNSPORE_ATTEMPT`, `RUNSPORE_VISIT`, and `RUNSPORE_EFFECT_KEY`. The effect key is
@@ -260,6 +273,7 @@ Result mapping, in order:
 
 | What happened | Runner output |
 | --- | --- |
+| **0.2.** A `cwd` from input that names no existing folder | `Failure`, `command.cwd-invalid`, not retryable, details `{pointer, cwd?}` |
 | Could not be spawned, or its program could not be run | `Failure`, `command.spawn`, retryable |
 | Killed by a signal it did not get from the engine, or its guard ended without reporting | `Unknown`, `command.signaled` |
 | Timed out, or stopped by the engine | `Unknown`, `command.timeout` or `command.stopped` |
@@ -304,9 +318,12 @@ applies to it; a crash that exits 1 is then `command.exit`, never an outcome. Th
 the shapes an async `watch` prints.
 
 `validate` checks the shape of every field above, that every `exitOutcomes` value is a
-declared outcome, and, in result mode, that `exitOutcomes` does not map 0.
+declared outcome, and, in result mode, that `exitOutcomes` does not map 0. A `cwd`
+object has the one key `fromInput`, holding a JSON Pointer: empty, or `/` and its
+steps, each `~` followed by `0` or `1`.
 
-0.1 had no `result` mode, no `RUNSPORE_VISIT`, and no undeclared-outcome row. Its
+0.1 had no `result` mode, no `RUNSPORE_VISIT`, no `cwd` from input, and no
+undeclared-outcome or `command.cwd-invalid` row. Its
 `text` mode gave `{"exitCode": n, "stdout": "<utf-8, lossy>"}` and failed with
 `command.output-too-large` when stdout passed 64 KiB, like the other modes.
 
@@ -422,3 +439,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H16 | **0.2.** A process record with another host name | The attempt is expired by its lease; the audit record says `process.unchecked` |
 | H17 | **0.2.** Output schemas: a command and a native function whose output does not fit; a signal, before and at its node, and a `complete` resolution whose data does not fit; a workflow with a schema outside the subset | The result is `output.invalid`, not retryable, and the step is stuck or takes its `failed` route; the client operations return `output.invalid` with the errors and append nothing; fitting data is accepted; `validate_workflow` refuses the workflow with `workflow.invalid-schema` |
 | H19 | **0.2.** A run started by an engine with one `base_dir` is worked by an engine with another and a `db_path` | The command runs in the folder recorded at `start` and sees `RUNSPORE_DB` equal to `db_path`, also when the action's `env` sets it |
+| H20 | **0.2.** A step makes a folder holding a `.spore/` of its own and returns its path, absolute or relative; the next step's `cwd` is `{"fromInput": …}` at that path. Then a pointer that names nothing, a value that is not a string, and a folder that does not exist | The second step runs in that folder, and a `spore` call from it reaches the run's database; each invalid case is `command.cwd-invalid`, not retryable, and the step is stuck after one try; `validate` refuses a malformed `cwd` object |

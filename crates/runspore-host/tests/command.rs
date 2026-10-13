@@ -383,3 +383,90 @@ fn validate_rejects_undeclared_exit_outcomes_and_bad_fields() {
     action["exitOutcomes"] = json!({"0": "red"});
     assert!(CommandRunner.validate("act", &action).is_err());
 }
+
+/// A fresh folder under the context's base folder (the temp dir), by name and absolute.
+fn scratch(name: &str) -> (String, std::path::PathBuf) {
+    let name = format!("runspore-cwd-{name}-{}", std::process::id());
+    let path = std::env::temp_dir().join(&name);
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).unwrap();
+    (name, path.canonicalize().unwrap())
+}
+
+fn in_folder(pointer: &str) -> Value {
+    let mut action = sh("pwd -P");
+    action["cwd"] = json!({ "fromInput": pointer });
+    action
+}
+
+#[tokio::test]
+async fn cwd_from_input_runs_in_the_folder_the_input_names() {
+    let (name, path) = scratch("ok");
+    let absolute = json!({"place": {"dir": path}});
+    let relative = json!({"place": {"dir": name}});
+    for input in [absolute, relative] {
+        let out = run(in_folder("/place/dir"), input.clone()).await;
+        let ActivityOutput::Success { output, .. } = out else {
+            panic!("{input}: {out:?}");
+        };
+        assert_eq!(output["stdout"], json!(format!("{}\n", path.display())));
+    }
+    // RFC 6901 escapes: `~1` is `/`, `~0` is `~`.
+    let input = json!({"a/b": {"~c": path}});
+    let out = run(in_folder("/a~1b/~0c"), input).await;
+    assert!(matches!(out, ActivityOutput::Success { .. }), "{out:?}");
+    std::fs::remove_dir_all(&path).unwrap();
+}
+
+#[tokio::test]
+async fn cwd_from_input_that_names_no_folder_is_cwd_invalid() {
+    let (_, path) = scratch("invalid");
+    let file = path.join("file");
+    std::fs::write(&file, "").unwrap();
+    let cases = [
+        (json!({}), json!({"pointer": "/dir"})),
+        (json!({"dir": null}), json!({"pointer": "/dir"})),
+        (json!({"dir": 7}), json!({"pointer": "/dir"})),
+        (
+            json!({"dir": "runspore-cwd-no-such-folder"}),
+            json!({"pointer": "/dir", "cwd": "runspore-cwd-no-such-folder"}),
+        ),
+        (
+            json!({"dir": file}),
+            json!({"pointer": "/dir", "cwd": file}),
+        ),
+    ];
+    for (input, expected) in cases {
+        let out = run(in_folder("/dir"), input.clone()).await;
+        let (code, retryable, details) = failure(&out);
+        assert_eq!((code, retryable), ("command.cwd-invalid", false), "{input}");
+        assert_eq!(details, &expected, "{input}");
+    }
+    std::fs::remove_dir_all(&path).unwrap();
+}
+
+#[test]
+fn validate_accepts_only_a_string_or_a_from_input_pointer_as_cwd() {
+    for cwd in [
+        json!("."),
+        json!({"fromInput": ""}),
+        json!({"fromInput": "/a/~0b~1"}),
+    ] {
+        let mut action = sh("true");
+        action["cwd"] = cwd.clone();
+        assert!(CommandRunner.validate("act", &action).is_ok(), "{cwd}");
+    }
+    for cwd in [
+        json!(7),
+        json!({}),
+        json!({"fromInput": 1}),
+        json!({"fromInput": "dir"}),
+        json!({"fromInput": "/a~2"}),
+        json!({"fromInput": "/a~"}),
+        json!({"fromInput": "/a", "other": 1}),
+    ] {
+        let mut action = sh("true");
+        action["cwd"] = cwd.clone();
+        assert!(CommandRunner.validate("act", &action).is_err(), "{cwd}");
+    }
+}
