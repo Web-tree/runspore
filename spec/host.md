@@ -82,12 +82,26 @@ process on its own.
   the same key in two stores gave the same run ID and the same effect keys. Runs
   created that way keep their IDs; step 1 finds them by key like any other run.
 - `signal(key, message_id, name, outcome, data)`: `append_event` with event ID
-  `ids::event_for_signal(message_id)`.
+  `ids::event_for_signal(message_id)`. **0.2:** first, the data is checked against
+  the run's package: against the schema each await-signal node waiting for `name`
+  declares for the signal's outcome (`received` when it names none). W13 makes those
+  schemas equal, so the check has one answer, and it holds even when the signal
+  arrives before the run reaches the node.
 - `resolve(key, request_id, invocation_id, resolution)`: `append_event` with event ID
-  `ids::event_for_resolution(request_id)`.
+  `ids::event_for_resolution(request_id)`. **0.2:** a `complete` resolution's output
+  is first checked against the schema the invocation's node declares for its outcome.
+- **0.2: the output check of a client operation.** Data that does not fit its schema
+  ([schema.md](schema.md) §3) is refused with `invalid-input` / `output.invalid`, the
+  outcome and the errors, before anything is appended: nothing is recorded, a held
+  attempt stays held and the run does not move, so the caller can correct the data
+  and send it again. A missing `data` or `output` is `null`. A run that does not
+  exist is reported by `append_event` as before. In 0.1 nothing was checked.
 - `validate_workflow(reducer, activities, limits, workflow_json)`: the checks of
   `start` up to and including the dry transition, with no store involved. Returns the
-  canonical package bytes. `start` uses it.
+  canonical package bytes. `start` uses it. **0.2:** after the dry transition, every
+  schema in a node's `outputSchemas` is checked against the subset, its depth counted
+  from the package root ([schema.md](schema.md) §1); one outside it is
+  `workflow.invalid-schema`, naming the node, the outcome and the keyword's path.
 - `release(key)`: `release_run`, with a request ID derived from the quarantine it
   lifts, so repeating it is a duplicate.
 - Read-through views: `get_run`, `get_package`, `list_runs`, `list_events`,
@@ -155,6 +169,15 @@ never claims again.
    | `Success { outcome, output }` | `success` | outcome, output |
    | `Failure { error, retryable }` | `failure` | error, retryable |
    | `Unknown { error }` | `unknown` | error |
+
+   **0.2:** before that, a `Success { outcome, output }` from any runner is checked
+   against the schema the claimed node declares for `outcome` ([schema.md](schema.md)
+   §3); for a `command`, after its undeclared-outcome check (§3). Output that does not
+   fit becomes `Failure` with error `output.invalid`, details
+   `{"outcome", "errors"}`, not retryable: the same output would come back from
+   another try. The kernel then takes the node's `failed` route, or the step is stuck
+   (kernel §7.4). An outcome with no schema is not checked. The same holds for a
+   result recorded as late evidence.
 
 5. `finish_attempt` with request ID `finish/<attemptId>`. On `unavailable`, retry the
    identical request. On `lease.lost`, `record_late_evidence`.
@@ -379,4 +402,5 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H15 | **0.2.** SIGKILL the worker while a command that traps SIGTERM runs | The command writes its file before the group goes |
 | H13 | **0.2.** SIGKILL the worker and its guard together while the command's group runs, with its leader and without it | The next sweep stops the recorded group before it expires the attempt; the next try starts only after the group is gone |
 | H16 | **0.2.** A process record with another host name | The attempt is expired by its lease; the audit record says `process.unchecked` |
+| H17 | **0.2.** Output schemas: a command and a native function whose output does not fit; a signal, before and at its node, and a `complete` resolution whose data does not fit; a workflow with a schema outside the subset | The result is `output.invalid`, not retryable, and the step is stuck or takes its `failed` route; the client operations return `output.invalid` with the errors and append nothing; fitting data is accepted; `validate_workflow` refuses the workflow with `workflow.invalid-schema` |
 | H19 | **0.2.** A run started by an engine with one `base_dir` is worked by an engine with another and a `db_path` | The command runs in the folder recorded at `start` and sees `RUNSPORE_DB` equal to `db_path`, also when the action's `env` sets it |

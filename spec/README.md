@@ -22,6 +22,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 | --- | --- |
 | Graph | `activity`, `await-signal`, `complete`, `fail`; routing by named outcome; bounded loops through back edges |
 | Data | Run input, latest result per node, `$get` projection and `$literal` in mappings |
+| Output schemas | 0.2: a schema per outcome on a node; every result, signal and resolution checked against it |
 | Effects | `pure`, `read-only`, `idempotent` repeat after an unknown outcome; `unsafe` pauses for an operator |
 | Stuck steps | 0.2: a step that gives up with no `failed` route pauses the run for a person, who retries, completes or fails it |
 | Retry | Kernel-decided delivery retries with exponential backoff, same invocation and effect key |
@@ -34,7 +35,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 ## Out of scope for the MVP
 
 Timers, fork and join, child workflows, compensation, cancellation, `reconcilable`
-effects, JSON Schema validation of inputs and outputs, a YAML frontend, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, approvals
+effects, JSON Schema validation of inputs (0.2 checks outputs, [schema.md](schema.md)), a YAML frontend, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, approvals
 and capability brokering, secrets, telemetry, blobs, history compaction, run migration,
 package signing. Each is additive under a later semantics version.
 
@@ -62,6 +63,7 @@ package signing. Each is additive under a later semantics version.
 - [host.md](host.md): engine loop, dispatch, activities, failpoints, wasm packaging.
 - [cli.md](cli.md): the `spore` command surface and exit codes.
 - [dot.md](dot.md): workflow folders, the DOT dialect, settings and the build.
+- [schema.md](schema.md): output schemas: the JSON Schema subset and how data is checked.
 - [release.md](release.md): release assets, the release key and signature, `install.sh`.
 
 The wire types are code: `crates/runspore-types`. Where prose and that crate disagree,
@@ -77,6 +79,7 @@ crates/runspore-wasmtime      Reducer implemented by running that component
 crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
 crates/runspore-build         Build: workflow folder (DOT and settings) to package
+crates/runspore-schema        Output schemas: the subset, its checks, data checks
 crates/runspore-cli           the spore binary and crash-recovery tests
 conformance/traces            golden kernel traces
 conformance/js                Node and Bun trace runners

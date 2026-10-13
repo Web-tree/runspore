@@ -30,6 +30,7 @@ The rules marked 0.2 so far:
 | --- | --- | --- |
 | `from` as a path's first step; `default` beside `$get` | §4, W10 | documents in format `runspore.workflow/0.2`, under either semantics |
 | A step that cannot recover is stuck and waits for a person instead of failing the run | §3, §7.3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
+| Nodes may carry `outputSchemas`, which no transition reads | §2, W01, W13 | documents in format `runspore.workflow/0.2`, under either semantics |
 
 ## 1. Canonical data
 
@@ -99,6 +100,19 @@ of their IDs; the first violation is reported.
 | W09 | Await-signal node: `signal` matches `[A-Za-z0-9_.-]{1,64}`; `outcomes` is non-empty; keys match the outcome pattern; every target names a node |
 | W10 | Mappings are well formed (section 4) |
 | W11 | Fail node: `error.code` matches `[a-z0-9][a-z0-9.-]{0,63}`; `error.nodeId` is null |
+| W13 | 0.2: `outputSchemas` (below) is non-empty; each key is an outcome the node produces, one of its action's `outcomes` for an activity node or a key of its `outcomes` for an await-signal node, and never `failed`; each value is a JSON object. Await-signal nodes that wait for the same `signal` declare equal schemas, or none, for every outcome they both route |
+
+W12 is reserved for loop limits. In a `runspore.workflow/0.1` document, a node that
+carries `outputSchemas` violates W01.
+
+**Output schemas (0.2).** An `activity` or `await-signal` node of a
+`runspore.workflow/0.2` document may carry `outputSchemas`: an object from outcome to
+the schema that outcome's output must fit ([schema.md](schema.md)). The kernel checks
+only the field's shape (W13) and never reads it in a transition: a result or a signal
+whose data does not fit is decided exactly as one that fits. Hosts check the data
+before it is recorded ([host.md](host.md) §2, §3) and check the schemas themselves
+against the subset (`workflow.invalid-schema`). `{"$outputSchemas": {}}` left in a
+mapping is a `$` key, so W10 already refuses it.
 
 A violation is `invalid-input` / `workflow.invalid`. An action with effect
 `reconcilable` is `incompatible-version` / `workflow.unsupported-effect`, checked as
@@ -418,10 +432,15 @@ tests also replay every trace with its `format` switched between `runspore.workf
 and `runspore.workflow/0.2`, and require the same expectations, so a 0.1 document stays
 accepted. The exceptions are the traces of a rule that names a format, which must change:
 the three 0.1 traces above, where a 0.2 step is stuck, which the `14*` traces pin, and
-the 0.2 traces of `from`, `$get` `default` and the stuck step.
+the 0.2 traces of `from`, `$get` `default`, the stuck step and `outputSchemas`.
 
 The 0.2 mapping rules have their own traces: the start node sees `from` `null`; a
 loop back sees the judging step's outcome and output; a `failed` arrow shows as
 `failed` with the error; a signal's arrow shows its outcome and data; a `default` is
 used, unevaluated, while its path is missing and ignored once it resolves; a `$get`
 object with a key besides `default` is `workflow.invalid`.
+
+`outputSchemas` has two: a result and a signal whose data do not fit their
+schemas route as if no schema were declared, and two await-signal nodes that wait for
+one signal with different schemas for an outcome both route are `workflow.invalid`
+(W13).
