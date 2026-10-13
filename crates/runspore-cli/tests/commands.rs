@@ -42,20 +42,21 @@ fn args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
 #[test]
 fn every_command_in_text_and_json_with_its_exit_codes() {
     let dir = Dir::new("surface");
-    dir.write("flow.json", &flow("0", "idempotent"));
-    let out = dir.run(&["validate", "flow.json"]);
+    dir.folder("flow", &flow("0", "idempotent"));
+    let out = dir.run(&["validate", "flow"]);
     assert_eq!(out.code(), Some(0));
     assert_eq!(
-        dir.run(&["--json", "validate", "flow.json"]).json()["valid"],
+        dir.run(&["--json", "validate", "flow"]).json()["valid"],
         true
     );
     assert!(
         !dir.file("runspore.db").exists(),
         "validate created a database"
     );
-    assert_eq!(dir.run(&["validate", "missing.json"]).code(), Some(2));
-    std::fs::write(dir.file("bad.json"), "{").unwrap();
-    let bad = dir.run(&["--json", "validate", "bad.json"]);
+    assert_eq!(dir.run(&["validate", "missing"]).code(), Some(2));
+    dir.folder("bad", &flow("0", "idempotent"));
+    std::fs::write(dir.file("bad/settings.json"), "{").unwrap();
+    let bad = dir.run(&["--json", "validate", "bad"]);
     assert_eq!(
         (bad.code(), bad.json()["format"].clone()),
         (Some(2), json!("runspore.cli/0.1"))
@@ -67,10 +68,10 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
     );
 
     let start = dir
-        .run(&args(&["--json", "start", "flow.json", "--key", "k1"]))
+        .run(&args(&["--json", "start", "flow", "--key", "k1"]))
         .json();
     let again = dir
-        .run(&args(&["--json", "start", "flow.json", "--key", "k1"]))
+        .run(&args(&["--json", "start", "flow", "--key", "k1"]))
         .json();
     assert_eq!(
         (start["created"].clone(), again["created"].clone()),
@@ -79,13 +80,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
     assert_eq!(start["runId"], again["runId"]);
     let elsewhere = dir
         .run(&args(&[
-            "--json",
-            "--db",
-            "other.db",
-            "start",
-            "flow.json",
-            "--key",
-            "k1",
+            "--json", "--db", "other.db", "start", "flow", "--key", "k1",
         ]))
         .json();
     assert_eq!(elsewhere["created"], json!(true));
@@ -94,9 +89,9 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
         "a start key names a run only in its own database"
     );
     let run = start["runId"].as_str().unwrap();
-    assert_eq!(dir.run(&args(&["start", "flow.json"])).code(), Some(0));
+    assert_eq!(dir.run(&args(&["start", "flow"])).code(), Some(0));
     assert_eq!(
-        dir.run(&args(&["run", "flow.json", "--key", "k1"])).code(),
+        dir.run(&args(&["run", "flow", "--key", "k1"])).code(),
         Some(3)
     );
     assert_eq!(
@@ -132,7 +127,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
         .run(&args(&[&["--json"][..], &signal[..]].concat()))
         .json();
     assert_eq!(repeated["disposition"], "duplicate");
-    let done = dir.run(&args(&["--json", "run", "flow.json", "--key", "k1"]));
+    let done = dir.run(&args(&["--json", "run", "flow", "--key", "k1"]));
     assert_eq!(
         (done.code(), done.json()["result"]["output"].clone()),
         (Some(0), json!("approved"))
@@ -146,7 +141,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
     );
 
     let rejected = dir
-        .run(&args(&["--json", "start", "flow.json", "--key", "k2"]))
+        .run(&args(&["--json", "start", "flow", "--key", "k2"]))
         .json();
     let run2 = rejected["runId"].as_str().unwrap();
     dir.run(&args(&[
@@ -157,7 +152,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
         "rejected",
     ]));
     assert_eq!(
-        dir.run(&args(&["run", "flow.json", "--key", "k2"])).code(),
+        dir.run(&args(&["run", "flow", "--key", "k2"])).code(),
         Some(1)
     );
 }
@@ -165,14 +160,14 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
 #[test]
 fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
     let dir = Dir::new("unsafe");
-    dir.write("flow.json", &flow("5", "unsafe"));
-    let mut child = dir.spawn(&args(&["run", "flow.json", "--key", "u"]));
+    dir.folder("flow", &flow("5", "unsafe"));
+    let mut child = dir.spawn(&args(&["run", "flow", "--key", "u"]));
     while dir.effects().is_empty() {
         std::thread::sleep(Duration::from_millis(20));
     }
     child.kill().unwrap();
     child.wait().unwrap();
-    let parked = dir.run(&args(&["--json", "run", "flow.json", "--key", "u"]));
+    let parked = dir.run(&args(&["--json", "run", "flow", "--key", "u"]));
     assert_eq!(parked.code(), Some(4));
     let status = parked.json();
     let (run, inv) = (
@@ -192,19 +187,37 @@ fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
     assert_eq!(dir.run(&args(&resolve)).json()["disposition"], "applied");
     assert_eq!(dir.run(&args(&resolve)).json()["disposition"], "duplicate");
     assert_eq!(
-        dir.run(&args(&["run", "flow.json", "--key", "u"])).code(),
+        dir.run(&args(&["run", "flow", "--key", "u"])).code(),
         Some(3)
     );
     assert_eq!(dir.effects().len(), 1);
 }
 
+/// The one test that hands `spore` a JSON workflow document: it is accepted until the
+/// cut-over to 0.2 (spec/cli.md).
 #[test]
-fn every_example_validates() {
+fn a_json_workflow_document_is_still_accepted() {
+    let dir = Dir::new("document");
+    dir.write("flow.json", &flow("0", "idempotent"));
+    assert_eq!(
+        dir.run(&["--json", "validate", "flow.json"]).json()["valid"],
+        true
+    );
+    let parked = dir.run(&args(&["--json", "run", "flow.json", "--key", "d"]));
+    assert_eq!(
+        (parked.code(), parked.json()["position"]["nodeId"].clone()),
+        (Some(3), json!("approve"))
+    );
+}
+
+#[test]
+fn every_example_validates_as_a_folder() {
     let dir = Dir::new("examples");
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for name in ["hello.json", "review-loop.json", "unsafe-deploy.json"] {
-        let path = examples.join(name);
-        let out = dir.run(&["--native-kernel", "validate", path.to_str().unwrap()]);
+    for name in ["hello", "review-loop", "unsafe-deploy"] {
+        let text = std::fs::read_to_string(examples.join(format!("{name}.json"))).unwrap();
+        dir.folder(name, &serde_json::from_str(&text).unwrap());
+        let out = dir.run(&["--native-kernel", "validate", name]);
         assert_eq!(out.code(), Some(0), "{name}: {}", out.stderr);
     }
 }
@@ -233,8 +246,8 @@ fn oversized() -> Value {
 #[test]
 fn a_run_over_the_state_budget_is_quarantined_until_released() {
     let dir = Dir::new("quarantine");
-    dir.write("flow.json", &oversized());
-    let run = ["--json", "run", "flow.json", "--key", "q"];
+    dir.folder("flow", &oversized());
+    let run = ["--json", "run", "flow", "--key", "q"];
     let out = dir.run(&args(&run));
     let status = out.json();
     assert_eq!(
@@ -259,14 +272,14 @@ fn a_run_over_the_state_budget_is_quarantined_until_released() {
 #[test]
 fn a_path_that_cannot_be_a_database_is_a_store_error() {
     let dir = Dir::new("store-error");
-    dir.write("flow.json", &flow("0", "idempotent"));
+    dir.folder("flow", &flow("0", "idempotent"));
     std::fs::create_dir(dir.file("a-directory")).unwrap();
     std::fs::write(dir.file("not-a-database"), "plain text\n").unwrap();
     for (db, code) in [
         ("a-directory", "store.io"),
         ("not-a-database", "store.corrupt"),
     ] {
-        for command in [&["list"][..], &["run", "flow.json"]] {
+        for command in [&["list"][..], &["run", "flow"]] {
             let mut argv = vec!["--json", "--db", db];
             argv.extend_from_slice(command);
             let out = dir.run(&args(&argv));
@@ -289,9 +302,9 @@ fn a_path_that_cannot_be_a_database_is_a_store_error() {
 #[test]
 fn a_worker_and_a_separate_signal_process_share_one_database() {
     let dir = Dir::new("two");
-    dir.write("flow.json", &flow("0", "idempotent"));
+    dir.folder("flow", &flow("0", "idempotent"));
     let run = dir
-        .run(&args(&["--json", "start", "flow.json", "--key", "w"]))
+        .run(&args(&["--json", "start", "flow", "--key", "w"]))
         .json()["runId"]
         .as_str()
         .unwrap()
@@ -337,18 +350,14 @@ fn a_worker_and_a_separate_signal_process_share_one_database() {
 fn an_interrupt_stops_a_worker_within_the_grace_period_and_another_finishes() {
     use nix::sys::signal::{SIGHUP, SIGINT};
     for (name, command, interrupt) in [
-        (
-            "sigint-run",
-            &["run", "flow.json", "--key", "s"][..],
-            SIGINT,
-        ),
+        ("sigint-run", &["run", "flow", "--key", "s"][..], SIGINT),
         ("sigint-worker", &["worker"][..], SIGINT),
         ("sighup-worker", &["worker"][..], SIGHUP),
     ] {
         let dir = Dir::new(name);
-        dir.write("flow.json", &flow("30", "idempotent"));
+        dir.folder("flow", &flow("30", "idempotent"));
         let run = dir
-            .run(&args(&["--json", "start", "flow.json", "--key", "s"]))
+            .run(&args(&["--json", "start", "flow", "--key", "s"]))
             .json()["runId"]
             .as_str()
             .unwrap()

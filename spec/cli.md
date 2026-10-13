@@ -32,7 +32,9 @@ engine. It never listens on a network.
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
 as [dot.md](dot.md) describes, or a JSON workflow document. JSON documents are still
 accepted until the cut-over to 0.2. A build error exits 2 and names the file and line
-(dot.md §6).
+(dot.md §6). The command and crash tests give `spore` workflow folders; exactly one
+test gives it a JSON document, to show it is still accepted, so the cut-over removes
+that test and no other.
 
 **0.2.** A `<workflow>` may also be a bare workflow name: an argument that is not an
 existing path and contains no `/`. It names the folder under `.spore/workflows/` of the
