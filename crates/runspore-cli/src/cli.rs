@@ -22,7 +22,7 @@ use tokio::signal::unix::{signal, Signal, SignalKind};
 
 use crate::{project, view};
 
-pub const FORMAT: &str = "runspore.cli/0.1";
+pub const FORMAT: &str = "runspore.cli/0.2";
 
 /// Exit code after a graceful shutdown on SIGINT, SIGTERM or SIGHUP: for `worker` always, for
 /// `run` and `worker --until-parked` when the run had not parked yet.
@@ -132,8 +132,8 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct StartArgs {
-    /// A workflow folder, its workflow.dot, a workflow artifact, a JSON workflow
-    /// document, or the name of a workflow in the project folder.
+    /// A workflow folder, its workflow.dot, a workflow artifact, or the name of a
+    /// workflow in the project folder.
     workflow: PathBuf,
     /// The run's base folder, where its commands run. Default: the folder holding the
     /// database's project folder, else the current folder.
@@ -464,9 +464,7 @@ fn build(cli: &Cli, folder: &Path, output: Option<&Path>) -> Result<Output, Fail
     };
     let source = Source::folder(&folder)?;
     source.validate(cli)?;
-    let Workflow::Artifact(artifact) = &source.workflow else {
-        unreachable!("a folder builds an artifact")
-    };
+    let artifact = &source.artifact;
     let target = match output {
         Some(path) => path.to_path_buf(),
         None => beside(&folder)?,
@@ -549,8 +547,11 @@ async fn inspect_file(engine: &Engine, run: &str, path: &str) -> Result<Output, 
     })
 }
 
+/// Opens the database, or refuses one another `spore` wrote with exit 10 and the fix
+/// (spec/cli.md, databases from another version), and builds the engine on it.
 fn engine(cli: &Cli, db: &Path, base_dir: PathBuf) -> Result<Engine, Fail> {
-    let store = SqliteStore::open(db).map_err(|f| Fail::internal(&f.code, f.message.clone()))?;
+    let store = SqliteStore::open(db)
+        .map_err(|f| Fail::internal(&f.code, format!("{}: {}", db.display(), f.message)))?;
     let mut config = EngineConfig {
         base_dir,
         db_path: Some(db.to_path_buf()),
@@ -611,11 +612,10 @@ impl StartRequest {
 
     async fn start(&self, engine: &Engine) -> Result<StartOutcome, Fail> {
         let (input, start_key) = (self.input.clone(), &self.start_key);
-        let started = match &self.source.workflow {
-            Workflow::Package(bytes) => engine.start(bytes, input, start_key).await,
-            Workflow::Artifact(artifact) => engine.start_artifact(artifact, input, start_key).await,
-        };
-        started.map_err(|e| self.source.fail(e))
+        engine
+            .start_artifact(&self.source.artifact, input, start_key)
+            .await
+            .map_err(|e| self.source.fail(e))
     }
 }
 
@@ -760,35 +760,37 @@ fn load(bytes: &[u8], origin: &Path) -> Result<Artifact, Fail> {
 /// The WebAssembly magic bytes that start every artifact.
 const WASM_MAGIC: &[u8] = b"\0asm";
 
-/// What a command was given to run.
-enum Workflow {
-    /// A JSON workflow document, read as it is.
-    Package(Vec<u8>),
-    /// A workflow artifact: built from a folder in memory, or read from a file.
-    Artifact(Artifact),
-}
-
-/// The workflow a command was given, and the folder or artifact file it came from.
+/// The workflow a command was given, as the artifact it builds to or is, and the
+/// folder or artifact file it came from.
 struct Source {
-    workflow: Workflow,
-    origin: Option<PathBuf>,
+    artifact: Artifact,
+    origin: PathBuf,
 }
 
 impl Source {
+    /// A folder, its `workflow.dot`, or an artifact file. Any other file is refused:
+    /// `spore` 0.2 reads no JSON workflow document (spec/cli.md).
     fn read(path: &Path) -> Result<Self, Fail> {
         match runspore_build::entry(path).map_err(build_fail)? {
             runspore_build::Entry::Folder(folder) => Self::folder(&folder),
             runspore_build::Entry::Document(path) => {
                 let bytes = read_file(&path)?;
                 if !bytes.starts_with(WASM_MAGIC) {
-                    return Ok(Self {
-                        workflow: Workflow::Package(bytes),
-                        origin: None,
-                    });
+                    return Err(Fail::usage(
+                        "workflow.folder",
+                        format!(
+                            "{}: not a workflow folder or artifact. A workflow is a folder \
+                             holding `{}` and `settings.json` (spec/dot.md), or an artifact \
+                             `spore build` made from one; spore 0.2 reads no JSON workflow \
+                             document",
+                            path.display(),
+                            runspore_build::DOT_FILE
+                        ),
+                    ));
                 }
                 Ok(Self {
-                    workflow: Workflow::Artifact(load(&bytes, &path)?),
-                    origin: Some(path),
+                    artifact: load(&bytes, &path)?,
+                    origin: path,
                 })
             }
         }
@@ -800,30 +802,23 @@ impl Source {
             .and_then(|built| built.seal())
             .map_err(build_fail)?;
         Ok(Self {
-            workflow: Workflow::Artifact(load(&sealed.bytes, folder)?),
-            origin: Some(folder.to_path_buf()),
+            artifact: load(&sealed.bytes, folder)?,
+            origin: folder.to_path_buf(),
         })
-    }
-
-    fn package(&self) -> &[u8] {
-        match &self.workflow {
-            Workflow::Package(bytes) => bytes,
-            Workflow::Artifact(artifact) => &artifact.package,
-        }
     }
 
     /// The checks of `start`, against no store; returns the canonical package bytes.
     fn validate(&self, cli: &Cli) -> Result<Vec<u8>, Fail> {
         let limits = EngineConfig::default().limits;
-        validate_workflow(&*reducer(cli)?, &registry(), limits, self.package())
+        validate_workflow(&*reducer(cli)?, &registry(), limits, &self.artifact.package)
             .map_err(|e| self.fail(e))
     }
 
     /// A rejection of a package names the folder or artifact file it came from.
     fn fail(&self, e: HostError) -> Fail {
         let mut fail = Fail::from(e);
-        if let (Some(origin), 2) = (&self.origin, fail.exit) {
-            fail.message = format!("{}: {}", origin.display(), fail.message);
+        if fail.exit == 2 {
+            fail.message = format!("{}: {}", self.origin.display(), fail.message);
         }
         fail
     }

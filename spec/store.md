@@ -29,8 +29,8 @@ Failure codes are part of the contract. `kind` is in parentheses.
 
 Protocol 0.2 adds `find_run`, an attempt's process record with `set_process`, the
 audit record of an expiry, the run's base folder, the artifact table with
-`get_artifact` and the run's artifact digest, and scenarios S15 to S18; everything
-else is as in 0.1.
+`get_artifact` and the run's artifact digest, the schema guard that names the version
+that wrote a database (§3), and scenarios S15 to S18; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -226,11 +226,22 @@ and are idempotent on an already matching state.
   least 5 seconds. Never on a network filesystem (documented, not detected).
 - Every mutation runs in `BEGIN IMMEDIATE`. `SQLITE_BUSY` after the timeout maps to
   `unavailable` / `store.busy`.
-- The schema carries a version. Opening a newer version fails with `incompatible` /
-  `schema.too-new`. An empty file is initialized. An older version is upgraded in place
-  in one transaction: version 1 to 2 adds the attempt's process record and the audit
-  record's kind; version 2 to 3 adds the run's base folder, null for runs created
-  before; version 3 to 4 adds the artifact table and the run's artifact digest.
+- The schema carries a version, and (**0.2**) the database records which `spore`
+  wrote its schema: the version of the binary that initialized or last upgraded it.
+  An empty file is initialized and records the writer. Opening a file is refused with
+  kind `incompatible` when:
+  - its schema is newer than this adapter's: `schema.too-new`. The message names the
+    version that wrote it, as the file records it, and the fix: finish its runs with
+    that `spore`, or move the file aside;
+  - its schema is version 1, the schema `spore` 0.1 wrote: `schema.too-old`. The
+    message says the file belongs to `spore` 0.1 and names the same fix, with the 0.1
+    binary. 0.2 replaces 0.1 outright: nothing upgrades a 0.1 database.
+
+  A version written by an earlier 0.2 `spore` is upgraded in place in one transaction,
+  and the writer is recorded again: version 2 to 3 adds the run's base folder, null
+  for runs created before; version 3 to 4 adds the artifact table and the run's
+  artifact digest; version 4 to 5 adds the writer. The refusal happens before any
+  other read or write, so a refused file is left exactly as it was.
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
@@ -277,8 +288,9 @@ SQLite-specific, in the adapter crate:
 | Q01 | Close and reopen the file | Every record is still there |
 | Q02 | Two store instances on one file, on different threads | S01 and S03 hold across instances |
 | Q03 | A child process aborts at each store failpoint | After reopen the mutation is either wholly absent or wholly present; a retry of the same request converges to one applied mutation |
-| Q04 | Open a file with a newer schema version | `schema.too-new` |
+| Q04 | Open a file with a newer schema version | `schema.too-new`; the message names the writer the file records and the fix |
 | Q05 | Expire one attempt plainly and one with `processUnchecked` (0.2) | Each writes one `attempt.expired` audit record with reason `lease`; only the second notes `process.unchecked` |
-| Q06 | Open a version 1 file (0.2) | Upgraded to version 4; its records are kept; process records and audit kinds work |
-| Q07 | Open a version 2 file (0.2) | Upgraded to version 4; its runs are kept with a null base folder; a new run records its folder |
-| Q08 | Open a version 3 file (0.2) | Upgraded to version 4; its runs are kept and show no artifact; a new run stores its artifact |
+| Q06 | Open a version 1 file, written by `spore` 0.1 (0.2) | `schema.too-old`; the message names 0.1 and the fix; the file is unchanged |
+| Q07 | Open a version 2 file (0.2) | Upgraded to the current version; its runs are kept with a null base folder; a new run records its folder |
+| Q08 | Open a version 3 file (0.2) | Upgraded to the current version; its runs are kept and show no artifact; a new run stores its artifact |
+| Q09 | Open a version 4 file (0.2) | Upgraded to the current version; its runs are kept; the file records this `spore` as its writer |

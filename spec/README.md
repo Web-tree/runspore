@@ -1,7 +1,10 @@
 # MVP specification
 
-Semantics 0.1 — frozen 2026-10-06. Semantics 0.2 is being added beside it, rule by
-rule; [kernel.md](kernel.md) says which rules each version follows. This directory is
+Semantics 0.1 — frozen 2026-10-06. Semantics 0.2 replaces it outright: `spore` 0.2
+reads only 0.2 workflow folders and the artifacts built from them, and refuses a
+database written by 0.1 or by a newer `spore` with the fix named ([cli.md](cli.md),
+[store.md](store.md)). The kernel still speaks both semantics, rule by rule;
+[kernel.md](kernel.md) says which rules each version follows. This directory is
 normative for the first implementation. Where it is narrower than `docs/`, this
 directory wins for the MVP; `docs/` remains the target architecture.
 
@@ -35,16 +38,18 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 
 ## Out of scope for the MVP
 
-Timers, fork and join, child workflows, compensation, cancellation, `reconcilable`
-effects, JSON Schema validation of inputs (0.2 checks outputs, [schema.md](schema.md)), a YAML frontend, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, approvals
-and capability brokering, secrets, telemetry, blobs, history compaction, run migration,
-package signing. Each is additive under a later semantics version.
+Timers, fork and join, child workflows, compensation, `reconcilable` effects, JSON
+Schema beyond the subset of [schema.md](schema.md), a YAML frontend, PostgreSQL, a JS
+host or SDK, browser and Cloudflare profiles, approvals and capability brokering,
+secrets, telemetry, blobs, history compaction, run migration, package signing. Each is
+additive under a later semantics version. 0.2 took cancellation, input and output
+schema checks, and the DOT frontend off this list; 0.1 had none of them.
 
 ## Decisions taken at the freeze
 
 | ID | Decision | Reason |
 | --- | --- | --- |
-| M01 | One workflow document holds graph and action bindings | No compiler yet; the package digest covers both. Superseded for authoring by workflow folders ([dot.md](dot.md)); the package is still one document |
+| M01 | One workflow document holds graph and action bindings | No compiler yet; the package digest covers both. **Superseded in 0.2:** a workflow is a folder, `workflow.dot` and `settings.json`, built into an artifact ([dot.md](dot.md), [artifact.md](artifact.md)); `spore` no longer reads a JSON document ([cli.md](cli.md)). The package inside the artifact is still one document, and its digest is still the run's identity |
 | M02 | The kernel reads only `outcomes`, `effect`, `retry` from an action | Implementation fields stay a host concern |
 | M03 | `effect` is required on every action | The author must state what a repeat would do |
 | M04 | Retries are kernel decisions carried by an `activity.retry` command | One implementation of retry semantics (ADR A01) |
@@ -55,7 +60,7 @@ package signing. Each is additive under a later semantics version.
 | M09 | The store interface is async from the start | PostgreSQL and remote stores must not force a rewrite |
 | M10 | A kernel failure quarantines the run; the event stays pending | A resource or version fault is never a business branch |
 | M11 | Commit request IDs are deterministic per revision and event | Competing coordinators collapse into one receipt |
-| M12 | No cancellation yet | It needs the dispatch gate and settled-effects tracking done properly |
+| M12 | No cancellation yet | It needs the dispatch gate and settled-effects tracking done properly. **Superseded in 0.2:** a run can be cancelled (`spore cancel`, [cli.md](cli.md)): it ends as `cancelled`, its history is kept, and a step in progress is stopped |
 
 ## Files
 

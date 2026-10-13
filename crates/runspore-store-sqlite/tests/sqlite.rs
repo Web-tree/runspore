@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q07 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q09 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -149,22 +149,52 @@ async fn q03_crash_at_every_failpoint() {
     }
 }
 
+/// `PRAGMA user_version` of the file, read outside any store.
+fn user_version(path: &Path) -> i64 {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap()
+}
+
 #[tokio::test]
-async fn q04_newer_schema_is_refused() {
+async fn q04_newer_schema_is_refused_naming_its_writer() {
     let path = fresh_path();
     drop(SqliteStore::open(&path).unwrap());
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.pragma_update(
-        None,
-        "user_version",
-        runspore_store_sqlite::SCHEMA_VERSION + 1,
-    )
-    .unwrap();
+    let newer = runspore_store_sqlite::SCHEMA_VERSION + 1;
+    conn.pragma_update(None, "user_version", newer).unwrap();
+    conn.execute("UPDATE meta SET value = '9.9.9' WHERE key = 'writer'", [])
+        .unwrap();
     drop(conn);
     let error = SqliteStore::open(&path).err().expect("refused");
     assert_eq!(
         (error.kind, error.code.as_str()),
         (StoreFailureKind::Incompatible, "schema.too-new")
+    );
+    for wanted in [
+        "spore 9.9.9",
+        runspore_store_sqlite::WRITER,
+        "move the file aside",
+    ] {
+        assert!(
+            error.message.contains(wanted),
+            "{wanted}: {}",
+            error.message
+        );
+    }
+    assert_eq!(user_version(&path), newer, "the file is left as it was");
+
+    // A newer schema that dropped the meta table is still refused, by its number.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE meta;").unwrap();
+    drop(conn);
+    let error = SqliteStore::open(&path).err().expect("refused");
+    assert_eq!(error.code, "schema.too-new");
+    assert!(
+        error.message.contains(&format!("schema version {newer}")),
+        "{}",
+        error.message
     );
 }
 
@@ -251,10 +281,12 @@ async fn q05_an_expiry_writes_its_audit_record() {
     assert!(audits(&path, "late-evidence").is_empty());
 }
 
+/// Q06: a version 1 file is what `spore` 0.1 wrote. It is refused, not upgraded, and
+/// left exactly as it was.
 #[tokio::test]
-async fn q06_a_version_1_file_is_upgraded() {
+async fn q06_a_version_1_file_is_refused_as_0_1() {
     let path = fresh_path();
-    let (store, attempt) = expired_lease(&path, "old").await;
+    let (store, _attempt) = expired_lease(&path, "old").await;
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
@@ -263,37 +295,37 @@ async fn q06_a_version_1_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN base_dir;
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
+         DROP TABLE meta;
          PRAGMA user_version = 1;",
     )
     .unwrap();
     drop(conn);
-    let clock = ManualClock::new(1_050);
-    let store = SqliteStore::open_with_clock(&path, clock.clone()).unwrap();
-    let version: i64 = rusqlite::Connection::open(&path)
-        .unwrap()
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(version, runspore_store_sqlite::SCHEMA_VERSION);
-    let key = RunKey::new(DEFAULT_TENANT, "old");
-    assert_eq!(store.list_invocations(&key).await.unwrap()[0].process, None);
-    let record = process_record("here", 4242);
-    store
-        .set_process(set_process(&attempt, "process", Some(record.clone())))
-        .await
-        .unwrap();
+    let error = SqliteStore::open_with_clock(&path, ManualClock::new(1_050))
+        .err()
+        .expect("refused");
     assert_eq!(
-        store.list_invocations(&key).await.unwrap()[0].process,
-        Some(record)
+        (error.kind, error.code.as_str()),
+        (StoreFailureKind::Incompatible, "schema.too-old")
     );
-    clock.set(1_100);
-    store
-        .expire_attempt(expire(&attempt, "expire"))
-        .await
-        .unwrap();
-    assert_eq!(
-        audits(&path, "attempt.expired"),
-        [json!({"reason": "lease"})]
-    );
+    for wanted in ["spore 0.1", "0.1 binary", "move the file aside"] {
+        assert!(
+            error.message.contains(wanted),
+            "{wanted}: {}",
+            error.message
+        );
+    }
+    assert_eq!(user_version(&path), 1, "the file is left as it was");
+    let tables: Vec<String> = {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'artifacts')")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert!(tables.is_empty(), "nothing was added: {tables:?}");
 }
 
 #[tokio::test]
@@ -311,16 +343,13 @@ async fn q07_a_version_2_file_is_upgraded() {
         "ALTER TABLE runs DROP COLUMN base_dir;
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
+         DROP TABLE meta;
          PRAGMA user_version = 2;",
     )
     .unwrap();
     drop(conn);
     let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
-    let version: i64 = rusqlite::Connection::open(&path)
-        .unwrap()
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(version, runspore_store_sqlite::SCHEMA_VERSION);
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!((kept.revision, kept.base_dir), (0, None));
     let new = RunKey::new(DEFAULT_TENANT, "new");
@@ -346,17 +375,14 @@ async fn q08_a_version_3_file_is_upgraded() {
     conn.execute_batch(
         "ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
+         DROP TABLE meta;
          PRAGMA user_version = 3;",
     )
     .unwrap();
     drop(conn);
 
     let store = SqliteStore::open_with_clock(&path, clock).unwrap();
-    let version: i64 = rusqlite::Connection::open(&path)
-        .unwrap()
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(version, runspore_store_sqlite::SCHEMA_VERSION);
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store
         .get_run(&old)
         .await
@@ -377,4 +403,34 @@ async fn q08_a_version_3_file_is_upgraded() {
         .artifact_digest
         .expect("the new run records its artifact");
     assert_eq!(store.get_artifact(&digest).await.unwrap(), Some(bytes));
+}
+
+#[tokio::test]
+async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
+    let path = fresh_path();
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    assert_eq!(
+        store.writer().unwrap().as_deref(),
+        Some(runspore_store_sqlite::WRITER),
+        "a fresh file records its writer"
+    );
+    let old = RunKey::new(DEFAULT_TENANT, "old");
+    store
+        .create_run(create_run(&old, "create", 0))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE meta; PRAGMA user_version = 4;")
+        .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    assert_eq!(
+        store.writer().unwrap().as_deref(),
+        Some(runspore_store_sqlite::WRITER)
+    );
+    let kept = store.get_run(&old).await.unwrap().expect("old run kept");
+    assert_eq!(kept.revision, 0);
 }
