@@ -1,0 +1,9 @@
+── Text after the graph ── dot.after-graph/workflow.dot:10  dot.after-graph
+workflow.dot goes on after the closing brace of its graph.
+
+ 10 │ }
+    │ ^
+
+To fix: move it inside the braces, or remove it.
+
+1 problem in dot.after-graph. Nothing was run.

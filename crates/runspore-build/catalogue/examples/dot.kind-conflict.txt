@@ -1,0 +1,9 @@
+── Two kinds for one step ── dot.kind-conflict/workflow.dot:7  dot.kind-conflict
+Step "done" is of kind "fail" here, and of kind "complete" on line 6.
+
+  7 │   done  [kind="fail"];
+    │               ^^^^^^
+
+To fix: give the step one kind.
+
+1 problem in release. Nothing was run.

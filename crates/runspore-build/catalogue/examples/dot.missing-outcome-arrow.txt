@@ -1,0 +1,10 @@
+── Missing arrow ────────────────── dot.missing-outcome-arrow/workflow.dot:5  dot.missing-outcome-arrow
+Step "build" can end with the outcome "red", but no arrow leaves it for "red".
+
+  5 │   build [label="Build the release"];
+    │   ^^^^^
+
+To fix: draw the arrow, for example   build -> done [on="red"];
+Why: action "build" lists ["ok", "red"], so the step can end with "red", and the run would have nowhere to go.
+
+1 problem in release. Nothing was run.

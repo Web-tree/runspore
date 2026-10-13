@@ -1,0 +1,9 @@
+── Signal name with other characters ── node.bad-signal/settings.json:12  node.bad-signal
+Signal "release approval" of step "approve" has characters a signal name cannot have; it may use letters, digits, ".", "_" and "-", at most 64.
+
+ 12 │     "approve": { "signal": "release approval" }
+    │                            ^^^^^^^^^^^^^^^^^^
+
+To fix: rename it with those characters only.
+
+1 problem in release. Nothing was run.

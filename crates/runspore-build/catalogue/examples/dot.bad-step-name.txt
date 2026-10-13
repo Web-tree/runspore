@@ -1,0 +1,9 @@
+── Step name with other characters ── dot.bad-step-name/workflow.dot:5  dot.bad-step-name
+Step "build step" has a name spore cannot use; a step name has letters, digits, "_" and "-", at most 64 of them.
+
+  5 │   "build step" [label="Build the release"];
+    │   ^^^^^^^^^^^^
+
+To fix: rename it to "build-step" everywhere in workflow.dot.
+
+1 problem in release. Nothing was run.

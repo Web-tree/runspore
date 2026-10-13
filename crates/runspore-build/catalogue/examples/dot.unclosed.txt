@@ -1,0 +1,9 @@
+── Never closed ────────────────── dot.unclosed/workflow.dot:8  dot.unclosed
+a /* comment that starts here in workflow.dot is never closed.
+
+  8 │   /* the last arrow
+    │   ^^
+
+To fix: close it with */.
+
+1 problem in dot.unclosed. Nothing was run.

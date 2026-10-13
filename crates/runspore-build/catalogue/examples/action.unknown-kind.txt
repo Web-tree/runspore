@@ -1,0 +1,9 @@
+── Unknown kind of action ── action.unknown-kind/settings.json:5  action.unknown-kind
+Action "build" has kind "shell", which this spore cannot run.
+
+  5 │       "kind": "shell",
+    │               ^^^^^^^
+
+To fix: use one of "command" | "native".
+
+1 problem in release. Nothing was run.

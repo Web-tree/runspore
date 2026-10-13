@@ -1,0 +1,9 @@
+── Not an exit code ────────────────── command.bad-exit-code/settings.json:9  command.bad-exit-code
+"one" in "exitOutcomes" of action "build" is not an exit code.
+
+  9 │       "exitOutcomes": { "one": "red" }
+    │                         ^^^^^
+
+To fix: use a whole number, such as "1".
+
+1 problem in release. Nothing was run.

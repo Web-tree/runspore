@@ -1,0 +1,9 @@
+── "$get" path that is not a list ── mapping.path-not-list/settings.json:11  mapping.path-not-list
+The "$get" of step "build" is "input.repo", and it must be a list of steps such as ["input", "repo"].
+
+ 11 │     "build": { "action": "build", "input": { "repo": { "$get": "input.repo" } } }
+    │                                                                ^^^^^^^^^^^^
+
+To fix: write it as a list, starting with "input", "nodes", "run" or "from".
+
+1 problem in release. Nothing was run.

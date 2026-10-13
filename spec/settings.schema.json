@@ -1,0 +1,354 @@
+{
+  "$defs": {
+    "Action": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "argv"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "native"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "function"
+            ]
+          }
+        }
+      ],
+      "description": "What an action does when a step runs it.",
+      "properties": {
+        "argv": {
+          "description": "`command`: the program and its arguments. No shell: each item is one word.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "assets": {
+          "description": "Files of the folder the action uses, sealed into the workflow artifact.",
+          "items": {
+            "$ref": "#/$defs/FileRef"
+          },
+          "type": "array"
+        },
+        "async": {
+          "additionalProperties": true,
+          "description": "`command`: an asynchronous action's probe, watch and stop programs.",
+          "type": "object"
+        },
+        "cwd": {
+          "$ref": "#/$defs/Cwd",
+          "description": "`command`: the folder to run in, relative to the run's base folder, or the\none the step's input holds."
+        },
+        "effect": {
+          "$ref": "#/$defs/Effect",
+          "description": "Whether a step may run again after a crash: `pure`, `read-only` and\n`idempotent` may, `unsafe` waits for a person."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "`command`: extra environment variables.",
+          "type": "object"
+        },
+        "exitOutcomes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "`command`: the outcome each exit code other than 0 ends with.",
+          "type": "object"
+        },
+        "function": {
+          "description": "`native`: the function the host registered under this name.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "outcomes": {
+          "description": "The outcomes a run of the action ends with. Default `[\"ok\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "output": {
+          "$ref": "#/$defs/Output",
+          "description": "`command`: how its output becomes the step's result. Default `text`."
+        },
+        "retry": {
+          "$ref": "#/$defs/Retry"
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/Millis",
+          "description": "`command`: how long it may run, in milliseconds."
+        }
+      },
+      "required": [
+        "kind",
+        "effect"
+      ],
+      "type": "object"
+    },
+    "Cwd": {
+      "additionalProperties": false,
+      "description": "A folder: a path relative to the run's base folder, or {\"fromInput\": \"<JSON Pointer>\"}, the one the step's input holds there.",
+      "properties": {
+        "fromInput": {
+          "pattern": "^(/([^~/]|~[01])*)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromInput"
+      ],
+      "type": [
+        "string",
+        "object"
+      ]
+    },
+    "Decimal": {
+      "description": "A count of milliseconds written as a string of digits, such as `\"500\"`.",
+      "pattern": "^(0|[1-9][0-9]{0,18})$",
+      "type": "string"
+    },
+    "Effect": {
+      "enum": [
+        "pure",
+        "read-only",
+        "idempotent",
+        "unsafe"
+      ],
+      "type": "string"
+    },
+    "Failure": {
+      "additionalProperties": false,
+      "description": "The error a `fail` step ends the run with.",
+      "properties": {
+        "code": {
+          "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+          "type": "string"
+        },
+        "details": {},
+        "message": {
+          "type": "string"
+        },
+        "nodeId": {
+          "description": "Always null here: the run fills it in.",
+          "type": "null"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "FileRef": {
+      "description": "A path to a file inside the workflow folder.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "Format": {
+      "enum": [
+        "runspore.workflow/0.2"
+      ],
+      "type": "string"
+    },
+    "Kind": {
+      "enum": [
+        "command",
+        "native"
+      ],
+      "type": "string"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "description": "Bounds on every loop.",
+      "properties": {
+        "maxActivations": {
+          "description": "Step entries allowed across the whole run. Default 256.",
+          "format": "uint32",
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxVisitsPerNode": {
+          "description": "Entries allowed into any one step. Default 16.",
+          "format": "uint32",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "LoopLimit": {
+      "description": "A loop limit: 1 to 999.",
+      "format": "uint32",
+      "maximum": 999,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "Millis": {
+      "description": "Milliseconds: a whole number, or one written as a string of digits.",
+      "minimum": 0,
+      "pattern": "^(0|[1-9][0-9]{0,18})$",
+      "type": [
+        "integer",
+        "string"
+      ]
+    },
+    "Output": {
+      "enum": [
+        "text",
+        "json",
+        "result",
+        "none"
+      ],
+      "type": "string"
+    },
+    "Retry": {
+      "additionalProperties": false,
+      "properties": {
+        "backoffMs": {
+          "$ref": "#/$defs/Decimal",
+          "description": "The wait before the second try, doubled for each one after, in milliseconds."
+        },
+        "maxAttempts": {
+          "description": "Tries in all, the first included. Default 1.",
+          "format": "uint32",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxBackoffMs": {
+          "$ref": "#/$defs/Decimal",
+          "description": "The longest wait between tries, in milliseconds. Default \"60000\"."
+        }
+      },
+      "type": "object"
+    },
+    "SchemaOrFile": {
+      "description": "A schema object, or the path of a JSON file holding one.",
+      "minLength": 1,
+      "type": [
+        "object",
+        "string"
+      ]
+    },
+    "Signal": {
+      "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+      "type": "string"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "description": "A step's fields. Which it may carry depends on its kind in `workflow.dot`.",
+      "properties": {
+        "action": {
+          "description": "`activity`: the action it runs.",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Failure",
+          "description": "`fail`: the error the run ends with."
+        },
+        "input": {
+          "description": "`activity`: its input, a mapping over the run."
+        },
+        "instructions": {
+          "$ref": "#/$defs/FileRef",
+          "description": "`activity`, `await-signal`: a file of instructions for whoever does the step."
+        },
+        "loopLimits": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LoopLimit"
+          },
+          "description": "`activity`, `await-signal`: by outcome, how many times in a row it may end\nwith it before it ends with `exhausted`.",
+          "minProperties": 1,
+          "type": "object"
+        },
+        "output": {
+          "description": "`complete`: the run's output, a mapping over the run."
+        },
+        "outputSchemas": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaOrFile"
+          },
+          "description": "`activity`, `await-signal`: by outcome, the schema its output fits, inline or\nas the path of a JSON file.",
+          "minProperties": 1,
+          "type": "object"
+        },
+        "signal": {
+          "$ref": "#/$defs/Signal",
+          "description": "`await-signal`: the signal it waits for."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/Web-tree/runspore/main/spec/settings.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The settings of a workflow folder: the package's own shape minus its topology,\nwhich `workflow.dot` holds.",
+  "properties": {
+    "$schema": {
+      "description": "This schema's address, for editors.",
+      "type": "string"
+    },
+    "actions": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Action"
+      },
+      "description": "Actions by ID: what a step runs.",
+      "type": "object"
+    },
+    "format": {
+      "$ref": "#/$defs/Format",
+      "description": "The package format; it agrees with the dialect of `workflow.dot`."
+    },
+    "inputSchema": {
+      "$ref": "#/$defs/SchemaOrFile",
+      "description": "The shape a run's input must have: a schema object whose root is\n`\"type\": \"object\"`, or the path of a JSON file holding one."
+    },
+    "limits": {
+      "$ref": "#/$defs/Limits"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Step"
+      },
+      "description": "Steps by the ID `workflow.dot` gives them: their fields other than kind and\narrows.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "format"
+  ],
+  "title": "Runspore workflow settings (settings.json)",
+  "type": "object"
+}

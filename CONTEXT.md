@@ -90,6 +90,18 @@ _Avoid_: workspace, config dir
 The folder a run's commands run from, recorded when the run starts: the folder holding the project folder, unless the person starting it names another. A run keeps it wherever it is continued from.
 _Avoid_: working directory (that is one command's), project root
 
+**Diagnostic**:
+One thing a build found wrong with a workflow folder: a code, the place in the author's file, the values it quotes, and its fixes. A problem stops the build; a warning does not. It holds no text: its words come from the catalogue.
+_Avoid_: error, lint, finding
+
+**Catalogue**:
+The one place every diagnostic's words are written, one entry per code with its message, its fix and an example folder that produces it.
+_Avoid_: message table, translations
+
+**Fix**:
+A concrete change to the author's files that removes a diagnostic, marked safe, needs-review or needs-choice. `spore validate --fix` applies only the safe ones.
+_Avoid_: suggestion, quick fix, autofix
+
 ### Steps and their actors
 
 **Step**:

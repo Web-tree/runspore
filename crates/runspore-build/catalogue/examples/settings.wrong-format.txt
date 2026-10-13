@@ -1,0 +1,9 @@
+── Wrong format ────────────────── settings.wrong-format/settings.json:2  settings.wrong-format
+Format "runspore.workflow/0.1" does not agree with the dialect "runspore/0.2" of workflow.dot.
+
+  2 │   "format": "runspore.workflow/0.1",
+    │             ^^^^^^^^^^^^^^^^^^^^^^^
+
+To fix: change it to "runspore.workflow/0.2".
+
+1 problem in release. Nothing was run.

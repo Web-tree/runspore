@@ -1,0 +1,9 @@
+── Empty ────────────────── settings.empty/settings.json:6  settings.empty
+"actions" → "build" → "argv" is empty.
+
+  6 │       "argv": [],
+    │               ^^
+
+To fix: give it at least one entry, or remove it.
+
+1 problem in release. Nothing was run.

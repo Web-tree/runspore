@@ -1,0 +1,25 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" },
+    "approve": {
+      "signal": "approval",
+      "outputSchemas": {
+        "approved": { "type": "object", "properties": { "by": { "type": "string" } } }
+      }
+    },
+    "recheck": {
+      "signal": "approval",
+      "outputSchemas": {
+        "approved": { "type": "object", "properties": { "by": { "type": "string" } } }
+      }
+    }
+  }
+}

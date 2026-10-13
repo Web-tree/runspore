@@ -1,0 +1,9 @@
+── Input schema file that is not JSON ── schema.input-file-not-json/settings.json:3  schema.input-file-not-json
+The input schema file "schemas/input.json" of "release" is not JSON that spore can read.
+
+  3 │   "inputSchema": "schemas/input.json",
+    │                  ^^^^^^^^^^^^^^^^^^^^
+
+To fix: make it a JSON object, with whole numbers only.
+
+1 problem in release. Nothing was run.

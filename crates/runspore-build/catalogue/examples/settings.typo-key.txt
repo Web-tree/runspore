@@ -1,0 +1,10 @@
+── Unknown key ────────────────── settings.typo-key/settings.json:7  settings.typo-key
+There is no key "efect" in "actions" → "build".
+
+  6 │       "argv": ["make"],
+  7 │       "efect": "idempotent"
+    │       ^^^^^^^
+
+To fix: rename it to "effect".
+
+1 problem in release. Nothing was run.

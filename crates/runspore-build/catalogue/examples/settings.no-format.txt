@@ -1,0 +1,9 @@
+── No format ────────────────── settings.no-format/settings.json:1  settings.no-format
+settings.json does not say its format.
+
+  1 │ {
+    │ ^
+
+To fix: add "format": "runspore.workflow/0.2".
+
+1 problem in release. Nothing was run.

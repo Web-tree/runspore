@@ -1,0 +1,17 @@
+── Arrow for an outcome the action does not have ── command.exit-outcome/workflow.dot:10  dot.undeclared-outcome
+Step "build" has an arrow for the outcome "red", which its action "build" does not list.
+
+ 10 │   build -> broken [on="red"];
+    │   ^^^^^^^^^^^^^^^
+
+To fix: add "red" to "outcomes" of action "build", or use one it lists: "ok".
+
+── Exit code for an outcome the action does not list ── command.exit-outcome/settings.json:8  command.exit-outcome
+Exit code "1" of action "build" gives the outcome "red", which the action does not list in "outcomes".
+
+  8 │       "exitOutcomes": { "1": "red" }
+    │                              ^^^^^
+
+To fix: add "red" to "outcomes", or give the exit code an outcome the action lists.
+
+2 problems in release. Nothing was run.

@@ -1,0 +1,9 @@
+── Loop limit for an outcome with no arrow ── node.limit-unknown-outcome/settings.json:12  node.limit-unknown-outcome
+Step "build" has a loop limit for "rde", but no arrow for "rde".
+
+ 12 │     "build": { "action": "build", "loopLimits": { "rde": 3 } },
+    │                                                   ^^^^^
+
+To fix: limit an outcome the step has an arrow for, or draw the arrow.
+
+1 problem in release. Nothing was run.

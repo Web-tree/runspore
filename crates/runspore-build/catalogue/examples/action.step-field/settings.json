@@ -1,0 +1,14 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent",
+      "input": { "target": "release" }
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" }
+  }
+}

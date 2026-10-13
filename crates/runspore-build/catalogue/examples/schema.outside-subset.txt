@@ -1,0 +1,9 @@
+── Schema outside what spore checks ── schema.outside-subset/settings.json:14  schema.outside-subset
+The schema for "ok" on step "build" is outside what spore checks, at "/properties/size/type": `number` is not allowed: data holds integers only; use `integer`.
+
+ 14 │         "ok": { "type": "object", "properties": { "size": { "type": "number" } } }
+    │                                                             ^^^^^^
+
+To fix: use only the parts of JSON Schema that spec/schema.md lists.
+
+1 problem in release. Nothing was run.

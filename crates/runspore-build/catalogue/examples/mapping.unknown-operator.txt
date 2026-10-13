@@ -1,0 +1,9 @@
+── Unknown "$" key ────────────────── mapping.unknown-operator/settings.json:13  mapping.unknown-operator
+"$gte" in step "build" is not something spore can work out; a key starting with "$" is "$get" or "$literal".
+
+ 13 │       "input": { "repo": { "$gte": ["input", "repo"] } }
+    │                            ^^^^^^
+
+To fix: use "$get" or "$literal", or put the value inside "$literal" to keep the key as it is.
+
+1 problem in release. Nothing was run.

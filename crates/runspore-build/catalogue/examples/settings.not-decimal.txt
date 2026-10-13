@@ -1,0 +1,9 @@
+── Milliseconds not written as digits ── settings.not-decimal/settings.json:8  settings.not-decimal
+"10m" at "actions" → "build" → "timeoutMs" is not a count of milliseconds written as digits, such as "500".
+
+  8 │       "timeoutMs": "10m"
+    │                    ^^^^^
+
+To fix: write it as a string of digits, such as "500".
+
+1 problem in release. Nothing was run.

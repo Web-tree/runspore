@@ -1,0 +1,9 @@
+── Step without what its kind needs ── node.missing-field/workflow.dot:6  node.missing-field
+Step "approve" is of kind "await-signal", so settings.json must give it "signal".
+
+  6 │   approve [kind="await-signal"];
+    │   ^^^^^^^
+
+To fix: add "signal" to step "approve" under "nodes" in settings.json.
+
+1 problem in release. Nothing was run.

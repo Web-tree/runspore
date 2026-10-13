@@ -1,0 +1,9 @@
+── Not JSON ────────────────── settings.not-json/settings.json:8  settings.not-json
+settings.json stops being JSON here.
+
+  8 │     }
+    │     ^
+
+To fix: correct the JSON at this spot; a missing comma, quote or brace is the usual cause.
+
+1 problem in release. Nothing was run.

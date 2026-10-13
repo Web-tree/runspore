@@ -1,0 +1,9 @@
+── Outcome for exit code 0 in result mode ── command.result-exit-zero/settings.json:9  command.result-exit-zero
+Action "build" reads its result from what it prints when it exits with 0, so "exitOutcomes" cannot give 0 an outcome.
+
+  9 │       "exitOutcomes": { "0": "ok" }
+    │                              ^^^^
+
+To fix: remove "0" from "exitOutcomes".
+
+1 problem in release. Nothing was run.

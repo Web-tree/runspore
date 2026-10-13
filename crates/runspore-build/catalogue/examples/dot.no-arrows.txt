@@ -1,0 +1,9 @@
+── Signal step with no arrows ── dot.no-arrows/workflow.dot:6  dot.no-arrows
+Step "approve" waits for a signal, but no arrow leaves it.
+
+  6 │   approve [kind="await-signal"];
+    │   ^^^^^^^
+
+To fix: draw an arrow for each outcome the signal can bring, for example   approve -> done [on="received"];
+
+1 problem in release. Nothing was run.

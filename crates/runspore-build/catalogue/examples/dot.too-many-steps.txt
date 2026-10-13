@@ -1,0 +1,9 @@
+── Too many steps ────────────────── dot.too-many-steps/workflow.dot:38  dot.too-many-steps
+workflow.dot has more than 256 steps, and step "c255" is the 257th.
+
+ 38 │   c249 [kind="complete"]; c250 [kind="complete"]; c251 [kind="complete"]; c252 [kind="complete"]; c253 [kind="complete"]; c254 [kind="complete"]; c255 [kind="complete"];
+    │                                                                                                                                                   ^^^^
+
+To fix: split the workflow in two, or join steps.
+
+1 problem in release. Nothing was run.

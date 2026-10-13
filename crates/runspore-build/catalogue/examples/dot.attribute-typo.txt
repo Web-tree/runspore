@@ -1,0 +1,9 @@
+── Unknown attribute ────────────────── dot.attribute-typo/workflow.dot:5  dot.attribute-typo
+Attribute "lable" in workflow.dot is not one spore reads.
+
+  5 │   build [lable="Build the release"];
+    │          ^^^^^
+
+To fix: rename it to label.
+
+1 problem in release. Nothing was run.

@@ -1,0 +1,10 @@
+── Loop limit too high ── node.limit-too-high/settings.json:12  node.limit-too-high
+The loop limit 20 for "red" on step "build" leaves no room under the visit limit 16 of the workflow.
+
+ 12 │     "build": { "action": "build", "loopLimits": { "red": 20 } },
+    │                                                          ^^
+
+To fix: lower it to 15, or raise "maxVisitsPerNode" in "limits".
+Why: a step is entered at most "maxVisitsPerNode" times, and a loop that runs out of tries enters it once more.
+
+1 problem in release. Nothing was run.

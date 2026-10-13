@@ -1,0 +1,10 @@
+── "input" is in the wrong place ── settings.misplaced-step-key/settings.json:12  settings.misplaced-step-key
+Every key under "nodes" must be a step in workflow.dot, and there is no step "input".
+
+ 11 │     "build": { "action": "build" },
+ 12 │     "input": { "target": "release" }
+    │     ^^^^^^^
+
+To fix: input is a key of a step. Move this line into the step it describes, for example "nodes" → "build".
+
+1 problem in release. Nothing was run.

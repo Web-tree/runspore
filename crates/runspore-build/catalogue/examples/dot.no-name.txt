@@ -1,0 +1,8 @@
+── No workflow name ────────────────── dot.no-name/workflow.dot:1  dot.no-name
+The graph in workflow.dot has no name, and its name is the workflow's name.
+
+  1 │ digraph {
+
+To fix: name it, for example   digraph "dot.no-name" {
+
+1 problem in dot.no-name. Nothing was run.

@@ -1,0 +1,9 @@
+── Unknown attribute ────────────────── dot.unknown-attribute/workflow.dot:5  dot.unknown-attribute
+Attribute "priority" in workflow.dot is not one spore reads.
+
+  5 │   build [label="Build the release", priority=1];
+    │                                     ^^^^^^^^
+
+To fix: remove it, or use one spore reads: kind, on, or a render attribute such as label, shape or color.
+
+1 problem in release. Nothing was run.

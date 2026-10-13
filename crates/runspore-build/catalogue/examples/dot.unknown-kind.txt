@@ -1,0 +1,9 @@
+── Unknown kind ────────────────── dot.unknown-kind/workflow.dot:6  dot.unknown-kind
+Step "done" has kind "completed", which spore does not know.
+
+  6 │   done  [kind="completed"];
+    │               ^^^^^^^^^^^
+
+To fix: use one of "activity" | "await-signal" | "complete" | "fail".
+
+1 problem in release. Nothing was run.

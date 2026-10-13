@@ -157,6 +157,18 @@ fn validate_refuses_a_malformed_cwd_object() {
     std::fs::write(&settings, text.replace("\"/place/dir\"", "\"place/dir\"")).unwrap();
     let out = spore(&root, &["--json", "validate", "worktree"]);
     assert_eq!(out.code(), Some(2), "{}{}", out.stdout, out.stderr);
-    let message = out.json()["error"]["message"].to_string();
-    assert!(message.contains("fromInput"), "{message}");
+    let report = out.json();
+    let codes: Vec<&str> = report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["severity"] == json!("problem"))
+        .map(|d| d["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["command.cwd-not-pointer"], "{report}");
+    assert_eq!(
+        report["diagnostics"][0]["path"],
+        json!("/actions/work/cwd/fromInput"),
+        "{report}"
+    );
 }

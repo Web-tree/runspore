@@ -1,0 +1,9 @@
+── Outcome listed twice ── action.repeated-outcome/settings.json:8  action.repeated-outcome
+Action "build" lists the outcome "ok" twice.
+
+  8 │       "outcomes": ["ok", "ok"]
+    │                          ^^^^
+
+To fix: remove the second one.
+
+1 problem in release. Nothing was run.

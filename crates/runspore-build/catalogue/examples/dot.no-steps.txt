@@ -1,0 +1,8 @@
+── No steps ────────────────── dot.no-steps/workflow.dot:1  dot.no-steps
+workflow.dot has no steps.
+
+  1 │ digraph "release" {
+
+To fix: add the steps of the workflow, and the arrows between them.
+
+1 problem in release. Nothing was run.

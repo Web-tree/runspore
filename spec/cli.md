@@ -23,8 +23,9 @@ marked **0.2** below are new since 0.1.
 | Command | Does |
 | --- | --- |
 | `init` | **0.2.** Creates the project folder (§Project folder) |
-| `validate <workflow>` | Builds the workflow and checks it and its actions without touching the database |
-| `build <folder> [-o <file>] [--composed]` | **0.2.** Builds a workflow folder (or its `workflow.dot`), checks it as `validate` does, and writes the workflow artifact to `<file>`, by default `<folder>.wasm` beside the folder. With `--composed`, the composed artifact (artifact.md §7), by default `<folder>-composed.wasm` |
+| `validate <workflow> [--short] [--strict] [--fix]` | Builds the workflow and checks it and its actions without touching the database. **0.2:** reports every problem of a folder at once (§Validation) |
+| `explain [<code>]` | **0.2.** Prints the help page of a validation code, or lists every code (§Validation) |
+| `build <folder> [-o <file>] [--composed] [--strict]` | **0.2.** Builds a workflow folder (or its `workflow.dot`), checks it as `validate` does, and writes the workflow artifact to `<file>`, by default `<folder>.wasm` beside the folder. With `--composed`, the composed artifact (artifact.md §7), by default `<folder>-composed.wasm` |
 | `inspect <artifact>` | **0.2.** Loads an artifact and prints its digest, manifest and package as JSON |
 | `inspect --run <runId> --file <path>` | **0.2.** Prints the file the run's artifact holds at `<path>`, for example `workflow.dot` |
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder. The input is checked against the workflow's `inputSchema` (0.2) |
@@ -43,10 +44,10 @@ WebAssembly magic bytes). Nothing else is read: any other file, such as a JSON
 workflow document of 0.1, exits 2 with `workflow.folder` and a message saying that a
 workflow is a folder holding `workflow.dot` and `settings.json`, or an artifact built
 from one. A folder of dialect `runspore/0.1`, or whose `settings.json` says
-`runspore.workflow/0.1`, is a build error that names the fix (dot.md §3). A build
-error exits 2 and names the file and line (dot.md §6); an artifact that does not load
-exits 2 with its code (artifact.md §6). JSON workflow documents remain an internal
-form: the package inside an artifact, and a test fixture.
+`runspore.workflow/0.1`, is a build problem that names the fix (dot.md §3). A folder
+with problems exits 2 with every one of them (dot.md §6, §Validation below); an
+artifact that does not load exits 2 with its code (artifact.md §6). JSON workflow
+documents remain an internal form: the package inside an artifact, and a test fixture.
 
 `start` and `run` from a folder build its artifact in memory, load it like a
 prebuilt one, and store it with the run; from an artifact they store that file. Either
@@ -110,8 +111,99 @@ spore: output.invalid: the data for outcome "rejected" does not fit its schema
 
 In JSON mode the error object carries `details`:
 `{"outcome": "rejected", "errors": [{"path": "", "message": "expected type \"object\", got null"}]}`.
-`validate`, `start` and `run` refuse a schema outside the subset with exit 2 and
-`workflow.invalid-schema` (dot.md §6).
+A folder's schema outside the subset is the diagnostic `schema.outside-subset` (dot.md
+§6).
+
+## Validation (0.2)
+
+`validate` on a workflow folder builds it and reports **every problem and warning in
+one run** (dot.md §6). Its diagnostics are messages, so they go to stderr; stdout
+gets only the verdict, so `spore validate <folder> >/dev/null` still shows what is
+wrong. In this order:
+
+1. with `--fix`, each change it made (below);
+2. one block per diagnostic, problems first, then in the order the build checks:
+   `workflow.dot` alone, what joins the two files, `settings.json` alone, then the
+   whole graph; by line within each. After 20 blocks it stops and says how many are
+   left and that `spore validate --short <folder>` lists them all;
+3. the count, last, because people read the end of the output first: `4 problems and 1
+   warning in nightly-backup. Nothing was run.`, or `1 warning in nightly-backup.`;
+4. on stdout, when there is no problem, `<workflow> is valid`.
+
+A block is a heading with the file, the line and the code on the right; the message;
+the author's lines with the spot marked; `To fix:` with the fix, and for some codes
+the first fix applied to the author's lines (added lines marked `+`); then `Why:` and
+`More: spore explain <code>` when the code has them:
+
+```text
+── Missing "effect" ────────────────── nightly-backup/settings.json:9  action.no-effect
+Action "upload" does not say whether it is safe to run again after a crash.
+
+  9 │     "upload": {
+    │     ^^^^^^^^
+
+To fix: add one of "pure" | "read-only" | "idempotent" | "unsafe" to action "upload". For example:
+
+ 11 │       "argv": ["aws", "s3", "cp", "backup.dump", "s3://acme-backups/shop/latest.dump"],
+ 12 │+      "effect": "idempotent"
+
+Why: spore runs a step again after a crash only when its effect says that is safe.
+More: spore explain action.no-effect
+```
+
+A warning's heading ends with `(warning)`. A heading of up to 18 characters is
+followed by 18 dashes, a longer one by 2. Paths are the folder as given, then the
+file. The [validation guide](../docs/validation.md) walks through a whole report.
+
+| Option | Does |
+| --- | --- |
+| `--short` | Prints one line per diagnostic instead of the blocks: `<file>:<line>:<column>: <code>: <message>` |
+| `--strict` | Warnings fail too: exit 2, and `valid` is false |
+| `--fix` | Applies the first fix of each diagnostic whose fix is `safe`, writes `workflow.dot` and `settings.json`, prints each change as its changed lines (`Fixed <code> in <file>:`, old lines `-`, new lines `+`), then checks the folder again and reports what is left. It never applies a `needs-review` or `needs-choice` fix: choosing an effect, for one, is the author's call |
+
+Exit codes: 2 when there is a problem, or a warning with `--strict`; else 0. Warnings
+alone never change the exit code.
+
+`start`, `run` and `build` refuse a folder with problems the same way, with exit 2:
+in text mode the blocks and the count on stderr, in JSON mode the error
+`workflow.invalid` whose `message` is the count and whose `details` is the object
+below. They print a folder's warnings on stderr and go on. `build --strict` refuses a
+folder with warnings.
+
+**JSON.** `spore --json validate` prints `{valid, problems, warnings, diagnostics}`,
+with `packageBytes` when valid and `fixed` (`[{code, file}]`) with `--fix`. `problems`
+and `warnings` are decimal strings. Each diagnostic:
+
+| Field | Value |
+| --- | --- |
+| `severity` | `problem` or `warning` |
+| `code` | The code, such as `action.no-effect` |
+| `title` | The code's title, the same for every diagnostic of the code |
+| `message` | The message, with the author's values in it |
+| `fix` | The fix, as text |
+| `why` | The reason, or null |
+| `file` | The file as the text output shows it: the folder as given, then `workflow.dot` or `settings.json` |
+| `range` | `{start: {line, column}, end: {line, column}}`, 1-based, the end excluded; columns count characters |
+| `path` | The JSON Pointer into `settings.json`, or null for a place in `workflow.dot` |
+| `args` | `[{name, kind, value, pointer}]`: each argument, its kind (`input`, `key`, `place`, `computed` or `code`), its value, and the pointer it was read from or null |
+| `fixes` | `[{applicability, edits}]`, the first being the example; `applicability` is `safe`, `needs-review` or `needs-choice`. Each edit has `file`, `op` (`set`, `remove`, `rename`, `replace` or `text`), for all but `text` `at` (a pointer) and `value`, `to` (the new key) or `key` and `value` (the member put in its place), and for every edit the same change as text: `range` and `text`, the new text for that range of the file as it was read |
+| `docs` | The address of the code's help page |
+
+These map one to one onto an LSP `Diagnostic` (`range` less one on each number,
+`severity`, `code`, `codeDescription.href` from `docs`, `message`) and its fixes onto
+`CodeAction`s of kind `quickfix` with a `WorkspaceEdit` built from `range` and `text`,
+the `safe` one `isPreferred`.
+
+`validate` on an artifact checks it as `start` would and prints `{valid: true,
+problems: "0", warnings: "0", diagnostics: [], packageBytes}`, or refuses it as `start`
+would.
+
+**`spore explain <code>`** prints the code's page, offline: its title and severity, its
+explanation when it has one, the block its example folder gives, and the change its
+fix makes. `--json` prints `{code, severity, title, page, docs}`. Without a code it
+lists every code with its severity and title (`{codes: [{code, severity, title}]}`).
+An unknown code exits 2 with `explain.unknown-code`. The same pages are in
+[docs/codes](../docs/codes/README.md).
 
 **0.2: input schema.** When the workflow declares `inputSchema`
 ([schema.md](schema.md) §4), `start` and `run` check the input (`--input`,
@@ -129,8 +221,9 @@ spore: input.invalid: the input does not fit the workflow's inputSchema
 In JSON mode the error object carries `details`:
 `{"errors": [{"path": "/task", "message": "required, but missing"}, …]}`. An
 `inputSchema` whose root is not `"type": "object"` is refused by `validate`, `start`
-and `run` with `workflow.invalid-schema`, like any schema outside the subset. A
-workflow without `inputSchema` accepts any input.
+and `run`: in a folder as the diagnostic `schema.input-not-object` (beside
+`schema.input-outside-subset` for one outside the subset), in an artifact with
+`workflow.invalid-schema`. A workflow without `inputSchema` accepts any input.
 
 ## Project folder (0.2)
 
@@ -224,7 +317,7 @@ name (`project.legacy-database`, above).
 | --- | --- |
 | 0 | Success. For `run` and `worker --until-parked`: the run completed |
 | 1 | The run failed |
-| 2 | Usage or validation error |
+| 2 | Usage or validation error; for `validate`, a problem, or a warning with `--strict` |
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |

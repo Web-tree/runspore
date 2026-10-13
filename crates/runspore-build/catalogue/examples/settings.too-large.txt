@@ -1,0 +1,9 @@
+── Number too large ────────────────── settings.too-large/settings.json:4  settings.too-large
+5000 at "limits" → "maxVisitsPerNode" is too large.
+
+  4 │     "maxVisitsPerNode": 5000
+    │                         ^^^^
+
+To fix: use 1000 or less.
+
+1 problem in release. Nothing was run.

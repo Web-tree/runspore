@@ -1,0 +1,9 @@
+── Outcome spore keeps for itself ── action.reserved-outcome/settings.json:8  action.reserved-outcome
+Action "build" lists "failed", an outcome spore keeps for itself.
+
+  8 │       "outcomes": ["ok", "failed"]
+    │                          ^^^^^^^^
+
+To fix: remove it; spore gives a step "failed" on its own.
+
+1 problem in release. Nothing was run.

@@ -1,0 +1,11 @@
+digraph "release" {
+  dialect = "runspore/0.2";
+  start   = "build";
+
+  build [label="Build the release"];
+  approve [kind="await-signal"];
+  done  [kind="complete"];
+
+  build -> approve;
+  approve -> done [on="approved"];
+}

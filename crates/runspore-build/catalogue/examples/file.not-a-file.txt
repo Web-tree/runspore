@@ -1,0 +1,9 @@
+── Not a file ────────────────── file.not-a-file/settings.json:11  file.not-a-file
+"steps" is not a regular file.
+
+ 11 │     "build": { "action": "build", "instructions": "steps" }
+    │                                                   ^^^^^^^
+
+To fix: name a file, not a folder.
+
+1 problem in release. Nothing was run.

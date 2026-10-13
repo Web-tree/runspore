@@ -1,0 +1,12 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "build": {
+      "argv": ["make"],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" }
+  }
+}

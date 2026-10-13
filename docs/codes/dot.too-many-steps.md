@@ -1,0 +1,59 @@
+# `dot.too-many-steps`: Too many steps
+
+<!-- Generated from crates/runspore-build/catalogue; `cargo test -p runspore-build --test catalogue -- --ignored bless` rewrites it. -->
+
+A problem: the workflow does not build, and nothing runs.
+
+## Example
+
+`spore validate dot.too-many-steps` reports:
+
+```text
+── Too many steps ────────────────── dot.too-many-steps/workflow.dot:38  dot.too-many-steps
+workflow.dot has more than 256 steps, and step "c255" is the 257th.
+
+ 38 │   c249 [kind="complete"]; c250 [kind="complete"]; c251 [kind="complete"]; c252 [kind="complete"]; c253 [kind="complete"]; c254 [kind="complete"]; c255 [kind="complete"];
+    │                                                                                                                                                   ^^^^
+
+To fix: split the workflow in two, or join steps.
+```
+
+The fix changes:
+
+```text
+dot.too-many-steps/workflow.dot:
+  7 │-  c1 [kind="complete"]; c2 [kind="complete"]; c3 [kind="complete"]; c4 [kind="complete"]; c5 [kind="complete"]; c6 [kind="complete"]; c7 [kind="complete"]; c8 [kind="complete"];
+  8 │-  c9 [kind="complete"]; c10 [kind="complete"]; c11 [kind="complete"]; c12 [kind="complete"]; c13 [kind="complete"]; c14 [kind="complete"]; c15 [kind="complete"]; c16 [kind="complete"];
+  9 │-  c17 [kind="complete"]; c18 [kind="complete"]; c19 [kind="complete"]; c20 [kind="complete"]; c21 [kind="complete"]; c22 [kind="complete"]; c23 [kind="complete"]; c24 [kind="complete"];
+ 10 │-  c25 [kind="complete"]; c26 [kind="complete"]; c27 [kind="complete"]; c28 [kind="complete"]; c29 [kind="complete"]; c30 [kind="complete"]; c31 [kind="complete"]; c32 [kind="complete"];
+ 11 │-  c33 [kind="complete"]; c34 [kind="complete"]; c35 [kind="complete"]; c36 [kind="complete"]; c37 [kind="complete"]; c38 [kind="complete"]; c39 [kind="complete"]; c40 [kind="complete"];
+ 12 │-  c41 [kind="complete"]; c42 [kind="complete"]; c43 [kind="complete"]; c44 [kind="complete"]; c45 [kind="complete"]; c46 [kind="complete"]; c47 [kind="complete"]; c48 [kind="complete"];
+ 13 │-  c49 [kind="complete"]; c50 [kind="complete"]; c51 [kind="complete"]; c52 [kind="complete"]; c53 [kind="complete"]; c54 [kind="complete"]; c55 [kind="complete"]; c56 [kind="complete"];
+ 14 │-  c57 [kind="complete"]; c58 [kind="complete"]; c59 [kind="complete"]; c60 [kind="complete"]; c61 [kind="complete"]; c62 [kind="complete"]; c63 [kind="complete"]; c64 [kind="complete"];
+ 15 │-  c65 [kind="complete"]; c66 [kind="complete"]; c67 [kind="complete"]; c68 [kind="complete"]; c69 [kind="complete"]; c70 [kind="complete"]; c71 [kind="complete"]; c72 [kind="complete"];
+ 16 │-  c73 [kind="complete"]; c74 [kind="complete"]; c75 [kind="complete"]; c76 [kind="complete"]; c77 [kind="complete"]; c78 [kind="complete"]; c79 [kind="complete"]; c80 [kind="complete"];
+ 17 │-  c81 [kind="complete"]; c82 [kind="complete"]; c83 [kind="complete"]; c84 [kind="complete"]; c85 [kind="complete"]; c86 [kind="complete"]; c87 [kind="complete"]; c88 [kind="complete"];
+ 18 │-  c89 [kind="complete"]; c90 [kind="complete"]; c91 [kind="complete"]; c92 [kind="complete"]; c93 [kind="complete"]; c94 [kind="complete"]; c95 [kind="complete"]; c96 [kind="complete"];
+ 19 │-  c97 [kind="complete"]; c98 [kind="complete"]; c99 [kind="complete"]; c100 [kind="complete"]; c101 [kind="complete"]; c102 [kind="complete"]; c103 [kind="complete"]; c104 [kind="complete"];
+ 20 │-  c105 [kind="complete"]; c106 [kind="complete"]; c107 [kind="complete"]; c108 [kind="complete"]; c109 [kind="complete"]; c110 [kind="complete"]; c111 [kind="complete"]; c112 [kind="complete"];
+ 21 │-  c113 [kind="complete"]; c114 [kind="complete"]; c115 [kind="complete"]; c116 [kind="complete"]; c117 [kind="complete"]; c118 [kind="complete"]; c119 [kind="complete"]; c120 [kind="complete"];
+ 22 │-  c121 [kind="complete"]; c122 [kind="complete"]; c123 [kind="complete"]; c124 [kind="complete"]; c125 [kind="complete"]; c126 [kind="complete"]; c127 [kind="complete"]; c128 [kind="complete"];
+ 23 │-  c129 [kind="complete"]; c130 [kind="complete"]; c131 [kind="complete"]; c132 [kind="complete"]; c133 [kind="complete"]; c134 [kind="complete"]; c135 [kind="complete"]; c136 [kind="complete"];
+ 24 │-  c137 [kind="complete"]; c138 [kind="complete"]; c139 [kind="complete"]; c140 [kind="complete"]; c141 [kind="complete"]; c142 [kind="complete"]; c143 [kind="complete"]; c144 [kind="complete"];
+ 25 │-  c145 [kind="complete"]; c146 [kind="complete"]; c147 [kind="complete"]; c148 [kind="complete"]; c149 [kind="complete"]; c150 [kind="complete"]; c151 [kind="complete"]; c152 [kind="complete"];
+ 26 │-  c153 [kind="complete"]; c154 [kind="complete"]; c155 [kind="complete"]; c156 [kind="complete"]; c157 [kind="complete"]; c158 [kind="complete"]; c159 [kind="complete"]; c160 [kind="complete"];
+ 27 │-  c161 [kind="complete"]; c162 [kind="complete"]; c163 [kind="complete"]; c164 [kind="complete"]; c165 [kind="complete"]; c166 [kind="complete"]; c167 [kind="complete"]; c168 [kind="complete"];
+ 28 │-  c169 [kind="complete"]; c170 [kind="complete"]; c171 [kind="complete"]; c172 [kind="complete"]; c173 [kind="complete"]; c174 [kind="complete"]; c175 [kind="complete"]; c176 [kind="complete"];
+ 29 │-  c177 [kind="complete"]; c178 [kind="complete"]; c179 [kind="complete"]; c180 [kind="complete"]; c181 [kind="complete"]; c182 [kind="complete"]; c183 [kind="complete"]; c184 [kind="complete"];
+ 30 │-  c185 [kind="complete"]; c186 [kind="complete"]; c187 [kind="complete"]; c188 [kind="complete"]; c189 [kind="complete"]; c190 [kind="complete"]; c191 [kind="complete"]; c192 [kind="complete"];
+ 31 │-  c193 [kind="complete"]; c194 [kind="complete"]; c195 [kind="complete"]; c196 [kind="complete"]; c197 [kind="complete"]; c198 [kind="complete"]; c199 [kind="complete"]; c200 [kind="complete"];
+ 32 │-  c201 [kind="complete"]; c202 [kind="complete"]; c203 [kind="complete"]; c204 [kind="complete"]; c205 [kind="complete"]; c206 [kind="complete"]; c207 [kind="complete"]; c208 [kind="complete"];
+ 33 │-  c209 [kind="complete"]; c210 [kind="complete"]; c211 [kind="complete"]; c212 [kind="complete"]; c213 [kind="complete"]; c214 [kind="complete"]; c215 [kind="complete"]; c216 [kind="complete"];
+ 34 │-  c217 [kind="complete"]; c218 [kind="complete"]; c219 [kind="complete"]; c220 [kind="complete"]; c221 [kind="complete"]; c222 [kind="complete"]; c223 [kind="complete"]; c224 [kind="complete"];
+ 35 │-  c225 [kind="complete"]; c226 [kind="complete"]; c227 [kind="complete"]; c228 [kind="complete"]; c229 [kind="complete"]; c230 [kind="complete"]; c231 [kind="complete"]; c232 [kind="complete"];
+ 36 │-  c233 [kind="complete"]; c234 [kind="complete"]; c235 [kind="complete"]; c236 [kind="complete"]; c237 [kind="complete"]; c238 [kind="complete"]; c239 [kind="complete"]; c240 [kind="complete"];
+ 37 │-  c241 [kind="complete"]; c242 [kind="complete"]; c243 [kind="complete"]; c244 [kind="complete"]; c245 [kind="complete"]; c246 [kind="complete"]; c247 [kind="complete"]; c248 [kind="complete"];
+ 38 │-  c249 [kind="complete"]; c250 [kind="complete"]; c251 [kind="complete"]; c252 [kind="complete"]; c253 [kind="complete"]; c254 [kind="complete"]; c255 [kind="complete"];
+```
+
+The example folder is [`catalogue/examples/dot.too-many-steps`](../../crates/runspore-build/catalogue/examples/dot.too-many-steps).

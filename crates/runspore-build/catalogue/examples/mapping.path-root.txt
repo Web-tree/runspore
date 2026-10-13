@@ -1,0 +1,9 @@
+── "$get" path with an unknown start ── mapping.path-root/settings.json:13  mapping.path-root
+The "$get" path of step "build" starts with "inputs", and a path starts with one of "input" | "nodes" | "run" | "from".
+
+ 13 │       "input": { "repo": { "$get": ["inputs", "repo"] } }
+    │                                     ^^^^^^^^
+
+To fix: start it with one of "input" | "nodes" | "run" | "from".
+
+1 problem in release. Nothing was run.

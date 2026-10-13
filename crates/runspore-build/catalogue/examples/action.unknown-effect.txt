@@ -1,0 +1,9 @@
+── Unknown effect ────────────────── action.unknown-effect/settings.json:7  action.unknown-effect
+Action "build" has effect "idempotant", which spore does not know.
+
+  7 │       "effect": "idempotant"
+    │                 ^^^^^^^^^^^^
+
+To fix: use one of "pure" | "read-only" | "idempotent" | "unsafe".
+
+1 problem in release. Nothing was run.

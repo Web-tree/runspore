@@ -1,0 +1,9 @@
+── No arrow for "exhausted" ── dot.no-exhausted-arrow/workflow.dot:5  dot.no-exhausted-arrow
+Step "build" has loop limits, but no arrow for "exhausted", the outcome it ends with when a limit runs out.
+
+  5 │   build [label="Build the release"];
+    │   ^^^^^
+
+To fix: draw it, for example   build -> done [on="exhausted"];
+
+1 problem in release. Nothing was run.

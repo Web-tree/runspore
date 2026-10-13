@@ -171,22 +171,30 @@ fn start_checks_the_input_against_the_input_schema() {
     assert_eq!(started.code(), Some(0), "{}", started.stdout);
     assert_eq!(started.json()["created"], true);
 
-    // A root that is not an object is refused at build time, naming the file.
+    // A root that is not an object is refused at build time, at the line naming the file.
     std::fs::write(
         dir.file("flow/schemas/input.json"),
         "{\"type\": \"string\"}\n",
     )
     .unwrap();
     let bad = dir.run(&args(&["--json", "validate", "flow"]));
-    let error = bad.json()["error"].clone();
+    let report = bad.json();
+    assert_eq!(bad.code(), Some(2), "{report}");
+    let diagnostics = report["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 1, "{report}");
+    let d = &diagnostics[0];
     assert_eq!(
-        (bad.code(), error["code"].as_str()),
-        (Some(2), Some("workflow.invalid-schema"))
-    );
-    assert_eq!(
-        error["message"],
-        "flow/settings.json:3: inputSchema (schemas/input.json): /type: an input schema's \
-         root must be `\"type\": \"object\"`"
+        (
+            d["code"].as_str(),
+            d["file"].as_str(),
+            d["range"]["start"]["line"].as_u64()
+        ),
+        (
+            Some("schema.input-not-object"),
+            Some("flow/settings.json"),
+            Some(3)
+        ),
+        "{report}"
     );
 }
 

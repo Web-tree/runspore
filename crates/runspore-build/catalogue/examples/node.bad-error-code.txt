@@ -1,0 +1,9 @@
+── Not an error code ────────────────── node.bad-error-code/settings.json:12  node.bad-error-code
+Error code "Build Broken" of step "broken" is not a code; a code has lowercase letters, digits, "." and "-", and starts with a letter or digit.
+
+ 12 │     "broken": { "error": { "code": "Build Broken", "message": "The build broke." } }
+    │                                    ^^^^^^^^^^^^^^
+
+To fix: rename it, for example "deploy.failed".
+
+1 problem in release. Nothing was run.

@@ -1,0 +1,10 @@
+── Empty "outcomes" ────────────────── action.no-outcomes/settings.json:8  action.no-outcomes
+Action "build" lists no outcomes in "outcomes".
+
+  7 │       "effect": "idempotent",
+  8 │       "outcomes": []
+    │       ^^^^^^^^^^
+
+To fix: remove the empty list, so the action ends with "ok", or list its outcomes.
+
+1 problem in release. Nothing was run.

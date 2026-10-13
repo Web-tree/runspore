@@ -1,0 +1,9 @@
+── File not found ────────────────── file.missing/settings.json:11  file.missing
+"steps/biuld.md" names no file in the workflow folder.
+
+ 11 │     "build": { "action": "build", "instructions": "steps/biuld.md" }
+    │                                                   ^^^^^^^^^^^^^^^^
+
+To fix: name a file inside the folder; paths are relative to the folder.
+
+1 problem in release. Nothing was run.

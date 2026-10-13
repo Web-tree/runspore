@@ -256,7 +256,8 @@ action's `kind` to a runner.
   dispatch of a run uses one folder whichever engine runs it. A run with no recorded
   folder uses `base_dir`. The child inherits the engine's environment plus `env`.
 - **0.2: `cwd` from input.** `cwd` is a string, as in 0.1, or
-  `{"fromInput": "<JSON Pointer>"}` (RFC 6901). That form reads the folder from the
+  `{"fromInput": "<JSON Pointer>"}` (RFC 6901); the build refuses one that is not a
+  pointer (`command.cwd-not-pointer`, dot.md §6). That form reads the folder from the
   node's evaluated input at dispatch, the value the command gets on stdin, so a
   workflow maps a folder an earlier step returned with a plain `$get`. A relative
   value resolves against the run's base folder like a string `cwd`; an absolute one

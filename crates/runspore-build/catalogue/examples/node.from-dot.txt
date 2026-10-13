@@ -1,0 +1,9 @@
+── Key that comes from workflow.dot ── node.from-dot/settings.json:11  node.from-dot
+"kind" of step "build" comes from workflow.dot, not from settings.json.
+
+ 11 │     "build": { "action": "build", "kind": "activity" }
+    │                                   ^^^^^^
+
+To fix: remove it; workflow.dot gives a step its kind, and its arrows give it its outcomes.
+
+1 problem in release. Nothing was run.

@@ -1,0 +1,9 @@
+── Arrow for an outcome the action does not have ── dot.undeclared-outcome/workflow.dot:9  dot.undeclared-outcome
+Step "build" has an arrow for the outcome "red", which its action "build" does not list.
+
+  9 │   build -> build [on="red"];
+    │   ^^^^^^^^^^^^^^
+
+To fix: add "red" to "outcomes" of action "build", or use one it lists: "ok".
+
+1 problem in release. Nothing was run.

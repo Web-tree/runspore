@@ -1,0 +1,9 @@
+── "$literal" with another key ── mapping.literal-extra-key/settings.json:13  mapping.literal-extra-key
+The "$literal" object in step "build" also has "quiet", and it may have only "$literal".
+
+ 13 │       "input": { "flags": { "$literal": ["-j4"], "quiet": true } }
+    │                                                  ^^^^^^^
+
+To fix: remove "quiet", or move it into the "$literal" value.
+
+1 problem in release. Nothing was run.

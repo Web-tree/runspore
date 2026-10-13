@@ -141,27 +141,40 @@ fn a_used_up_loop_limit_takes_the_exhausted_edge() {
 /// W12 and W14 are the kernel's, reported after the build; the node is named.
 #[test]
 fn a_loop_limit_validation_error_names_the_node() {
+    // The build words each problem itself; the kernel's rule numbers never show.
+    let check = |dir: &Dir, wanted: &[&str]| {
+        let out = dir.run(&["validate", "flow"]);
+        assert_eq!(out.code(), Some(2), "{}", out.stderr);
+        for w in wanted {
+            assert!(out.stderr.contains(w), "no {w:?} in {}", out.stderr);
+        }
+        assert!(
+            !out.stderr.contains("W12") && !out.stderr.contains("kernel"),
+            "{}",
+            out.stderr
+        );
+    };
     let dir = folder("loop-invalid", r#"{"red": 16}"#);
-    let out = dir.run(&["validate", "flow"]);
-    assert_eq!(out.code(), Some(2), "{}", out.stdout);
-    assert!(
-        out.stderr.contains("W12") && out.stderr.contains("\"test\""),
-        "{}",
-        out.stderr
+    check(
+        &dir,
+        &[
+            "node.limit-too-high",
+            "flow/settings.json:",
+            "step \"test\"",
+        ],
     );
 
     let dir = folder("loop-no-limit", r#"{"red": 2}"#);
     let settings = std::fs::read_to_string(dir.file("flow/settings.json")).unwrap();
     let settings = settings.replace(r#", "loopLimits": {"red": 2}"#, "");
     std::fs::write(dir.file("flow/settings.json"), settings).unwrap();
-    let out = dir.run(&["validate", "flow"]);
-    assert_eq!(out.code(), Some(2), "{}", out.stdout);
-    assert!(
-        out.stderr.contains("workflow.dot:")
-            && out.stderr.contains("exhausted")
-            && out.stderr.contains("nodes.test.loopLimits"),
-        "{}",
-        out.stderr
+    check(
+        &dir,
+        &[
+            "dot.exhausted-arrow",
+            "flow/workflow.dot:",
+            "\"loopLimits\"",
+        ],
     );
 
     let dir = folder("loop-orphan", r#"{"red": 2}"#);
@@ -170,11 +183,8 @@ fn a_loop_limit_validation_error_names_the_node() {
         "  stopped [kind=fail];\n  orphan [kind=complete];",
     );
     std::fs::write(dir.file("flow/workflow.dot"), dot).unwrap();
-    let out = dir.run(&["validate", "flow"]);
-    assert_eq!(out.code(), Some(2), "{}", out.stdout);
-    assert!(
-        out.stderr.contains("W14") && out.stderr.contains("\"orphan\""),
-        "{}",
-        out.stderr
+    check(
+        &dir,
+        &["dot.unreachable", "Step \"orphan\" can't be reached"],
     );
 }

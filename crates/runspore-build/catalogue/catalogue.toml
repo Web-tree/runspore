@@ -1,0 +1,1099 @@
+# Every message `spore validate` can give, one entry per code.
+#
+# A check returns a code, a place, named arguments and fixes; never text. The words
+# are here. Templates are text with {name} placeholders and nothing else; wording a
+# template cannot express is another code. `{{` and `}}` are braces.
+#
+#   title        short and general, no placeholders
+#   heading      the block's heading when it names a value (else the title)
+#   message      one plain sentence, quoting the author's values
+#   fix          what to do; the first fix of the diagnostic is its example
+#   show-fix     the text output shows the first fix applied to the author's lines
+#   why          optional
+#   explanation  optional; a longer text for `spore explain`, and "More:" in a block
+#   args         the placeholders a check passes, by kind: input and key (quoted from
+#                settings.json), place (a path in it), computed, code (shown as is).
+#                Host names need no entry: {action}, {step}, {file}, {workflow}.
+#   example      the folder under catalogue/examples/ that produces the code;
+#                catalogue/fixed/<code>/ is that folder after the first fix
+#   also         the other codes the example produces
+#   absent       the problem is something missing, so the message quotes nothing
+#
+# `cargo test -p runspore-build` checks every entry (catalogue quality checks).
+
+# ---------------------------------------------------------------------------
+# workflow.dot: the dialect, which stops the build when missing or unknown
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "dot.no-dialect"
+severity = "problem"
+title = '''No dialect line'''
+message = '''{file} does not say which DOT dialect it is written in.'''
+fix = '''add this line inside the braces:   {line}'''
+why = '''the dialect says how spore reads the rest of the file, so spore reads nothing else until it is there.'''
+args = { line = "code" }
+example = "dot.no-dialect"
+
+[[code]]
+code = "dot.old-dialect"
+severity = "problem"
+title = '''Old dialect'''
+message = '''{file} is written in dialect {dialect}, which this spore no longer reads.'''
+fix = '''change the dialect to "runspore/0.2", and "format" in settings.json to "runspore.workflow/0.2".'''
+args = { dialect = "computed" }
+example = "dot.old-dialect"
+
+[[code]]
+code = "dot.unknown-dialect"
+severity = "problem"
+title = '''Unknown dialect'''
+message = '''{file} is written in dialect {dialect}, which this spore does not know.'''
+fix = '''change it to "runspore/0.2", the dialect this spore reads.'''
+args = { dialect = "computed" }
+example = "dot.unknown-dialect"
+
+# ---------------------------------------------------------------------------
+# workflow.dot: syntax, which stops the reading of the file
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "dot.syntax"
+severity = "problem"
+title = '''DOT syntax'''
+message = '''{file} has {found} here, where spore expects {expected}.'''
+fix = '''check this line against the DOT spore reads: steps, arrows written with "->", and attributes in [brackets].'''
+args = { found = "code", expected = "code" }
+example = "dot.syntax"
+
+[[code]]
+code = "dot.unsupported"
+severity = "problem"
+title = '''DOT that spore does not read'''
+message = '''{file} uses {feature}, which spore does not read.'''
+fix = '''write it with what spore reads: steps, arrows written with "->", and attributes in [brackets].'''
+why = '''spore reads a small part of DOT, so that every workflow.dot means one thing.'''
+args = { feature = "code" }
+example = "dot.unsupported"
+
+[[code]]
+code = "dot.unclosed"
+severity = "problem"
+title = '''Never closed'''
+message = '''{what} that starts here in {file} is never closed.'''
+fix = '''close it with {closer}.'''
+args = { what = "code", closer = "code" }
+example = "dot.unclosed"
+
+[[code]]
+code = "dot.number-id"
+severity = "problem"
+title = '''Unquoted number'''
+message = '''{text} in {file} starts like a number, so it is not a name.'''
+fix = '''put it in quotes: {quoted}'''
+args = { text = "computed", quoted = "code" }
+example = "dot.number-id"
+
+[[code]]
+code = "dot.no-value"
+severity = "problem"
+title = '''Attribute with no value'''
+message = '''Attribute {attribute} in {file} has no value.'''
+fix = '''give it one, as in {example}.'''
+args = { attribute = "computed", example = "code" }
+example = "dot.no-value"
+
+[[code]]
+code = "dot.after-graph"
+severity = "problem"
+title = '''Text after the graph'''
+message = '''{file} goes on after the closing brace of its graph.'''
+fix = '''move it inside the braces, or remove it.'''
+example = "dot.after-graph"
+
+# ---------------------------------------------------------------------------
+# workflow.dot: names, attributes and arrows
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "dot.no-name"
+severity = "problem"
+title = '''No workflow name'''
+message = '''The graph in {file} has no name, and its name is the workflow's name.'''
+fix = '''name it, for example   {line}'''
+args = { line = "code" }
+example = "dot.no-name"
+
+[[code]]
+code = "dot.bad-name"
+severity = "problem"
+title = '''Workflow name with other characters'''
+message = '''The workflow name {name} in {file} has characters a name cannot have; it may use letters, digits, ".", "_" and "-".'''
+fix = '''rename it to {fixed}.'''
+args = { name = "computed", fixed = "computed" }
+example = "dot.bad-name"
+
+[[code]]
+code = "dot.bad-step-name"
+severity = "problem"
+title = '''Step name with other characters'''
+message = '''Step {step} has a name spore cannot use; a step name has letters, digits, "_" and "-", at most 64 of them.'''
+fix = '''rename it to {fixed} everywhere in {file}.'''
+args = { fixed = "computed" }
+example = "dot.bad-step-name"
+
+[[code]]
+code = "dot.too-many-steps"
+severity = "problem"
+title = '''Too many steps'''
+message = '''{file} has more than 256 steps, and step {step} is the 257th.'''
+fix = '''split the workflow in two, or join steps.'''
+example = "dot.too-many-steps"
+
+[[code]]
+code = "dot.no-steps"
+severity = "problem"
+title = '''No steps'''
+message = '''{file} has no steps.'''
+fix = '''add the steps of the workflow, and the arrows between them.'''
+example = "dot.no-steps"
+
+[[code]]
+code = "dot.repeated-attribute"
+severity = "problem"
+title = '''Attribute given twice'''
+message = '''Attribute {attribute} is given twice in {file}.'''
+fix = '''keep one of them.'''
+args = { attribute = "computed" }
+example = "dot.repeated-attribute"
+
+[[code]]
+code = "dot.misplaced-attribute"
+severity = "problem"
+title = '''Attribute in the wrong place'''
+message = '''Attribute {attribute} in {file} belongs on {home}, not on {place}.'''
+fix = '''move it to {home}.'''
+args = { attribute = "computed", home = "code", place = "code" }
+example = "dot.misplaced-attribute"
+
+[[code]]
+code = "dot.attribute-typo"
+severity = "problem"
+title = '''Unknown attribute'''
+message = '''Attribute {attribute} in {file} is not one spore reads.'''
+fix = '''rename it to {closest}.'''
+args = { attribute = "computed", closest = "code" }
+example = "dot.attribute-typo"
+
+[[code]]
+code = "dot.unknown-attribute"
+severity = "problem"
+title = '''Unknown attribute'''
+message = '''Attribute {attribute} in {file} is not one spore reads.'''
+fix = '''remove it, or use one spore reads: kind, on, or a render attribute such as label, shape or color.'''
+args = { attribute = "computed" }
+example = "dot.unknown-attribute"
+
+[[code]]
+code = "dot.unknown-kind"
+severity = "problem"
+title = '''Unknown kind'''
+message = '''Step {step} has kind {kind}, which spore does not know.'''
+fix = '''use one of {choices}.'''
+args = { kind = "computed", choices = "computed" }
+example = "dot.unknown-kind"
+
+[[code]]
+code = "dot.kind-conflict"
+severity = "problem"
+title = '''Two kinds for one step'''
+message = '''Step {step} is of kind {kind} here, and of kind {other} on line {line}.'''
+fix = '''give the step one kind.'''
+args = { kind = "computed", other = "computed", line = "computed" }
+example = "dot.kind-conflict"
+
+[[code]]
+code = "dot.bad-outcome"
+severity = "problem"
+title = '''Not an outcome name'''
+message = '''The arrow outcome {outcome} in {file} is not one outcome name; an outcome has lowercase letters, digits and "-".'''
+fix = '''draw one arrow per outcome, each with one name.'''
+args = { outcome = "computed" }
+example = "dot.bad-outcome"
+
+[[code]]
+code = "dot.no-start"
+severity = "problem"
+title = '''No first step'''
+message = '''The workflow does not say which step runs first.'''
+fix = '''add this line inside the braces:   start = {start};'''
+args = { start = "computed" }
+absent = true
+example = "nightly-backup"
+also = ["dot.missing-arrow", "settings.misplaced-key", "action.no-effect", "command.argv-spaces"]
+
+[[code]]
+code = "dot.unknown-start"
+severity = "problem"
+title = '''Unknown first step'''
+message = '''The first step {start} is not a step in {file}.'''
+fix = '''name one of its steps, for example {closest}.'''
+args = { start = "computed", closest = "computed" }
+example = "dot.unknown-start"
+
+[[code]]
+code = "dot.arrow-from-end"
+severity = "problem"
+title = '''Arrow from an end'''
+message = '''Step {step} is of kind {kind}, where the run ends, so no arrow may leave it.'''
+fix = '''remove the arrow   {arrow}'''
+args = { kind = "computed", arrow = "code" }
+example = "dot.arrow-from-end"
+
+[[code]]
+code = "dot.repeated-arrow"
+severity = "problem"
+title = '''Two arrows for one outcome'''
+message = '''Step {step} has two arrows for the outcome {outcome}, and an outcome leads to one step.'''
+fix = '''remove one, or give it another outcome with [on="…"].'''
+args = { outcome = "computed" }
+example = "dot.repeated-arrow"
+
+# ---------------------------------------------------------------------------
+# Arrows against actions: what joins the two files
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "dot.missing-arrow"
+severity = "problem"
+title = '''Missing arrow'''
+message = '''Step {step} can end with the outcome {outcome}, but no arrow leaves it for {outcome}.'''
+fix = '''draw the arrow, for example   {arrow}'''
+why = '''action {action} lists no outcomes, so it ends with {outcome}, and the run would have nowhere to go.'''
+args = { outcome = "computed", arrow = "code" }
+example = "nightly-backup"
+also = ["dot.no-start", "settings.misplaced-key", "action.no-effect", "command.argv-spaces"]
+
+[[code]]
+code = "dot.missing-outcome-arrow"
+severity = "problem"
+title = '''Missing arrow'''
+message = '''Step {step} can end with the outcome {outcome}, but no arrow leaves it for {outcome}.'''
+fix = '''draw the arrow, for example   {arrow}'''
+why = '''action {action} lists {outcomes}, so the step can end with {outcome}, and the run would have nowhere to go.'''
+args = { outcome = "computed", outcomes = "input", arrow = "code" }
+example = "dot.missing-outcome-arrow"
+
+[[code]]
+code = "dot.undeclared-outcome"
+severity = "problem"
+title = '''Arrow for an outcome the action does not have'''
+message = '''Step {step} has an arrow for the outcome {outcome}, which its action {action} does not list.'''
+fix = '''add {outcome} to "outcomes" of action {action}, or use one it lists: {declared}.'''
+args = { outcome = "computed", declared = "computed" }
+example = "dot.undeclared-outcome"
+
+[[code]]
+code = "dot.exhausted-arrow"
+severity = "problem"
+title = '''Arrow for "exhausted" without a loop limit'''
+message = '''Step {step} has an arrow for "exhausted", but no loop limit that could run out.'''
+fix = '''add "loopLimits" to step {step} in settings.json, or remove the arrow.'''
+example = "dot.exhausted-arrow"
+
+[[code]]
+code = "dot.no-exhausted-arrow"
+severity = "problem"
+title = '''No arrow for "exhausted"'''
+message = '''Step {step} has loop limits, but no arrow for "exhausted", the outcome it ends with when a limit runs out.'''
+fix = '''draw it, for example   {arrow}'''
+args = { arrow = "code" }
+example = "dot.no-exhausted-arrow"
+
+[[code]]
+code = "dot.no-arrows"
+severity = "problem"
+title = '''Signal step with no arrows'''
+message = '''Step {step} waits for a signal, but no arrow leaves it.'''
+fix = '''draw an arrow for each outcome the signal can bring, for example   {arrow}'''
+args = { arrow = "code" }
+example = "dot.no-arrows"
+
+[[code]]
+code = "dot.unreachable"
+severity = "problem"
+title = '''Step that cannot be reached'''
+message = '''Step {step} can't be reached from the first step {start}.'''
+fix = '''draw an arrow into it, or remove it.'''
+args = { start = "computed" }
+example = "dot.unreachable"
+
+[[code]]
+code = "dot.no-way-out"
+severity = "problem"
+title = '''No way to an end'''
+message = '''From step {step}, no path of arrows leads to an end.'''
+fix = '''draw an arrow from it, or from a step after it, to a "complete" or "fail" step.'''
+example = "dot.no-way-out"
+
+# ---------------------------------------------------------------------------
+# settings.json: JSON, and values the package cannot hold
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "settings.not-json"
+severity = "problem"
+title = '''Not JSON'''
+message = '''{file} stops being JSON here.'''
+fix = '''correct the JSON at this spot; a missing comma, quote or brace is the usual cause.'''
+example = "settings.not-json"
+
+[[code]]
+code = "settings.not-object"
+severity = "problem"
+title = '''Settings that are not an object'''
+message = '''{file} holds {value}, and it must hold one JSON object.'''
+fix = '''write the settings as one object, with "format", "actions" and "nodes".'''
+args = { value = "input" }
+example = "settings.not-object"
+
+[[code]]
+code = "settings.no-format"
+severity = "problem"
+title = '''No format'''
+message = '''{file} does not say its format.'''
+fix = '''add "format": "runspore.workflow/0.2".'''
+example = "settings.no-format"
+
+[[code]]
+code = "settings.wrong-format"
+severity = "problem"
+title = '''Wrong format'''
+message = '''Format {format} does not agree with the dialect "runspore/0.2" of workflow.dot.'''
+fix = '''change it to "runspore.workflow/0.2".'''
+args = { format = "input" }
+example = "settings.wrong-format"
+
+[[code]]
+code = "settings.repeated-key"
+severity = "problem"
+title = '''Key given twice'''
+message = '''{key} is given twice in {place}, and JSON keeps only the last one.'''
+fix = '''remove the one you do not want.'''
+args = { key = "key", place = "place" }
+example = "settings.repeated-key"
+
+[[code]]
+code = "settings.not-integer"
+severity = "problem"
+title = '''Not a whole number'''
+message = '''{value} at {place} is not a whole number.'''
+fix = '''use a whole number, such as {rounded}.'''
+args = { value = "input", place = "place", rounded = "computed" }
+example = "settings.not-integer"
+
+[[code]]
+code = "settings.number-too-large"
+severity = "problem"
+title = '''Number too large'''
+message = '''{value} at {place} is too large for spore to keep exactly.'''
+fix = '''use a number of at most 9007199254740991.'''
+args = { value = "input", place = "place" }
+example = "settings.number-too-large"
+
+[[code]]
+code = "settings.too-deep"
+severity = "problem"
+title = '''Nested too deep'''
+message = '''{place} has values nested deeper than the 32 levels a package may hold.'''
+fix = '''flatten it.'''
+args = { place = "place" }
+example = "settings.too-deep"
+
+# ---------------------------------------------------------------------------
+# settings.json: the shape the schema checks
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "settings.wrong-type"
+severity = "problem"
+title = '''Wrong type'''
+message = '''{value} at {place} is {actual}, and it must be {expected}.'''
+fix = '''write {expected} here.'''
+args = { value = "input", place = "place", actual = "code", expected = "code" }
+example = "settings.wrong-type"
+
+[[code]]
+code = "settings.not-allowed"
+severity = "problem"
+title = '''Value not allowed'''
+message = '''{value} at {place} is not one of the values allowed there.'''
+fix = '''use one of {choices}.'''
+args = { value = "input", place = "place", choices = "computed" }
+example = "settings.not-allowed"
+
+[[code]]
+code = "settings.too-small"
+severity = "problem"
+title = '''Number too small'''
+message = '''{value} at {place} is too small.'''
+fix = '''use {limit} or more.'''
+args = { value = "input", place = "place", limit = "computed" }
+example = "settings.too-small"
+
+[[code]]
+code = "settings.too-large"
+severity = "problem"
+title = '''Number too large'''
+message = '''{value} at {place} is too large.'''
+fix = '''use {limit} or less.'''
+args = { value = "input", place = "place", limit = "computed" }
+example = "settings.too-large"
+
+[[code]]
+code = "settings.empty"
+severity = "problem"
+title = '''Empty'''
+message = '''{place} is empty.'''
+fix = '''give it at least one entry, or remove it.'''
+args = { place = "place" }
+example = "settings.empty"
+
+[[code]]
+code = "settings.not-decimal"
+severity = "problem"
+title = '''Milliseconds not written as digits'''
+message = '''{value} at {place} is not a count of milliseconds written as digits, such as "500".'''
+fix = '''write it as a string of digits, such as "500".'''
+args = { value = "input", place = "place" }
+example = "settings.not-decimal"
+
+[[code]]
+code = "settings.missing-field"
+severity = "problem"
+title = '''Missing key'''
+message = '''This object in {file} needs {field}.'''
+fix = '''add {field}.'''
+args = { field = "computed" }
+example = "settings.missing-field"
+
+[[code]]
+code = "settings.from-dot"
+severity = "problem"
+title = '''Key that comes from workflow.dot'''
+message = '''{key} comes from workflow.dot, not from {file}.'''
+fix = '''remove it; workflow.dot gives the workflow its name and its first step.'''
+args = { key = "key" }
+example = "settings.from-dot"
+
+[[code]]
+code = "settings.typo-key"
+severity = "problem"
+title = '''Unknown key'''
+message = '''There is no key {key} in {place}.'''
+fix = '''rename it to {closest}.'''
+args = { key = "key", place = "place", closest = "computed" }
+example = "settings.typo-key"
+
+[[code]]
+code = "settings.unknown-key"
+severity = "problem"
+title = '''Unknown key'''
+message = '''There is no key {key} in {place}.'''
+fix = '''remove it; the keys allowed here are {allowed}.'''
+args = { key = "key", place = "place", allowed = "computed" }
+example = "settings.unknown-key"
+
+# ---------------------------------------------------------------------------
+# "nodes": keys that are not steps
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "settings.misplaced-key"
+severity = "problem"
+title = '''Key in the wrong place'''
+heading = '''{key} is in the wrong place'''
+message = '''Every key under "nodes" must be a step in workflow.dot, and there is no step {key}.'''
+fix = '''{field} belong on an action. Move this line into the action it describes, for example {target}.'''
+args = { key = "key", field = "code", target = "place" }
+example = "nightly-backup"
+also = ["dot.no-start", "dot.missing-arrow", "action.no-effect", "command.argv-spaces"]
+
+[[code]]
+code = "settings.misplaced-action-key"
+severity = "problem"
+title = '''Key in the wrong place'''
+heading = '''{key} is in the wrong place'''
+message = '''Every key under "nodes" must be a step in workflow.dot, and there is no step {key}.'''
+fix = '''{field} is a key of an action. Move this line into the action it describes, for example {target}.'''
+args = { key = "key", field = "code", target = "place" }
+example = "settings.misplaced-action-key"
+
+[[code]]
+code = "settings.misplaced-step-key"
+severity = "problem"
+title = '''Key in the wrong place'''
+heading = '''{key} is in the wrong place'''
+message = '''Every key under "nodes" must be a step in workflow.dot, and there is no step {key}.'''
+fix = '''{field} is a key of a step. Move this line into the step it describes, for example {target}.'''
+args = { key = "key", field = "code", target = "place" }
+example = "settings.misplaced-step-key"
+
+[[code]]
+code = "settings.step-typo"
+severity = "problem"
+title = '''Unknown step'''
+message = '''Every key under "nodes" must be a step in workflow.dot, and there is no step {key}.'''
+fix = '''rename it to {closest}, the step of workflow.dot it is closest to.'''
+args = { key = "key", closest = "computed" }
+example = "settings.step-typo"
+
+[[code]]
+code = "settings.unknown-step"
+severity = "problem"
+title = '''Unknown step'''
+message = '''Every key under "nodes" must be a step in workflow.dot, and there is no step {key}.'''
+fix = '''add step {key} to workflow.dot, or remove these settings.'''
+args = { key = "key" }
+example = "settings.unknown-step"
+
+# ---------------------------------------------------------------------------
+# Steps
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "node.from-dot"
+severity = "problem"
+title = '''Key that comes from workflow.dot'''
+message = '''{key} of step {step} comes from workflow.dot, not from {file}.'''
+fix = '''remove it; workflow.dot gives a step its kind, and its arrows give it its outcomes.'''
+args = { key = "key" }
+example = "node.from-dot"
+
+[[code]]
+code = "node.action-field"
+severity = "problem"
+title = '''Action key on a step'''
+message = '''{key} is a key of an action, not of step {step}.'''
+fix = '''move it into the action that step {step} runs, under "actions".'''
+args = { key = "key" }
+example = "node.action-field"
+
+[[code]]
+code = "action.step-field"
+severity = "problem"
+title = '''Step key on an action'''
+message = '''{key} is a key of a step, not of action {action}.'''
+fix = '''move it to the steps that run action {action}, under "nodes".'''
+args = { key = "key" }
+example = "action.step-field"
+
+[[code]]
+code = "node.missing-field"
+severity = "problem"
+title = '''Step without what its kind needs'''
+message = '''Step {step} is of kind {kind}, so settings.json must give it {field}.'''
+fix = '''add {field} to step {step} under "nodes" in settings.json.'''
+args = { kind = "computed", field = "computed" }
+example = "node.missing-field"
+
+[[code]]
+code = "node.field-not-allowed"
+severity = "problem"
+title = '''Key that the step's kind does not take'''
+message = '''Step {step} is of kind {kind}, and {key} does not go on that kind.'''
+fix = '''remove it, or change the step's kind in workflow.dot.'''
+args = { key = "key", kind = "computed" }
+example = "node.field-not-allowed"
+
+[[code]]
+code = "node.unknown-action"
+severity = "problem"
+title = '''Unknown action'''
+message = '''Step {step} runs action {name}, which "actions" does not define.'''
+fix = '''name an action that "actions" defines, or define action {name} there.'''
+args = { name = "input" }
+example = "node.unknown-action"
+
+[[code]]
+code = "node.bad-signal"
+severity = "problem"
+title = '''Signal name with other characters'''
+message = '''Signal {value} of step {step} has characters a signal name cannot have; it may use letters, digits, ".", "_" and "-", at most 64.'''
+fix = '''rename it with those characters only.'''
+args = { value = "input" }
+example = "node.bad-signal"
+
+[[code]]
+code = "node.bad-error-code"
+severity = "problem"
+title = '''Not an error code'''
+message = '''Error code {value} of step {step} is not a code; a code has lowercase letters, digits, "." and "-", and starts with a letter or digit.'''
+fix = '''rename it, for example "deploy.failed".'''
+args = { value = "input" }
+example = "node.bad-error-code"
+
+[[code]]
+code = "node.limit-on-exhausted"
+severity = "problem"
+title = '''Loop limit on "exhausted"'''
+message = '''Step {step} has a loop limit for "exhausted", the outcome a limit gives when it runs out.'''
+fix = '''remove it, and limit the outcome that loops instead.'''
+example = "node.limit-on-exhausted"
+
+[[code]]
+code = "node.limit-unknown-outcome"
+severity = "problem"
+title = '''Loop limit for an outcome with no arrow'''
+message = '''Step {step} has a loop limit for {outcome}, but no arrow for {outcome}.'''
+fix = '''limit an outcome the step has an arrow for, or draw the arrow.'''
+args = { outcome = "key" }
+example = "node.limit-unknown-outcome"
+
+[[code]]
+code = "node.limit-too-high"
+severity = "problem"
+title = '''Loop limit too high'''
+message = '''The loop limit {limit} for {outcome} on step {step} leaves no room under the visit limit {max} of the workflow.'''
+fix = '''lower it to {highest}, or raise "maxVisitsPerNode" in "limits".'''
+why = '''a step is entered at most "maxVisitsPerNode" times, and a loop that runs out of tries enters it once more.'''
+args = { limit = "input", outcome = "key", max = "computed", highest = "computed" }
+example = "node.limit-too-high"
+
+[[code]]
+code = "node.schema-reserved-outcome"
+severity = "problem"
+title = '''Schema for an outcome with no output'''
+message = '''Step {step} has a schema for {outcome}, which never carries output of its own.'''
+fix = '''remove it.'''
+args = { outcome = "key" }
+example = "node.schema-reserved-outcome"
+
+[[code]]
+code = "node.schema-unknown-outcome"
+severity = "problem"
+title = '''Schema for an outcome the step does not have'''
+message = '''Step {step} has a schema for {outcome}, an outcome it never ends with.'''
+fix = '''rename it to an outcome the step ends with, or remove it.'''
+args = { outcome = "key" }
+example = "node.schema-unknown-outcome"
+
+[[code]]
+code = "node.signal-schemas-differ"
+severity = "problem"
+title = '''One signal, two schemas'''
+message = '''Steps {other} and {step} wait for the signal {signal} with different schemas for {outcome}.'''
+fix = '''give both steps the same schema for {outcome}.'''
+why = '''a signal goes to whichever step waits for it, so its data must fit both.'''
+args = { other = "computed", signal = "input", outcome = "computed" }
+example = "node.signal-schemas-differ"
+
+[[code]]
+code = "schema.file-not-json"
+severity = "problem"
+title = '''Schema file that is not JSON'''
+message = '''The schema file {path} for {outcome} on step {step} is not JSON that spore can read.'''
+fix = '''make it a JSON object, with whole numbers only.'''
+args = { path = "input", outcome = "key" }
+example = "schema.file-not-json"
+
+[[code]]
+code = "schema.outside-subset"
+severity = "problem"
+title = '''Schema outside what spore checks'''
+message = '''The schema for {outcome} on step {step} is outside what spore checks, at {keyword}: {reason}.'''
+fix = '''use only the parts of JSON Schema that spec/schema.md lists.'''
+args = { outcome = "key", keyword = "computed", reason = "code" }
+example = "schema.outside-subset"
+
+[[code]]
+code = "schema.input-file-not-json"
+severity = "problem"
+title = '''Input schema file that is not JSON'''
+message = '''The input schema file {path} of {workflow} is not JSON that spore can read.'''
+fix = '''make it a JSON object, with whole numbers only.'''
+args = { path = "input" }
+example = "schema.input-file-not-json"
+
+[[code]]
+code = "schema.input-outside-subset"
+severity = "problem"
+title = '''Input schema outside what spore checks'''
+message = '''The input schema of {workflow} is outside what spore checks, at {keyword}: {reason}.'''
+fix = '''use only the parts of JSON Schema that spec/schema.md lists.'''
+args = { keyword = "computed", reason = "code" }
+example = "schema.input-outside-subset"
+
+[[code]]
+code = "schema.input-not-object"
+severity = "problem"
+title = '''Input schema that is not an object'''
+message = '''The input schema of {workflow} does not have "type": "object" at its root.'''
+fix = '''give its root "type": "object".'''
+why = '''A run's input is a JSON object, its fields named, so steps can read them.'''
+example = "schema.input-not-object"
+
+[[code]]
+code = "input.marker-shape"
+severity = "problem"
+title = '''Marker written with something else'''
+message = '''The marker "$outputSchemas" in the input of step {step} is written with something else.'''
+fix = '''write it as {{"$outputSchemas": {{}}}}, on its own.'''
+example = "input.marker-shape"
+
+[[code]]
+code = "input.marker-no-schemas"
+severity = "problem"
+title = '''Marker on a step with no schemas'''
+message = '''The input of step {step} copies its output schemas with "$outputSchemas", but the step has none.'''
+fix = '''add "outputSchemas" to step {step}, or remove the marker.'''
+example = "input.marker-no-schemas"
+
+[[code]]
+code = "input.marker-too-deep"
+severity = "problem"
+title = '''Marker copy nested too deep'''
+message = '''The copy of the output schemas that "$outputSchemas" makes in the input of step {step} reaches level {depth}, past the 32 levels a package may hold.'''
+fix = '''move the marker closer to the top of the input, or make the schemas shallower.'''
+args = { depth = "computed" }
+example = "input.marker-too-deep"
+
+[[code]]
+code = "mapping.unknown-operator"
+severity = "problem"
+title = '''Unknown "$" key'''
+message = '''{key} in step {step} is not something spore can work out; a key starting with "$" is "$get" or "$literal".'''
+fix = '''use "$get" or "$literal", or put the value inside "$literal" to keep the key as it is.'''
+args = { key = "key" }
+example = "mapping.unknown-operator"
+
+[[code]]
+code = "mapping.get-extra-key"
+severity = "problem"
+title = '''"$get" with another key'''
+message = '''The "$get" object in step {step} also has {key}, and it may have only "$get" and "default".'''
+fix = '''remove {key}, or put the object inside "$literal".'''
+args = { key = "key" }
+example = "mapping.get-extra-key"
+
+[[code]]
+code = "mapping.literal-extra-key"
+severity = "problem"
+title = '''"$literal" with another key'''
+message = '''The "$literal" object in step {step} also has {key}, and it may have only "$literal".'''
+fix = '''remove {key}, or move it into the "$literal" value.'''
+args = { key = "key" }
+example = "mapping.literal-extra-key"
+
+[[code]]
+code = "mapping.path-not-list"
+severity = "problem"
+title = '''"$get" path that is not a list'''
+message = '''The "$get" of step {step} is {path}, and it must be a list of steps such as ["input", "repo"].'''
+fix = '''write it as a list, starting with "input", "nodes", "run" or "from".'''
+args = { path = "input" }
+example = "mapping.path-not-list"
+
+[[code]]
+code = "mapping.path-root"
+severity = "problem"
+title = '''"$get" path with an unknown start'''
+message = '''The "$get" path of step {step} starts with {root}, and a path starts with one of {roots}.'''
+fix = '''start it with one of {roots}.'''
+args = { root = "input", roots = "computed" }
+example = "mapping.path-root"
+
+[[code]]
+code = "mapping.path-step"
+severity = "problem"
+title = '''"$get" path with a wrong step'''
+message = '''{value} in a "$get" path of step {step} is not a step of a path; a step is a key or a whole number of zero or more.'''
+fix = '''use a key or a whole number here.'''
+args = { value = "input" }
+example = "mapping.path-step"
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "action.bad-name"
+severity = "problem"
+title = '''Action name with other characters'''
+message = '''Action {action} has a name spore cannot use; an action name has letters, digits, "_" and "-", at most 64.'''
+fix = '''rename it, and every "action" that names it.'''
+example = "action.bad-name"
+
+[[code]]
+code = "action.no-effect"
+severity = "problem"
+title = '''Missing "effect"'''
+message = '''Action {action} does not say whether it is safe to run again after a crash.'''
+fix = '''add one of {choices} to action {action}. For example:'''
+show-fix = true
+why = '''spore runs a step again after a crash only when its effect says that is safe.'''
+explanation = '''
+A run can stop at any moment: the machine reboots, the process is killed, the
+network goes away. When the run goes on, spore has to decide what to do with a step
+that may or may not have finished. The action's effect tells it:
+
+- "pure": the step only computes; running it again gives the same result.
+- "read-only": it reads the world but changes nothing.
+- "idempotent": it changes the world, and running it again changes nothing more,
+  such as copying a file to the same place.
+- "unsafe": running it twice could do harm, such as sending an email or charging a
+  card. spore never runs it again on its own; the run waits for a person
+  (spore resolve).
+
+spore does not guess, because a wrong guess either repeats something harmful or
+stops a run that could have gone on.
+'''
+args = { choices = "computed" }
+example = "nightly-backup"
+also = ["dot.no-start", "dot.missing-arrow", "settings.misplaced-key", "command.argv-spaces"]
+
+[[code]]
+code = "action.unknown-effect"
+severity = "problem"
+title = '''Unknown effect'''
+message = '''Action {action} has effect {effect}, which spore does not know.'''
+fix = '''use one of {choices}.'''
+args = { effect = "input", choices = "computed" }
+example = "action.unknown-effect"
+
+[[code]]
+code = "action.unsupported-effect"
+severity = "problem"
+title = '''Effect this spore cannot run'''
+message = '''Action {action} has effect {effect}, which this spore cannot run yet.'''
+fix = '''use one of {choices}.'''
+args = { effect = "input", choices = "computed" }
+example = "action.unsupported-effect"
+
+[[code]]
+code = "action.no-kind"
+severity = "problem"
+title = '''Missing "kind"'''
+message = '''Action {action} does not say what kind of action it is.'''
+fix = '''add "kind": "command" to run a program.'''
+example = "action.no-kind"
+
+[[code]]
+code = "action.unknown-kind"
+severity = "problem"
+title = '''Unknown kind of action'''
+message = '''Action {action} has kind {kind}, which this spore cannot run.'''
+fix = '''use one of {choices}.'''
+args = { kind = "input", choices = "computed" }
+example = "action.unknown-kind"
+
+[[code]]
+code = "action.no-outcomes"
+severity = "problem"
+title = '''Empty "outcomes"'''
+message = '''Action {action} lists no outcomes in "outcomes".'''
+fix = '''remove the empty list, so the action ends with "ok", or list its outcomes.'''
+example = "action.no-outcomes"
+
+[[code]]
+code = "action.bad-outcome"
+severity = "problem"
+title = '''Not an outcome name'''
+message = '''Outcome {outcome} of action {action} is not an outcome name; an outcome has lowercase letters, digits and "-", and starts with a letter or digit.'''
+fix = '''rename it with those characters only.'''
+args = { outcome = "input" }
+example = "action.bad-outcome"
+
+[[code]]
+code = "action.reserved-outcome"
+severity = "problem"
+title = '''Outcome spore keeps for itself'''
+message = '''Action {action} lists {outcome}, an outcome spore keeps for itself.'''
+fix = '''remove it; spore gives a step {outcome} on its own.'''
+args = { outcome = "input" }
+example = "action.reserved-outcome"
+
+[[code]]
+code = "action.repeated-outcome"
+severity = "problem"
+title = '''Outcome listed twice'''
+message = '''Action {action} lists the outcome {outcome} twice.'''
+fix = '''remove the second one.'''
+args = { outcome = "input" }
+example = "action.repeated-outcome"
+
+[[code]]
+code = "action.unknown-function"
+severity = "problem"
+title = '''Unknown native function'''
+message = '''Action {action} calls the native function {function}, which this spore does not have.'''
+fix = '''run a program instead, with "kind": "command" and "argv".'''
+args = { function = "input" }
+example = "action.unknown-function"
+
+[[code]]
+code = "command.no-argv"
+severity = "problem"
+title = '''Missing "argv"'''
+message = '''Action {action} runs a command, but has no "argv" to say which.'''
+fix = '''add "argv": the program, then each argument as its own item, such as ["make", "test"].'''
+example = "command.no-argv"
+
+[[code]]
+code = "command.bad-exit-code"
+severity = "problem"
+title = '''Not an exit code'''
+message = '''{exit} in "exitOutcomes" of action {action} is not an exit code.'''
+fix = '''use a whole number, such as "1".'''
+args = { exit = "key" }
+example = "command.bad-exit-code"
+
+[[code]]
+code = "command.result-exit-zero"
+severity = "problem"
+title = '''Outcome for exit code 0 in result mode'''
+message = '''Action {action} reads its result from what it prints when it exits with 0, so "exitOutcomes" cannot give 0 an outcome.'''
+fix = '''remove "0" from "exitOutcomes".'''
+example = "command.result-exit-zero"
+
+[[code]]
+code = "command.exit-outcome"
+severity = "problem"
+title = '''Exit code for an outcome the action does not list'''
+message = '''Exit code {exit} of action {action} gives the outcome {outcome}, which the action does not list in "outcomes".'''
+fix = '''add {outcome} to "outcomes", or give the exit code an outcome the action lists.'''
+args = { exit = "key", outcome = "input" }
+example = "command.exit-outcome"
+also = ["dot.undeclared-outcome"]
+
+[[code]]
+code = "command.cwd-not-pointer"
+severity = "problem"
+title = '''Working folder from input not a JSON Pointer'''
+message = '''{value} in "cwd" of action {action} is not a JSON Pointer into the step's input; a pointer is empty or starts with "/".'''
+fix = '''write where the step's input holds the folder, starting with "/", such as "/checkout".'''
+args = { value = "input" }
+example = "command.cwd-not-pointer"
+
+[[code]]
+code = "command.argv-spaces"
+severity = "warning"
+title = '''Program name with spaces'''
+message = '''{item} is read as one program name. spore does not use a shell, so the words are not split.'''
+fix = '''give each word its own item.'''
+show-fix = true
+explanation = '''
+spore starts a command's program directly, the way exec does, without a shell. The
+first item of "argv" is the program and each other item is one argument, passed as it
+is: no splitting at spaces, no quotes, no "$VARIABLES", no globs, no pipes.
+
+So ["pg_dump --format=custom shop"] looks for a program whose name is that whole
+line, and the step fails when it starts. Give each word its own item:
+["pg_dump", "--format=custom", "shop"]. spore marks this split as safe to apply with
+`spore validate --fix` when the line has no quotes, "$", globs or backslashes; with
+any of those, it needs a look, since a shell would have read them.
+
+To run shell syntax on purpose, run the shell: ["sh", "-c", "pg_dump … | gzip"].
+
+This is a warning, not a problem, because a program whose file name really has
+spaces in it is allowed.
+'''
+args = { item = "input" }
+example = "nightly-backup"
+also = ["dot.no-start", "dot.missing-arrow", "settings.misplaced-key", "action.no-effect"]
+
+[[code]]
+code = "command.program-not-found"
+severity = "warning"
+title = '''Program not found'''
+message = '''Program {program} of action {action} is not on this machine's PATH.'''
+fix = '''install it, or name it by its full path.'''
+why = '''the run may happen on another machine, so this is only a warning.'''
+args = { program = "input" }
+example = "command.program-not-found"
+
+# ---------------------------------------------------------------------------
+# File references
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "file.missing"
+severity = "problem"
+title = '''File not found'''
+message = '''{path} names no file in the workflow folder.'''
+fix = '''name a file inside the folder; paths are relative to the folder.'''
+args = { path = "input" }
+example = "file.missing"
+
+[[code]]
+code = "file.absolute"
+severity = "problem"
+title = '''Absolute path'''
+message = '''{path} is an absolute path, and a file reference names a file inside the workflow folder.'''
+fix = '''write the path relative to the workflow folder.'''
+args = { path = "input" }
+example = "file.absolute"
+
+[[code]]
+code = "file.backslash"
+severity = "problem"
+title = '''Backslash in a path'''
+message = '''{path} separates folders with a backslash.'''
+fix = '''separate folders with "/".'''
+args = { path = "input" }
+example = "file.backslash"
+
+[[code]]
+code = "file.outside"
+severity = "problem"
+title = '''File outside the folder'''
+message = '''{path} leads outside the workflow folder.'''
+fix = '''copy the file into the workflow folder, and name it there.'''
+why = '''the workflow artifact seals the folder's files, so a run sees the same files wherever it runs.'''
+args = { path = "input" }
+example = "file.outside"
+
+[[code]]
+code = "file.fixed-name"
+severity = "problem"
+title = '''Reference to workflow.dot or settings.json'''
+message = '''{path} names a file every build already includes.'''
+fix = '''name another file.'''
+args = { path = "input" }
+example = "file.fixed-name"
+
+[[code]]
+code = "file.not-a-file"
+severity = "problem"
+title = '''Not a file'''
+message = '''{path} is not a regular file.'''
+fix = '''name a file, not a folder.'''
+args = { path = "input" }
+example = "file.not-a-file"
+
+# ---------------------------------------------------------------------------
+# spore itself
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "spore.missed-check"
+severity = "problem"
+title = '''spore missed a check'''
+message = '''spore accepted this workflow, but its kernel refused it, so spore missed a check.'''
+fix = '''please report it at https://github.com/Web-tree/runspore/issues with this workflow folder.'''
+
+[[code]]
+code = "spore.broken-message"
+severity = "problem"
+title = '''spore made a broken message'''
+message = '''spore made a broken message for {code}, please report it.'''
+fix = '''report it at https://github.com/Web-tree/runspore/issues with this workflow folder.'''
+args = { code = "code" }
+
+[[code]]
+code = "spore.unworded-shape"
+severity = "problem"
+title = '''spore has no words for a shape problem'''
+message = '''spore found a shape problem at {place} of {file} that it has no words for, please report it.'''
+fix = '''compare it with the schema at https://raw.githubusercontent.com/Web-tree/runspore/main/spec/settings.schema.json, and report it at https://github.com/Web-tree/runspore/issues.'''
+args = { place = "place" }

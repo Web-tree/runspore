@@ -1,0 +1,10 @@
+digraph "nightly-backup" {
+  dialect = "runspore/0.2";
+
+  dump   [label="Dump the database"];
+  upload [label="Upload the dump"];
+  done   [kind="complete"];
+
+  dump -> upload;
+  upload -> done;
+}

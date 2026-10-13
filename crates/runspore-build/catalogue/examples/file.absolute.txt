@@ -1,0 +1,9 @@
+── Absolute path ────────────────── file.absolute/settings.json:11  file.absolute
+"/home/me/steps/build.md" is an absolute path, and a file reference names a file inside the workflow folder.
+
+ 11 │     "build": { "action": "build", "instructions": "/home/me/steps/build.md" }
+    │                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To fix: write the path relative to the workflow folder.
+
+1 problem in release. Nothing was run.

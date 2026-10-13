@@ -1,10 +1,10 @@
 //! Workflow folders (spec/dot.md) through the compiled binary: a folder runs, and each
-//! build error exits 2 naming its file and line.
+//! build problem exits 2 with its code, file and line.
 
 mod common;
 
 use common::{effect_argv, Dir};
-use serde_json::{json, Value};
+use serde_json::json;
 
 /// The heartbeat renews the lease well before it runs out on a busy machine.
 const FAST: [&str; 7] = [
@@ -163,63 +163,66 @@ const S: &str = "settings.json";
 
 #[rustfmt::skip]
 const CASES: &[Case] = &[
-    case("no dialect", Some(("  dialect = \"runspore/0.2\";\n", "")), None, "dot.dialect", D, 2),
-    case("dialect 0.1", Some(("runspore/0.2", "runspore/0.1")), None, "dot.dialect", D, 3),
-    case("unknown dialect", Some(("runspore/0.2", "runspore/9")), None, "dot.dialect", D, 3),
-    case("dialect before syntax", Some(("  dialect = \"runspore/0.2\";", "  subgraph s { a; }")), None, "dot.dialect", D, 2),
-    case("subgraph", Some(("  node [shape=box];", "  subgraph s { a; }")), None, "dot.syntax", D, 5),
-    case("anonymous subgraph", Some(("  node [shape=box];", "  { a; }")), None, "dot.syntax", D, 5),
-    case("port", Some(("prep -> work", "prep:e -> work")), None, "dot.syntax", D, 12),
-    case("html label", Some(("\"Prep\" + \"are\"", "<<b>Prep</b>>")), None, "dot.syntax", D, 8),
-    case("strict", Some(("digraph \"folder-flow\"", "strict digraph \"folder-flow\"")), None, "dot.syntax", D, 2),
-    case("undirected graph", Some(("digraph \"folder-flow\"", "graph \"folder-flow\"")), None, "dot.syntax", D, 2),
-    case("undirected edge", Some(("work -> broken", "work -- broken")), None, "dot.syntax", D, 13),
-    case("attribute without value", Some(("shape=doublecircle", "bold")), None, "dot.syntax", D, 10),
-    case("after the graph", Some(("}\n", "}\ndigraph again {}\n")), None, "dot.syntax", D, 17),
-    case("unknown attribute", Some(("shape=doublecircle", "colour=red")), None, "dot.attribute", D, 10),
-    case("kind on an edge", Some(("style=dashed", "kind=\"fail\"")), None, "dot.attribute", D, 15),
-    case("on in defaults", Some(("node [shape=box]", "edge [on=\"x\"]")), None, "dot.attribute", D, 5),
-    case("bad kind", Some(("broken [kind=\"fail\"]", "broken [kind=\"end\"]")), None, "dot.attribute", D, 11),
-    case("two kinds", Some(("  approve [kind=\"await-signal\"];", "  approve [kind=\"await-signal\"];\n  approve [kind=\"activity\"];")), None, "dot.attribute", D, 10),
-    case("list in on", Some(("on=\"approved\"", "on=\"approved,ok\"")), None, "dot.attribute", D, 14),
-    case("twice in a list", Some(("on=\"rejected\", style=dashed", "on=\"rejected\", on=\"no\"")), None, "dot.attribute", D, 15),
-    case("no graph id", Some(("digraph \"folder-flow\"", "digraph")), None, "dot.graph", D, 2),
-    case("bad node id", Some(("prep -> work ->", "prep -> \"wo rk\" ->")), None, "dot.graph", D, 12),
-    case("edge from an end", Some(("work -> broken [on=\"failed\"]", "done -> broken")), None, "dot.graph", D, 13),
-    case("same outcome twice", Some(("on=\"rejected\", style=dashed", "on=\"approved\"")), None, "dot.graph", D, 15),
-    case("no start", Some(("start=\"prep\", ", "")), None, "dot.graph", D, 2),
-    case("start not a node", Some(("start=\"prep\"", "start=\"nope\"")), None, "dot.graph", D, 4),
-    case("declared outcome without edge", None, Some(("\"effect\": \"idempotent\"", "\"effect\": \"idempotent\", \"outcomes\": [\"ok\", \"red\"]")), "dot.graph", D, 8),
-    case("edge for an undeclared outcome", Some(("on=\"failed\"", "on=\"red\"")), None, "dot.graph", D, 13),
-    case("format disagrees", None, Some(("runspore.workflow/0.2", "runspore.workflow/0.1")), "dot.dialect", S, 2),
-    case("settings not json", None, Some(("4},", "4},,")), "settings.invalid", S, 3),
-    case("start in settings", None, Some(("4},", "4}, \"start\": \"prep\",")), "settings.invalid", S, 3),
-    case("field not allowed", None, Some(("\"approval\",", "\"approval\", \"timeout\": 5,")), "settings.invalid", S, 11),
-    case("outcomes in settings", None, Some(("{\"action\": \"step\"}", "{\"action\": \"step\", \"outcomes\": {}}")), "settings.invalid", S, 9),
-    case("unknown action", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"nope\"}")), "settings.invalid", S, 9),
-    case("node not in the dot", None, Some(("\"prep\": {\"action\": \"step\"},", "\"prep\": {\"action\": \"step\"}, \"ghost\": {},")), "settings.mismatch", S, 9),
-    case("node not in settings", None, Some(("    \"prep\": {\"action\": \"step\"},\n", "")), "settings.mismatch", D, 8),
-    case("reference escapes", None, Some(("steps/work.md", "../outside.md")), "settings.reference", S, 10),
-    case("reference absolute", None, Some(("steps/work.md", "/etc/hosts")), "settings.reference", S, 10),
-    case("reference missing", None, Some(("steps/work.md", "steps/nope.md")), "settings.reference", S, 10),
-    case("symlink escapes", None, Some(("steps/work.md", "steps/link.md")), "settings.reference", S, 10),
-    case("asset escapes", None, Some(("assets/tool.sh", "../outside.md")), "settings.reference", S, 6),
-    case("schema outside the subset", None, Some(("{\"type\": \"object\"}", "{\"type\": \"number\"}")), "workflow.invalid-schema", S, 11),
-    case("schema file missing", None, Some(("{\"type\": \"object\"}", "\"schemas/nope.json\"")), "settings.reference", S, 11),
-    case("schema file not json", None, Some(("{\"type\": \"object\"}", "\"steps/work.md\"")), "workflow.invalid-schema", S, 11),
-    case("schema with a remote ref", None, Some(("{\"type\": \"object\"}", "{\"$ref\": \"other.json\"}")), "workflow.invalid-schema", S, 11),
-    case("schemas not an object", None, Some(("\"outputSchemas\": {\"approved\": {\"type\": \"object\"}}", "\"outputSchemas\": []")), "settings.invalid", S, 11),
-    case("input schema root not an object", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": {\"type\": \"string\"}")), "workflow.invalid-schema", S, 2),
-    case("input schema outside the subset", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": {\"type\": \"object\", \"pattern\": \"x\"}")), "workflow.invalid-schema", S, 2),
-    case("input schema not a schema", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": 5")), "settings.invalid", S, 2),
-    case("input schema file missing", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": \"schemas/nope.json\"")), "settings.reference", S, 2),
-    case("input schema file not json", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": \"steps/work.md\"")), "workflow.invalid-schema", S, 2),
-    case("marker without schemas", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}}}")), "settings.invalid", S, 9),
-    case("marker not alone", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}, \"x\": 1}}")), "settings.invalid", S, 9),
-    case("dotted escape", None, Some(("steps/work.md", "steps/../../outside.md")), "settings.reference", S, 10),
-    case("backslash", None, Some(("steps/work.md", "steps\\\\work.md")), "settings.reference", S, 10),
-    case("names a fixed file", None, Some(("steps/work.md", "./settings.json")), "settings.reference", S, 10),
-    case("probe escapes", None, Some(("[\"assets/tool.sh\"]", "[\"assets/tool.sh\"], \"async\": {\"probe\": {\"command\": {\"argv\": [\"./../outside.md\"]}}}")), "settings.reference", S, 6),
+    case("no dialect", Some(("  dialect = \"runspore/0.2\";\n", "")), None, "dot.no-dialect", D, 2),
+    case("dialect 0.1", Some(("runspore/0.2", "runspore/0.1")), None, "dot.old-dialect", D, 3),
+    case("unknown dialect", Some(("runspore/0.2", "runspore/9")), None, "dot.unknown-dialect", D, 3),
+    case("dialect before syntax", Some(("  dialect = \"runspore/0.2\";", "  subgraph s { a; }")), None, "dot.no-dialect", D, 2),
+    case("subgraph", Some(("  node [shape=box];", "  subgraph s { a; }")), None, "dot.unsupported", D, 5),
+    case("anonymous subgraph", Some(("  node [shape=box];", "  { a; }")), None, "dot.unsupported", D, 5),
+    case("port", Some(("prep -> work", "prep:e -> work")), None, "dot.unsupported", D, 12),
+    case("html label", Some(("\"Prep\" + \"are\"", "<<b>Prep</b>>")), None, "dot.unsupported", D, 8),
+    case("strict", Some(("digraph \"folder-flow\"", "strict digraph \"folder-flow\"")), None, "dot.unsupported", D, 2),
+    case("undirected graph", Some(("digraph \"folder-flow\"", "graph \"folder-flow\"")), None, "dot.unsupported", D, 2),
+    case("undirected edge", Some(("work -> broken", "work -- broken")), None, "dot.unsupported", D, 13),
+    case("attribute without value", Some(("shape=doublecircle", "bold")), None, "dot.no-value", D, 10),
+    case("after the graph", Some(("}\n", "}\ndigraph again {}\n")), None, "dot.after-graph", D, 17),
+    case("misspelt attribute", Some(("shape=doublecircle", "colour=red")), None, "dot.attribute-typo", D, 10),
+    case("unknown attribute", Some(("shape=doublecircle", "priority=1")), None, "dot.unknown-attribute", D, 10),
+    case("kind on an edge", Some(("style=dashed", "kind=\"fail\"")), None, "dot.misplaced-attribute", D, 15),
+    case("on in defaults", Some(("node [shape=box]", "edge [on=\"x\"]")), None, "dot.misplaced-attribute", D, 5),
+    case("bad kind", Some(("broken [kind=\"fail\"]", "broken [kind=\"end\"]")), None, "dot.unknown-kind", D, 11),
+    case("two kinds", Some(("  approve [kind=\"await-signal\"];", "  approve [kind=\"await-signal\"];\n  approve [kind=\"activity\"];")), None, "dot.kind-conflict", D, 10),
+    case("list in on", Some(("on=\"approved\"", "on=\"approved,ok\"")), None, "dot.bad-outcome", D, 14),
+    case("twice in a list", Some(("on=\"rejected\", style=dashed", "on=\"rejected\", on=\"no\"")), None, "dot.repeated-attribute", D, 15),
+    case("no graph id", Some(("digraph \"folder-flow\"", "digraph")), None, "dot.no-name", D, 2),
+    case("bad node id", Some(("prep -> work ->", "prep -> \"wo rk\" ->")), None, "dot.bad-step-name", D, 12),
+    case("edge from an end", Some(("work -> broken [on=\"failed\"]", "done -> broken")), None, "dot.arrow-from-end", D, 13),
+    case("same outcome twice", Some(("on=\"rejected\", style=dashed", "on=\"approved\"")), None, "dot.repeated-arrow", D, 15),
+    case("no start", Some(("start=\"prep\", ", "")), None, "dot.no-start", D, 2),
+    case("start not a node", Some(("start=\"prep\"", "start=\"nope\"")), None, "dot.unknown-start", D, 4),
+    case("declared outcome without edge", None, Some(("\"effect\": \"idempotent\"", "\"effect\": \"idempotent\", \"outcomes\": [\"ok\", \"red\"]")), "dot.missing-outcome-arrow", D, 8),
+    case("edge for an undeclared outcome", Some(("on=\"failed\"", "on=\"red\"")), None, "dot.undeclared-outcome", D, 13),
+    case("format disagrees", None, Some(("runspore.workflow/0.2", "runspore.workflow/0.1")), "settings.wrong-format", S, 2),
+    case("settings not json", None, Some(("4},", "4},,")), "settings.not-json", S, 3),
+    case("start in settings", None, Some(("4},", "4}, \"start\": \"prep\",")), "settings.from-dot", S, 3),
+    case("field not allowed", None, Some(("\"approval\",", "\"approval\", \"timeout\": 5,")), "settings.unknown-key", S, 11),
+    case("field of another kind", None, Some(("\"approval\",", "\"approval\", \"input\": {},")), "node.field-not-allowed", S, 11),
+    case("outcomes in settings", None, Some(("{\"action\": \"step\"}", "{\"action\": \"step\", \"outcomes\": {}}")), "node.from-dot", S, 9),
+    case("unknown action", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"nope\"}")), "node.unknown-action", S, 9),
+    case("node not in the dot", None, Some(("\"prep\": {\"action\": \"step\"},", "\"prep\": {\"action\": \"step\"}, \"ghost\": {},")), "settings.unknown-step", S, 9),
+    case("node not in settings", None, Some(("    \"prep\": {\"action\": \"step\"},\n", "")), "node.missing-field", D, 8),
+    case("reference escapes", None, Some(("steps/work.md", "../outside.md")), "file.outside", S, 10),
+    case("reference absolute", None, Some(("steps/work.md", "/etc/hosts")), "file.absolute", S, 10),
+    case("reference missing", None, Some(("steps/work.md", "steps/nope.md")), "file.missing", S, 10),
+    case("symlink escapes", None, Some(("steps/work.md", "steps/link.md")), "file.outside", S, 10),
+    case("asset escapes", None, Some(("assets/tool.sh", "../outside.md")), "file.outside", S, 6),
+    case("schema outside the subset", None, Some(("{\"type\": \"object\"}", "{\"type\": \"number\"}")), "schema.outside-subset", S, 11),
+    case("schema file missing", None, Some(("{\"type\": \"object\"}", "\"schemas/nope.json\"")), "file.missing", S, 11),
+    case("schema file not json", None, Some(("{\"type\": \"object\"}", "\"steps/work.md\"")), "schema.file-not-json", S, 11),
+    case("schema with a remote ref", None, Some(("{\"type\": \"object\"}", "{\"$ref\": \"other.json\"}")), "schema.outside-subset", S, 11),
+    case("schemas not an object", None, Some(("\"outputSchemas\": {\"approved\": {\"type\": \"object\"}}", "\"outputSchemas\": []")), "settings.wrong-type", S, 11),
+    case("input schema root not an object", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": {\"type\": \"string\"}")), "schema.input-not-object", S, 2),
+    case("input schema outside the subset", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": {\"type\": \"object\", \"pattern\": \"x\"}")), "schema.input-outside-subset", S, 2),
+    case("input schema not a schema", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": 5")), "settings.wrong-type", S, 2),
+    case("input schema file missing", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": \"schemas/nope.json\"")), "file.missing", S, 2),
+    case("input schema file not json", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": \"steps/work.md\"")), "schema.input-file-not-json", S, 2),
+    case("marker without schemas", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}}}")), "input.marker-no-schemas", S, 9),
+    case("marker not alone", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}, \"x\": 1}}")), "input.marker-shape", S, 9),
+    case("dotted escape", None, Some(("steps/work.md", "steps/../../outside.md")), "file.outside", S, 10),
+    case("backslash", None, Some(("steps/work.md", "steps\\\\work.md")), "file.backslash", S, 10),
+    case("names a fixed file", None, Some(("steps/work.md", "./settings.json")), "file.fixed-name", S, 10),
+    case("probe escapes", None, Some(("[\"assets/tool.sh\"]", "[\"assets/tool.sh\"], \"async\": {\"probe\": {\"command\": {\"argv\": [\"./../outside.md\"]}}}")), "file.outside", S, 6),
+    case("visits out of range", None, Some(("\"maxVisitsPerNode\": 4", "\"maxVisitsPerNode\": 0")), "settings.too-small", S, 3),
 ];
 
 #[test]
@@ -236,56 +239,73 @@ fn each_build_error_names_its_file_and_line() {
         let dir = folder("folder-error", &edit(DOT, c.dot), &edit(&base, c.settings));
         std::os::unix::fs::symlink("../../outside.md", dir.file("flow/steps/link.md")).unwrap();
         let out = dir.run(&["--json", "validate", "flow"]);
-        let error = out.json()["error"].clone();
-        let at = format!("flow/{}:{}: ", c.file, c.line);
+        let report = out.json();
         assert_eq!(
-            (out.code(), error["code"].as_str()),
-            (Some(2), Some(c.code)),
-            "{}: {error}",
+            (out.code(), report["valid"].clone()),
+            (Some(2), json!(false)),
+            "{}: {report}",
             c.name
         );
-        let message = error["message"].as_str().unwrap();
+        let file = format!("flow/{}", c.file);
+        let found = report["diagnostics"].as_array().unwrap().iter().any(|d| {
+            d["code"] == c.code && d["file"] == file && d["range"]["start"]["line"] == c.line
+        });
         assert!(
-            message.starts_with(&at),
-            "{}: wanted `{at}…`, got {message}",
+            found,
+            "{}: no {} at {file}:{}: {report}",
+            c.name, c.code, c.line
+        );
+        // The build words every problem itself: nothing of the kernel shows.
+        let text = report.to_string();
+        assert!(
+            !text.contains("kernel") && !text.contains(" W0") && !text.contains(" W1"),
+            "{}: {text}",
             c.name
         );
     }
 }
 
 #[test]
-fn errors_name_the_fix_and_both_files() {
-    let check = |name, dot: &str, settings: &str, wanted: &[&str]| {
-        let dir = folder(name, dot, settings);
-        let out = dir.run(&["validate", "flow"]);
-        assert_eq!(out.code(), Some(2), "{name}");
-        for w in wanted {
-            assert!(out.stderr.contains(w), "{name}: no `{w}` in {}", out.stderr);
-        }
-    };
-    let base = settings();
-    check(
-        "fix-dialect",
-        &DOT.replace("runspore/0.2", "runspore/0.1"),
-        &base,
-        &[
-            "spore: dot.dialect: flow/workflow.dot:3: ",
-            "runspore/0.2",
-            "runspore.workflow/0.2",
-        ],
+fn every_problem_of_a_folder_shows_at_once() {
+    // A missing start, a misspelt action and an unknown key: three problems, one run.
+    let dot = DOT.replace("start=\"prep\", ", "");
+    let settings = settings()
+        .replace(
+            "\"prep\": {\"action\": \"step\"}",
+            "\"prep\": {\"action\": \"stpe\"}",
+        )
+        .replace("\"approval\",", "\"approval\", \"timeout\": 5,");
+    let dir = folder("folder-all", &dot, &settings);
+    let out = dir.run(&["validate", "flow"]);
+    assert_eq!(out.code(), Some(2), "{}", out.stderr);
+    for wanted in [
+        "flow/workflow.dot:2  dot.no-start",
+        "flow/settings.json:9  node.unknown-action",
+        "flow/settings.json:11  settings.unknown-key",
+        "3 problems in folder-flow. Nothing was run.",
+    ] {
+        assert!(
+            out.stderr.contains(wanted),
+            "no {wanted:?} in\n{}",
+            out.stderr
+        );
+    }
+    assert!(
+        !dir.file("runspore.db").exists(),
+        "validate created a database"
     );
-    check(
-        "both-files-format",
-        DOT,
-        &base.replace("workflow/0.2", "workflow/0.1"),
-        &["flow/settings.json:2: ", "flow/workflow.dot:3"],
+
+    // `start` refuses the same folder with the same report, and creates no run.
+    let start = dir.run(&["start", "flow"]);
+    assert_eq!(start.code(), Some(2));
+    assert!(
+        start.stderr.contains("3 problems in folder-flow."),
+        "{}",
+        start.stderr
     );
-    check(
-        "both-files-node",
-        DOT,
-        &base.replace("    \"prep\": {\"action\": \"step\"},\n", ""),
-        &["flow/workflow.dot:8: ", "flow/settings.json"],
-    );
+    let json = dir.run(&["--json", "start", "flow"]).json();
+    assert_eq!(json["error"]["code"], "workflow.invalid", "{json}");
+    assert_eq!(json["error"]["details"]["problems"], "3", "{json}");
 }
 
 #[test]
@@ -313,22 +333,6 @@ fn entries_other_than_a_folder_or_its_dot_file() {
             .as_str()
             .unwrap()
             .starts_with("flow/settings.json: "),
-        "{error}"
-    );
-}
-
-#[test]
-fn a_kernel_rejection_of_a_built_folder_names_the_folder() {
-    let settings = settings().replace("\"maxVisitsPerNode\": 4", "\"maxVisitsPerNode\": 0");
-    let dir = folder("folder-kernel", DOT, &settings);
-    let out = dir.run(&["--json", "--native-kernel", "validate", "flow"]);
-    let error: Value = out.json()["error"].clone();
-    assert_eq!(
-        (out.code(), error["code"].clone()),
-        (Some(2), json!("workflow.invalid"))
-    );
-    assert!(
-        error["message"].as_str().unwrap().starts_with("flow: "),
         "{error}"
     );
 }

@@ -1,0 +1,9 @@
+── Input schema outside what spore checks ── schema.input-outside-subset/settings.json:5  schema.input-outside-subset
+The input schema of "release" is outside what spore checks, at "/properties/version/pattern": `pattern` is not in the schema subset.
+
+  5 │     "properties": { "version": { "type": "string", "pattern": "^v[0-9]+" } }
+    │                                                    ^^^^^^^^^
+
+To fix: use only the parts of JSON Schema that spec/schema.md lists.
+
+1 problem in release. Nothing was run.

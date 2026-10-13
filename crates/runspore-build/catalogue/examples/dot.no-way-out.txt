@@ -1,0 +1,9 @@
+── No way to an end ────────────────── dot.no-way-out/workflow.dot:6  dot.no-way-out
+From step "approve", no path of arrows leads to an end.
+
+  6 │   approve [kind="await-signal"];
+    │   ^^^^^^^
+
+To fix: draw an arrow from it, or from a step after it, to a "complete" or "fail" step.
+
+1 problem in release. Nothing was run.

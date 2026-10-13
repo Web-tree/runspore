@@ -1,0 +1,9 @@
+── Effect this spore cannot run ── action.unsupported-effect/settings.json:7  action.unsupported-effect
+Action "build" has effect "reconcilable", which this spore cannot run yet.
+
+  7 │       "effect": "reconcilable"
+    │                 ^^^^^^^^^^^^^^
+
+To fix: use one of "pure" | "read-only" | "idempotent" | "unsafe".
+
+1 problem in release. Nothing was run.

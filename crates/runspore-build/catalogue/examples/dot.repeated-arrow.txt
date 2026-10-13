@@ -1,0 +1,9 @@
+── Two arrows for one outcome ── dot.repeated-arrow/workflow.dot:10  dot.repeated-arrow
+Step "build" has two arrows for the outcome "ok", and an outcome leads to one step.
+
+ 10 │   build -> broken;
+    │   ^^^^^^^^^^^^^^^
+
+To fix: remove one, or give it another outcome with [on="…"].
+
+1 problem in release. Nothing was run.

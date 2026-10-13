@@ -48,14 +48,17 @@ fn main() -> ExitCode {
                     map.insert("format".into(), json!(FORMAT));
                 }
                 println!("{object}");
-            } else if let Some(raw) = &out.raw {
-                use std::io::Write;
-                let mut stdout = std::io::stdout().lock();
-                if let Err(e) = stdout.write_all(raw).and_then(|()| stdout.flush()) {
-                    return report_error(false, &Fail::internal("stdout", e.to_string()));
+            } else {
+                eprint!("{}", out.stderr);
+                if let Some(raw) = &out.raw {
+                    use std::io::Write;
+                    let mut stdout = std::io::stdout().lock();
+                    if let Err(e) = stdout.write_all(raw).and_then(|()| stdout.flush()) {
+                        return report_error(false, &Fail::internal("stdout", e.to_string()));
+                    }
+                } else if !out.text.is_empty() {
+                    println!("{}", out.text.trim_end());
                 }
-            } else if !out.text.is_empty() {
-                println!("{}", out.text.trim_end());
             }
             ExitCode::from(out.exit)
         }
@@ -63,7 +66,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// In JSON mode an error is one object on stdout; otherwise one line on stderr.
+/// In JSON mode an error is one object on stdout; otherwise one line on stderr, or the
+/// report of a workflow that did not build.
 fn report_error(json_mode: bool, fail: &Fail) -> ExitCode {
     if json_mode {
         let mut error = json!({"code": fail.code, "message": fail.message});
@@ -72,6 +76,8 @@ fn report_error(json_mode: bool, fail: &Fail) -> ExitCode {
         }
         let object = json!({"format": FORMAT, "error": error});
         println!("{object}");
+    } else if let Some(report) = &fail.report {
+        eprint!("{report}");
     } else {
         eprintln!("spore: {}: {}", fail.code, fail.message);
     }
