@@ -1,4 +1,4 @@
-//! Step files and work folders (spec/host.md §3, H20–H24): a step's declared files
+//! Step files and work folders (spec/host.md §3, H21–H25): a step's declared files
 //! reach it read-only from the run's stored artifact, checked before every use, each
 //! invocation gets a work folder, and the sweep removes what no unfinished run needs.
 
@@ -176,8 +176,8 @@ async fn finished(engine: &Engine, key: &RunKey) -> RunView {
 }
 
 #[tokio::test]
-async fn h20_a_step_gets_its_own_files_and_a_work_folder_per_visit() {
-    let db = temp_db("files-h20");
+async fn h21_a_step_gets_its_own_files_and_a_work_folder_per_visit() {
+    let db = temp_db("files-h21");
     let root = db.parent().unwrap().to_path_buf();
     let files_dir = root.join("store.db.files");
     let artifact = artifact(&root, "loop", LOOP, &settings());
@@ -185,7 +185,7 @@ async fn h20_a_step_gets_its_own_files_and_a_work_folder_per_visit() {
     let store = Arc::new(SqliteStore::open(&db).unwrap());
     let engine = engine(store, check(seen.clone(), |_| {}), Some(files_dir.clone()));
     let key = engine
-        .start_artifact(&artifact, Value::Null, "h20")
+        .start_artifact(&artifact, Value::Null, "h21")
         .await
         .unwrap()
         .key;
@@ -258,8 +258,8 @@ async fn h20_a_step_gets_its_own_files_and_a_work_folder_per_visit() {
 }
 
 #[tokio::test]
-async fn h21_tampered_step_files_are_made_again_before_the_next_use() {
-    let db = temp_db("files-h21");
+async fn h22_tampered_step_files_are_made_again_before_the_next_use() {
+    let db = temp_db("files-h22");
     let root = db.parent().unwrap().to_path_buf();
     let files_dir = root.join("store.db.files");
     let artifact = artifact(&root, "loop", LOOP, &settings());
@@ -288,7 +288,7 @@ async fn h21_tampered_step_files_are_made_again_before_the_next_use() {
         Some(files_dir.clone()),
     );
     let key = engine
-        .start_artifact(&artifact, Value::Null, "h21")
+        .start_artifact(&artifact, Value::Null, "h22")
         .await
         .unwrap()
         .key;
@@ -317,14 +317,14 @@ async fn h21_tampered_step_files_are_made_again_before_the_next_use() {
 }
 
 #[tokio::test]
-async fn h22_start_refuses_files_without_a_files_dir() {
-    let db = temp_db("files-h22");
+async fn h23_start_refuses_files_without_a_files_dir() {
+    let db = temp_db("files-h23");
     let root = db.parent().unwrap().to_path_buf();
     let artifact = artifact(&root, "loop", LOOP, &settings());
     let store = Arc::new(SqliteStore::open(&db).unwrap());
     let engine = engine(store, check(Arc::default(), |_| {}), None);
     let error = engine
-        .start_artifact(&artifact, Value::Null, "h22")
+        .start_artifact(&artifact, Value::Null, "h23")
         .await
         .unwrap_err();
     assert_eq!(error.code(), runspore_host::FILES_DIR_MISSING);
@@ -342,8 +342,8 @@ impl Hook for Hide {
 }
 
 #[tokio::test]
-async fn h23_an_unreadable_artifact_quarantines_the_run_until_it_is_repaired() {
-    let db = temp_db("files-h23");
+async fn h24_an_unreadable_artifact_quarantines_the_run_until_it_is_repaired() {
+    let db = temp_db("files-h24");
     let root = db.parent().unwrap().to_path_buf();
     let files_dir = root.join("store.db.files");
     let artifact = artifact(&root, "loop", LOOP, &settings());
@@ -354,7 +354,7 @@ async fn h23_an_unreadable_artifact_quarantines_the_run_until_it_is_repaired() {
     });
     let engine = engine(store, check(Arc::default(), |_| {}), Some(files_dir));
     let key = engine
-        .start_artifact(&artifact, Value::Null, "h23")
+        .start_artifact(&artifact, Value::Null, "h24")
         .await
         .unwrap()
         .key;
@@ -372,8 +372,8 @@ async fn h23_an_unreadable_artifact_quarantines_the_run_until_it_is_repaired() {
 }
 
 #[tokio::test]
-async fn h23_an_absent_entry_blob_quarantines_the_run() {
-    let db = temp_db("files-h23-blob");
+async fn h24_an_absent_entry_blob_quarantines_the_run() {
+    let db = temp_db("files-h24-blob");
     let root = db.parent().unwrap().to_path_buf();
     let built = artifact(&root, "loop", LOOP, &settings());
     // The same manifest, holding the package and nothing else.
@@ -390,7 +390,7 @@ async fn h23_an_absent_entry_blob_quarantines_the_run() {
         Some(root.join("store.db.files")),
     );
     let key = engine
-        .start_artifact(&artifact, Value::Null, "h23-blob")
+        .start_artifact(&artifact, Value::Null, "h24-blob")
         .await
         .unwrap()
         .key;
@@ -403,8 +403,8 @@ async fn h23_an_absent_entry_blob_quarantines_the_run() {
 }
 
 #[tokio::test]
-async fn h24_the_sweep_removes_step_files_no_unfinished_run_needs() {
-    let db = temp_db("files-h24");
+async fn h25_the_sweep_removes_step_files_no_unfinished_run_needs() {
+    let db = temp_db("files-h25");
     let root = db.parent().unwrap().to_path_buf();
     let files_dir = root.join("store.db.files");
     let finished_artifact = artifact(&root, "loop", LOOP, &settings());
