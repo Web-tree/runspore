@@ -1085,6 +1085,7 @@ dependencies = [
 name = "runspore-build"
 version = "0.1.0"
 dependencies = [
+ "runspore-schema",
  "runspore-types",
  "serde_json",
 ]
@@ -1140,6 +1141,7 @@ dependencies = [
  "libproc",
  "nix",
  "runspore-kernel",
+ "runspore-schema",
  "runspore-store-conformance",
  "runspore-store-sqlite",
  "runspore-types",
@@ -1159,6 +1161,14 @@ dependencies = [
  "runspore-trace",
  "runspore-types",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "runspore-schema"
+version = "0.1.0"
+dependencies = [
+ "runspore-types",
  "serde_json",
 ]
 

@@ -11,7 +11,7 @@ use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
 use runspore_types::model::{
     event_kind, ActivityResult, AttemptStatus, InvocationResolved, Resolution, RunStarted,
-    RunStatus, SignalReceived, State, Workflow, WorkflowLimits,
+    RunStatus, SignalReceived, State, Workflow, WorkflowLimits, OUTCOME_RECEIVED,
 };
 use runspore_types::reducer::{Envelope, Identity, Limits, Reducer, TransitionRequest};
 use runspore_types::store::*;
@@ -167,6 +167,7 @@ struct Runnable {
     input: Value,
     visit: u32,
     base_dir: PathBuf,
+    package: Arc<Package>,
 }
 
 /// Why a claimed attempt cannot start.
@@ -181,8 +182,47 @@ enum Unrunnable {
 struct Package {
     bytes: Vec<u8>,
     actions: Map<String, Value>,
+    nodes: Map<String, Value>,
     /// `limits.maxVisitsPerNode`: no activation has a higher visit.
     max_visits: u32,
+}
+
+impl Package {
+    /// The schema node `node_id` declares for `outcome`, if any.
+    fn schema(&self, node_id: &str, outcome: &str) -> Option<&Value> {
+        self.nodes.get(node_id)?.get("outputSchemas")?.get(outcome)
+    }
+
+    /// The schema the await-signal nodes waiting for `signal` declare for `outcome`.
+    /// W13 makes them equal, so the first one found is the answer.
+    fn signal_schema(&self, signal: &str, outcome: &str) -> Option<&Value> {
+        self.nodes
+            .values()
+            .filter(|node| {
+                node.get("kind").and_then(Value::as_str) == Some("await-signal")
+                    && node.get("signal").and_then(Value::as_str) == Some(signal)
+            })
+            .find_map(|node| node.get("outputSchemas")?.get(outcome))
+    }
+}
+
+/// A runner's output, with a success whose output does not fit its outcome's schema
+/// turned into a non-retryable `output.invalid` failure (host §2, One attempt).
+fn checked(output: ActivityOutput, schema: impl FnOnce(&str) -> Option<Value>) -> ActivityOutput {
+    let ActivityOutput::Success { outcome, output } = output else {
+        return output;
+    };
+    match schema(&outcome).map(|schema| runspore_schema::fit(&outcome, &schema, &output)) {
+        Some(Err(misfit)) => ActivityOutput::Failure {
+            error: ActivityOutput::error(
+                runspore_schema::OUTPUT_INVALID,
+                misfit.message(),
+                misfit.details(),
+            ),
+            retryable: false,
+        },
+        _ => ActivityOutput::Success { outcome, output },
+    }
 }
 
 struct Inner {
@@ -346,7 +386,26 @@ fn check_workflow(
         },
         frozen_limits: limits,
     })?;
+    check_schemas(&workflow)?;
     Ok(package)
+}
+
+/// Every schema in a node's `outputSchemas` against the subset (spec/schema.md §1).
+/// The kernel has already checked the field's shape (W13).
+fn check_schemas(workflow: &Value) -> Result<(), HostError> {
+    let nodes = workflow.get("nodes").and_then(Value::as_object);
+    for (id, node) in nodes.into_iter().flatten() {
+        let schemas = node.get("outputSchemas").and_then(Value::as_object);
+        for (outcome, schema) in schemas.into_iter().flatten() {
+            runspore_schema::check(schema, runspore_schema::ROOT_LEVEL).map_err(|e| {
+                HostError::invalid(
+                    runspore_schema::INVALID_SCHEMA,
+                    format!("nodes.{id}.outputSchemas.{outcome}: {e}"),
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 impl Engine {
@@ -478,6 +537,12 @@ impl Engine {
         outcome: Option<String>,
         data: Value,
     ) -> Result<Receipt<EventAccepted>, HostError> {
+        if let Some(package) = self.run_package(key).await? {
+            let routed = outcome.as_deref().unwrap_or(OUTCOME_RECEIVED);
+            if let Some(schema) = package.signal_schema(name, routed) {
+                runspore_schema::fit(routed, schema, &data).map_err(HostError::OutputInvalid)?;
+            }
+        }
         let body = evidence(&SignalReceived {
             name: name.to_string(),
             outcome,
@@ -498,6 +563,10 @@ impl Engine {
         invocation_id: &str,
         resolution: Resolution,
     ) -> Result<Receipt<EventAccepted>, HostError> {
+        if let Resolution::Complete { outcome, output } = &resolution {
+            self.check_completion(key, invocation_id, outcome, output)
+                .await?;
+        }
         let body = evidence(&InvocationResolved {
             invocation_id: invocation_id.to_string(),
             resolution,
@@ -512,6 +581,40 @@ impl Engine {
             body,
         )
         .await
+    }
+
+    /// The package of a run, or `None` when there is no such run (the append that
+    /// follows reports that).
+    async fn run_package(&self, key: &RunKey) -> Result<Option<Arc<Package>>, HostError> {
+        match self.get_run(key).await? {
+            Some(view) => Ok(Some(self.inner.package(&view.package_digest).await?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Checks a `complete` resolution's output against the schema the invocation's
+    /// node declares for its outcome. An unknown invocation is left to the kernel.
+    async fn check_completion(
+        &self,
+        key: &RunKey,
+        invocation_id: &str,
+        outcome: &str,
+        output: &Value,
+    ) -> Result<(), HostError> {
+        let Some(package) = self.run_package(key).await? else {
+            return Ok(());
+        };
+        let invocations = self.list_invocations(key).await?;
+        let node = invocations
+            .iter()
+            .find(|i| i.invocation_id == invocation_id)
+            .map(|i| i.node_id.as_str());
+        match node.and_then(|node| package.schema(node, outcome)) {
+            Some(schema) => {
+                runspore_schema::fit(outcome, schema, output).map_err(HostError::OutputInvalid)
+            }
+            None => Ok(()),
+        }
     }
 
     /// Lifts a quarantine. The request ID names the quarantine being lifted, so a
@@ -790,11 +893,14 @@ impl Inner {
                 ))
             })?;
         let workflow: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-        let actions = workflow
-            .get("actions")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
+        let section = |name: &str| {
+            workflow
+                .get(name)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default()
+        };
+        let (actions, nodes) = (section("actions"), section("nodes"));
         let max_visits = workflow
             .pointer("/limits/maxVisitsPerNode")
             .and_then(Value::as_u64)
@@ -803,6 +909,7 @@ impl Inner {
         let package = Arc::new(Package {
             bytes,
             actions,
+            nodes,
             max_visits,
         });
         lock(&self.packages).insert(digest.to_string(), package.clone());
@@ -1037,6 +1144,7 @@ impl Inner {
                 input,
                 visit,
                 base_dir,
+                package,
             }) => {
                 let mut ctx = ActivityContext::new(
                     attempt.key.clone(),
@@ -1068,7 +1176,7 @@ impl Inner {
                 let mut beat =
                     tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                 let mut shutdown = self.shutdown.subscribe();
-                loop {
+                let output = loop {
                     tokio::select! {
                         output = &mut run => break output,
                         _ = beat.tick(), if !lost => {
@@ -1084,7 +1192,10 @@ impl Inner {
                             stop.send_replace(true);
                         }
                     }
-                }
+                };
+                checked(output, |outcome| {
+                    package.schema(&claim.node_id, outcome).cloned()
+                })
             }
         };
         failpoint::hit("host.attempt.after-effect");
@@ -1151,8 +1262,8 @@ impl Inner {
         let _ = retry(true, || self.store.record_late_evidence(request.clone())).await;
     }
 
-    /// Finds the action, its runner, the input and the run's base folder of a claimed
-    /// attempt.
+    /// Finds the action, its runner, the input, the run's base folder and the package
+    /// of a claimed attempt.
     async fn resolve_action(&self, key: &RunKey, claim: &Claim) -> Result<Runnable, Unrunnable> {
         let fail = |code: &str, message: String| {
             Unrunnable::Fail(ActivityOutput::Failure {
@@ -1198,6 +1309,7 @@ impl Inner {
             input,
             visit,
             base_dir,
+            package,
         })
     }
 }

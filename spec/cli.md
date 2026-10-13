@@ -54,6 +54,23 @@ try of the same invocation, with the same effect key, even past the action's
 outcome. `--fail <message>` ends the run as failed with the step's kept error; the
 message is recorded in the event only, and the run never pauses on that step again.
 
+**0.2: output schemas.** `signal --data` and `resolve --complete --output` are
+checked against the schema of their outcome ([schema.md](schema.md), host.md §2);
+missing data is `null`. Data that does not fit exits 2 with code `output.invalid` and
+records nothing, so the same command can be sent again with corrected data. Text mode
+prints the refusal and then one error per line, path first, `(root)` for the whole
+value:
+
+```text
+spore: output.invalid: the data for outcome "rejected" does not fit its schema
+(root): expected type "object", got null
+```
+
+In JSON mode the error object carries `details`:
+`{"outcome": "rejected", "errors": [{"path": "", "message": "expected type \"object\", got null"}]}`.
+`validate`, `start` and `run` refuse a schema outside the subset with exit 2 and
+`workflow.invalid-schema` (dot.md §6).
+
 ## Project folder (0.2)
 
 A repository keeps its workflows and its runs in one project folder, `.spore/`, at its

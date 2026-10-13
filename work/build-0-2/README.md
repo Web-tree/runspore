@@ -40,6 +40,10 @@ work/build-0-2/bin/answer a changes "Errors should name the settings key" "skill
 
 `changes` makes one ticket per change (runspore, or the skills repo with `skills:`),
 builds them, then asks again.
+spore checks the answer against the checkpoint's output schema in
+`.spore/workflows/build-0-2/settings.json`: a `changes` answer needs at least one
+change, none of them empty. An answer that does not fit is refused, with each error
+on its own line, and nothing is recorded; answer again.
 
 ## Move onto the newest spore
 
@@ -80,4 +84,3 @@ its own acceptance criteria, so the build uses each fix from the next upgrade on
 | The step scripts `cd` into the worktree from their input | `cwd` is fixed per action | R25 |
 | Over the visit limit the ticket run fails; the wave tries once more, then asks you | No limit arrow | R11 |
 | A wave step starts ticket runs and polls them | No child runs or parallel steps | later map (Temporal child workflows, n8n Execute Workflow) |
-| Checkpoints are answered with `bin/answer`; output schemas are checked there, not by spore | No output schemas on signals | R13 |

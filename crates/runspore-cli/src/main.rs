@@ -60,8 +60,11 @@ fn main() -> ExitCode {
 /// In JSON mode an error is one object on stdout; otherwise one line on stderr.
 fn report_error(json_mode: bool, fail: &Fail) -> ExitCode {
     if json_mode {
-        let object = json!({"format": FORMAT,
-                            "error": {"code": fail.code, "message": fail.message}});
+        let mut error = json!({"code": fail.code, "message": fail.message});
+        if let Some(details) = &fail.details {
+            error["details"] = details.clone();
+        }
+        let object = json!({"format": FORMAT, "error": error});
         println!("{object}");
     } else {
         eprintln!("spore: {}: {}", fail.code, fail.message);

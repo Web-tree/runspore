@@ -1113,7 +1113,9 @@ mod tests {
                         assert!(workflow.nodes.contains_key(target));
                     }
                 }
-                Node::AwaitSignal { signal, outcomes } => {
+                Node::AwaitSignal {
+                    signal, outcomes, ..
+                } => {
                     assert!(identifier(signal, 64, "_.-"));
                     assert!(!outcomes.is_empty());
                     for (outcome, target) in outcomes {

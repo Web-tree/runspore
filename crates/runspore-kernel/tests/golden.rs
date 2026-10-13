@@ -15,7 +15,7 @@ use runspore_types::model::{code, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
 use serde_json::{json, Value};
 
 /// Files a checkout must hold; more may be added.
-const MINIMUM_TRACES: usize = 59;
+const MINIMUM_TRACES: usize = 61;
 
 /// Every failure code, diagnostic code and kernel-produced error code. Each must
 /// be expected by at least one trace, so no part of the vocabulary goes unpinned.
@@ -132,10 +132,12 @@ const STUCK_UNDER_0_2: &[&str] = &[
 ];
 
 /// Traces of a 0.2 document that pin a rule naming 0.2 (`from`, `$get` `default`,
-/// the stuck step): a 0.1 document is refused or runs differently there, by design.
+/// the stuck step, `outputSchemas`): a 0.1 document is refused or runs differently
+/// there, by design.
 const RULES_NAMING_0_2: &[&str] = &[
     "from-arrows",
     "get-default",
+    "output-schemas-never-read",
     "stuck-expiries-exhausted",
     "stuck-non-retryable-failure",
     "stuck-retries-exhausted",

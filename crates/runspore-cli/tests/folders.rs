@@ -118,7 +118,10 @@ fn a_folder_validates_starts_and_runs() {
     );
 
     let run = status["runId"].as_str().unwrap();
+    // `approved` declares an object schema, so a signal without data is refused.
     let signal = ["signal", run, "approval", "--outcome", "approved"];
+    assert_eq!(dir.run(&args(&signal)).code(), Some(2));
+    let signal = [&signal[..], &["--data", "{}"]].concat();
     assert_eq!(dir.run(&args(&signal)).code(), Some(0));
     let done = dir.run(&args(&["--json", "run", "flow", "--key", "k"]));
     assert_eq!(
@@ -201,6 +204,13 @@ const CASES: &[Case] = &[
     case("reference missing", None, Some(("steps/work.md", "steps/nope.md")), "settings.reference", S, 10),
     case("symlink escapes", None, Some(("steps/work.md", "steps/link.md")), "settings.reference", S, 10),
     case("asset escapes", None, Some(("assets/tool.sh", "../outside.md")), "settings.reference", S, 6),
+    case("schema outside the subset", None, Some(("{\"type\": \"object\"}", "{\"type\": \"number\"}")), "workflow.invalid-schema", S, 11),
+    case("schema file missing", None, Some(("{\"type\": \"object\"}", "\"schemas/nope.json\"")), "settings.reference", S, 11),
+    case("schema file not json", None, Some(("{\"type\": \"object\"}", "\"steps/work.md\"")), "workflow.invalid-schema", S, 11),
+    case("schema with a remote ref", None, Some(("{\"type\": \"object\"}", "{\"$ref\": \"other.json\"}")), "workflow.invalid-schema", S, 11),
+    case("schemas not an object", None, Some(("\"outputSchemas\": {\"approved\": {\"type\": \"object\"}}", "\"outputSchemas\": []")), "settings.invalid", S, 11),
+    case("marker without schemas", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}}}")), "settings.invalid", S, 9),
+    case("marker not alone", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}, \"x\": 1}}")), "settings.invalid", S, 9),
 ];
 
 #[test]

@@ -445,7 +445,12 @@ impl<'a> Machine<'a> {
         let Some(position) = &self.state.position else {
             return Err(failure::invariant("a waiting run has no position"));
         };
-        let Some((node_id, Node::AwaitSignal { signal, outcomes })) = graph.node(&position.node_id)
+        let Some((
+            node_id,
+            Node::AwaitSignal {
+                signal, outcomes, ..
+            },
+        )) = graph.node(&position.node_id)
         else {
             return Err(failure::invariant(
                 "a waiting run is not at an await-signal node",

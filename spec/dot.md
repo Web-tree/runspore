@@ -113,9 +113,22 @@ An `activity`, `await-signal` or `fail` node therefore needs an entry in `nodes`
 `complete` node may omit it.
 
 `instructions` (on a node) and `assets` (a list, on an action) are relative paths to
-files inside the folder. `outputSchemas` is an object keyed by outcome; its contents
-are checked by the schema rules, which this version does not yet apply. All three are
-build-only: the build checks them and leaves them out of the package.
+files inside the folder. Both are build-only: the build checks them and leaves them
+out of the package.
+
+`outputSchemas` is an object keyed by outcome ([schema.md](schema.md)). Each value is
+a schema written inline, or a string: a file reference to a JSON file holding one.
+Either may use the authoring form, `$defs` and `$ref` (schema.md §2). The build puts
+every schema into the package in its package form: read from its file, every `$ref`
+inlined, checked against the subset. The package never holds a path or a `$ref`.
+
+An `activity` node's `input` may hold the marker `{"$outputSchemas": {}}` wherever a
+mapping is evaluated: as the input itself, or inside its plain objects and arrays,
+but not inside a `$literal` or a `$get`, whose contents are data. The build replaces
+each marker with `{"$literal": <the node's outputSchemas>}`, the schemas in package
+form, so a program the step runs can read its own schemas without the workflow
+writing them twice. A marker on a node with no `outputSchemas`, or one with another
+key or a value other than `{}`, is an error.
 
 A file reference must be a relative path to a regular file that stays inside the
 folder once `..` and every symbolic link are resolved. An absolute path, an escape,
@@ -133,7 +146,10 @@ or a missing file is an error naming the reference.
    settings for has them. Each `activity` node's action exists; every outcome the
    action declares has an edge, and every edge's `on` is a declared outcome or
    `failed`.
-5. Check and strip the file references and `outputSchemas`.
+5. Check and strip the file references. Read each `outputSchemas` file, inline the
+   `$ref`s and check every schema against the subset at its place in the package
+   (schema.md §1); then replace each `$outputSchemas` marker, checking that the copy
+   still fits the package's depth limit where it lands.
 6. Produce the package: `format`, `name` and `start` from the files above, `limits`
    and `actions` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
@@ -158,3 +174,5 @@ validation after the build names the folder.
 | `settings.invalid` | `settings.json` is not JSON or not the shape of §4, or a node names an action `actions` does not define |
 | `settings.mismatch` | A node is in one file and missing from the other |
 | `settings.reference` | A file reference that is absolute, escapes the folder, or names no file |
+| `settings.invalid` | Also: a `$outputSchemas` marker on a node with no `outputSchemas`, or not written as `{"$outputSchemas": {}}` |
+| `workflow.invalid-schema` | A schema file that is not JSON in the canonical domain, or a schema outside the subset, too deep, too large or with a bad `$ref` ([schema.md](schema.md)). The message names `nodes.<id>.outputSchemas.<outcome>`, the schema file when there is one, and the JSON Pointer of the keyword |

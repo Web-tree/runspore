@@ -1,3 +1,4 @@
+use runspore_schema::Misfit;
 use runspore_types::reducer::Failure;
 use runspore_types::store::StoreFailure;
 
@@ -13,6 +14,10 @@ pub enum HostError {
     /// The request was rejected by the engine before it reached the store.
     #[error("{code}: {message}")]
     Invalid { code: String, message: String },
+    /// `output.invalid`: data that does not fit its outcome's schema; nothing was
+    /// recorded.
+    #[error("output.invalid: {0}")]
+    OutputInvalid(Misfit),
 }
 
 impl HostError {
@@ -29,6 +34,7 @@ impl HostError {
             Self::Store(f) => &f.code,
             Self::Kernel(f) => &f.code,
             Self::Invalid { code, .. } => code,
+            Self::OutputInvalid(_) => runspore_schema::OUTPUT_INVALID,
         }
     }
 }

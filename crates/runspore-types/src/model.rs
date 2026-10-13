@@ -122,11 +122,26 @@ pub enum Node {
         #[serde(default)]
         input: Value,
         outcomes: BTreeMap<String, String>,
+        /// 0.2: the schema each outcome's output must fit. The kernel checks only the
+        /// field's shape (W13) and never reads it in a transition; hosts check results.
+        #[serde(
+            default,
+            rename = "outputSchemas",
+            skip_serializing_if = "Option::is_none"
+        )]
+        output_schemas: Option<BTreeMap<String, Value>>,
     },
     /// Consumes the earliest buffered signal with this name.
     AwaitSignal {
         signal: String,
         outcomes: BTreeMap<String, String>,
+        /// 0.2: as on an activity node; the schema a signal's data must fit.
+        #[serde(
+            default,
+            rename = "outputSchemas",
+            skip_serializing_if = "Option::is_none"
+        )]
+        output_schemas: Option<BTreeMap<String, Value>>,
     },
     Complete {
         /// Mapping evaluated against the run context to build the run output.

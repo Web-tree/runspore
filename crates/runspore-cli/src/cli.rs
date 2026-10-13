@@ -132,6 +132,8 @@ pub struct Fail {
     pub exit: u8,
     pub code: String,
     pub message: String,
+    /// Structured details for JSON mode, such as the errors of `output.invalid`.
+    pub details: Option<Value>,
 }
 
 impl Fail {
@@ -140,6 +142,7 @@ impl Fail {
             exit: 2,
             code: code.to_string(),
             message: message.into(),
+            details: None,
         }
     }
 
@@ -148,6 +151,7 @@ impl Fail {
             exit: 10,
             code: code.to_string(),
             message: message.into(),
+            details: None,
         }
     }
 }
@@ -155,8 +159,15 @@ impl Fail {
 /// Rejections of the caller's request exit 2; store and internal failures exit 10.
 impl From<HostError> for Fail {
     fn from(e: HostError) -> Self {
+        if let HostError::OutputInvalid(misfit) = &e {
+            // The summary, then one error per line (spec/cli.md, output schemas).
+            let mut fail = Fail::usage(e.code(), misfit.to_string());
+            fail.details = Some(misfit.details());
+            return fail;
+        }
         let usage = match &e {
             HostError::Invalid { .. } | HostError::Kernel(_) => true,
+            HostError::OutputInvalid(_) => unreachable!("handled above"),
             HostError::Store(f) => {
                 f.kind == StoreFailureKind::Conflict || f.code == "run.not-found"
             }
