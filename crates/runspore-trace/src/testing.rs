@@ -353,6 +353,7 @@ impl Turn<'_> {
                 Node::AwaitSignal {
                     signal: name,
                     outcomes,
+                    ..
                 } => {
                     *name == signal.name
                         && outcomes

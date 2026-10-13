@@ -1,4 +1,4 @@
-//! `spec/kernel.md` section 2: workflow validation rules W01–W11.
+//! `spec/kernel.md` section 2: workflow validation rules W01–W11 and W13.
 
 mod common;
 
@@ -428,6 +428,105 @@ fn w11_fail_nodes() {
         "/nodes/broken/error/details",
         json!({"hint": [1, 2]}),
     ));
+}
+
+/// The example workflow, with a second await-signal node `recheck` that waits for the
+/// same signal as `approve` and routes the same outcomes.
+fn two_waiters() -> Value {
+    let mut workflow = edited("/nodes/build/outcomes/ok", json!("recheck"));
+    workflow["nodes"]["recheck"] = json!({"kind": "await-signal", "signal": "approval",
+        "outcomes": {"approved": "approve", "rejected": "build"}});
+    workflow
+}
+
+#[test]
+fn w01_output_schemas_need_format_0_2() {
+    let declared = edited(
+        "/nodes/build/outputSchemas",
+        json!({"ok": {"type": "object"}}),
+    );
+    assert_valid(&declared);
+    let failure = check(&with(declared, "/format", json!(WORKFLOW_FORMAT))).unwrap_err();
+    assert!(failure.details.starts_with("W01"), "{}", failure.details);
+}
+
+#[test]
+fn w13_output_schemas() {
+    let object = json!({"type": "object"});
+    assert_valid(&edited(
+        "/nodes/build/outputSchemas",
+        json!({"red": object}),
+    ));
+    assert_valid(&edited(
+        "/nodes/approve/outputSchemas",
+        json!({"approved": object, "rejected": {}}),
+    ));
+    for (pointer, schemas) in [
+        ("/nodes/build/outputSchemas", json!({})),
+        ("/nodes/build/outputSchemas", json!({"failed": object})),
+        ("/nodes/build/outputSchemas", json!({"approved": object})),
+        ("/nodes/build/outputSchemas", json!({"ok": true})),
+        (
+            "/nodes/build/outputSchemas",
+            json!({"ok": "schemas/ok.json"}),
+        ),
+        ("/nodes/approve/outputSchemas", json!({"ok": object})),
+        ("/nodes/approve/outputSchemas", json!({"approved": []})),
+    ] {
+        let failure = check(&edited(pointer, schemas.clone())).unwrap_err();
+        assert!(
+            failure.details.starts_with("W13"),
+            "{schemas}: {}",
+            failure.details
+        );
+    }
+    // Only activity and await-signal nodes carry the field.
+    assert_invalid(&edited("/nodes/done/outputSchemas", json!({"ok": object})));
+    assert_invalid(&edited("/nodes/build/outputSchemas", json!(["ok"])));
+}
+
+#[test]
+fn w13_waiters_for_one_signal_declare_equal_schemas() {
+    let reason = json!({"type": "object", "required": ["reason"],
+                        "properties": {"reason": {"type": "string"}}});
+    assert_valid(&two_waiters());
+    let one = with(
+        two_waiters(),
+        "/nodes/approve/outputSchemas",
+        json!({"rejected": reason}),
+    );
+    let failure = check(&one).unwrap_err();
+    assert!(failure.details.starts_with("W13"), "{}", failure.details);
+    let both = with(
+        one,
+        "/nodes/recheck/outputSchemas",
+        json!({"rejected": reason}),
+    );
+    assert_valid(&both);
+    assert_invalid(&with(
+        both.clone(),
+        "/nodes/recheck/outputSchemas/rejected",
+        json!({}),
+    ));
+    // An outcome only one of them routes may have its own schema.
+    let mut own = with(both, "/nodes/recheck/outcomes/later", json!("done"));
+    own["nodes"]["recheck"]["outputSchemas"]["later"] = json!({"type": "null"});
+    assert_valid(&own);
+}
+
+/// The kernel never reads a schema: a result that does not fit routes as usual.
+#[test]
+fn output_schemas_change_no_decision() {
+    let declared = edited(
+        "/nodes/build/outputSchemas",
+        json!({"ok": {"type": "object", "required": ["never"],
+                       "properties": {"never": {"type": "string"}}}}),
+    );
+    for workflow in [review_loop(), declared] {
+        let mut run = Run::started(&workflow, json!({"repo": "r"}));
+        run.succeed("ok", json!("not an object"), 2_000);
+        assert_eq!(run.state()["position"]["nodeId"], "approve");
+    }
 }
 
 #[test]

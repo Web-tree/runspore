@@ -9,6 +9,7 @@ use runspore_types::model::{
 };
 use runspore_types::reducer::Failure;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::mapping::Dialect;
 use crate::{failure, mapping, pattern};
@@ -24,7 +25,7 @@ pub(crate) struct Graph {
 }
 
 impl Graph {
-    /// Decodes a canonical workflow document and applies rules W01–W11 in order.
+    /// Decodes a canonical workflow document and applies rules W01–W11 and W13 in order.
     /// Within W10, a 0.2 document's mappings may use `from` and `default`.
     pub(crate) fn load(bytes: &[u8]) -> Result<Self, Failure> {
         let workflow: Workflow = canonical::decode(bytes).map_err(|error| {
@@ -84,6 +85,18 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
                 workflow.format
             ),
         ));
+    }
+
+    if workflow.format != WORKFLOW_FORMAT_0_2 {
+        if let Some(id) = nodes
+            .keys()
+            .find(|id| output_schemas(&nodes[*id]).is_some())
+        {
+            return Err(violation(
+                "W01",
+                format!("node {id:?}: outputSchemas needs format {WORKFLOW_FORMAT_0_2:?}"),
+            ));
+        }
     }
 
     if !pattern::is_name(&workflow.name) {
@@ -168,7 +181,10 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
     }
 
     for (id, node) in nodes {
-        if let Node::AwaitSignal { signal, outcomes } = node {
+        if let Node::AwaitSignal {
+            signal, outcomes, ..
+        } = node
+        {
             if !pattern::is_signal(signal) {
                 return Err(violation(
                     "W09",
@@ -217,7 +233,84 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
         }
     }
 
+    output_schemas_fit(workflow, &policies)?;
+
     Ok(policies)
+}
+
+fn output_schemas(node: &Node) -> Option<&BTreeMap<String, Value>> {
+    match node {
+        Node::Activity { output_schemas, .. } | Node::AwaitSignal { output_schemas, .. } => {
+            output_schemas.as_ref()
+        }
+        Node::Complete { .. } | Node::Fail { .. } => None,
+    }
+}
+
+/// W13: each node's `outputSchemas` is non-empty, keyed by outcomes the node can
+/// produce, and holds objects; await-signal nodes that wait for one signal declare
+/// equal schemas for every outcome they share. The schemas' contents are the host's.
+fn output_schemas_fit(
+    workflow: &Workflow,
+    policies: &BTreeMap<String, ActionPolicy>,
+) -> Result<(), Failure> {
+    let mut waiters: BTreeMap<&str, (&str, &BTreeMap<String, String>)> = BTreeMap::new();
+    for (id, node) in &workflow.nodes {
+        let schemas = output_schemas(node);
+        for (outcome, schema) in schemas.into_iter().flatten() {
+            let produced = match node {
+                Node::Activity { action, .. } => policies
+                    .get(action)
+                    .is_some_and(|policy| policy.outcomes.contains(outcome)),
+                Node::AwaitSignal { outcomes, .. } => outcomes.contains_key(outcome),
+                Node::Complete { .. } | Node::Fail { .. } => false,
+            };
+            if !produced || outcome == OUTCOME_FAILED {
+                return Err(violation(
+                    "W13",
+                    format!(
+                        "node {id:?}: outputSchemas names {outcome:?}, which is not an outcome \
+                         the node produces"
+                    ),
+                ));
+            }
+            if !schema.is_object() {
+                return Err(violation(
+                    "W13",
+                    format!("node {id:?}: the schema of {outcome:?} is not an object"),
+                ));
+            }
+        }
+        if schemas.is_some_and(BTreeMap::is_empty) {
+            return Err(violation(
+                "W13",
+                format!("node {id:?}: outputSchemas is empty"),
+            ));
+        }
+        let Node::AwaitSignal {
+            signal, outcomes, ..
+        } = node
+        else {
+            continue;
+        };
+        let Some((other, other_outcomes)) = waiters.get(signal.as_str()) else {
+            waiters.insert(signal, (id, outcomes));
+            continue;
+        };
+        let theirs = output_schemas(&workflow.nodes[*other]);
+        for outcome in outcomes.keys().filter(|o| other_outcomes.contains_key(*o)) {
+            if schemas.and_then(|s| s.get(outcome)) != theirs.and_then(|s| s.get(outcome)) {
+                return Err(violation(
+                    "W13",
+                    format!(
+                        "nodes {other:?} and {id:?} wait for signal {signal:?} with different \
+                         schemas for outcome {outcome:?}"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The mapping dialect of a document whose format passed W01.

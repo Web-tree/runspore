@@ -1,0 +1,213 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "output-schemas-never-read",
+  "description": "A 0.2 document's nodes carry outputSchemas; the kernel never reads them: a result and a signal whose data do not fit route exactly as they would without them (hosts check results before they are recorded).",
+  "workflow": {
+    "actions": {
+      "review": {
+        "argv": ["review"],
+        "effect": "read-only",
+        "kind": "command",
+        "outcomes": ["ok", "changes"]
+      }
+    },
+    "format": "runspore.workflow/0.2",
+    "name": "output-schemas-never-read",
+    "nodes": {
+      "approve": {
+        "kind": "await-signal",
+        "outcomes": {"approved": "done", "rejected": "review"},
+        "outputSchemas": {
+          "rejected": {
+            "additionalProperties": false,
+            "properties": {"reason": {"minLength": 1, "type": "string"}},
+            "required": ["reason"],
+            "type": "object"
+          }
+        },
+        "signal": "approval"
+      },
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "review", "output"]}},
+      "review": {
+        "action": "review",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"changes": "review", "ok": "approve"},
+        "outputSchemas": {
+          "changes": {
+            "properties": {
+              "requests": {"items": {"type": "string"}, "minItems": 1, "type": "array"}
+            },
+            "required": ["requests"],
+            "type": "object"
+          },
+          "ok": {
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "type": "object"
+          }
+        }
+      }
+    },
+    "start": "review"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"task": "t-1"}, "runId": "run_schemas", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": {
+            "actionId": "review",
+            "activationId": "review/1",
+            "attempt": 1,
+            "inputDigest": "sha256:3afe9ecf9680a214d8e64f216bf8dc7e69a83fa4ae38647fb103f30abf981c3a",
+            "invocationId": "inv_8a00397f6b2dae844641e56382f23deb",
+            "nodeId": "review",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "review/1", "nodeId": "review", "visit": 1},
+          "result": null,
+          "runId": "run_schemas",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"review": 1}
+        },
+        "snapshotDigest": "sha256:c1226db12385ee9abc16814078a6f81e105d5744362dee8351de939ea3c77390",
+        "commands": [
+          {
+            "commandId": "cmd_e490a1a8f98d26554e103610fe71a395",
+            "activationId": "review/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "review",
+              "activationId": "review/1",
+              "attempt": 1,
+              "effectKey": "inv_8a00397f6b2dae844641e56382f23deb",
+              "input": {"task": "t-1"},
+              "invocationId": "inv_8a00397f6b2dae844641e56382f23deb",
+              "nodeId": "review",
+              "notBeforeMs": "1000"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:32069d88966493c5915b124b10906ddc81948a2ffafedec32b2219c21700bd18"
+      }
+    },
+    {
+      "event": {
+        "eventId": "att:inv_8a00397f6b2dae844641e56382f23deb.1.2",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_8a00397f6b2dae844641e56382f23deb.1",
+          "invocationId": "inv_8a00397f6b2dae844641e56382f23deb",
+          "outcome": "ok",
+          "output": "not an object",
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {"review": {"outcome": "ok", "output": "not an object", "visit": 1}},
+          "position": {"activationId": "approve/1", "nodeId": "approve", "visit": 1},
+          "result": null,
+          "runId": "run_schemas",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "waiting",
+          "tenant": "default",
+          "visits": {"approve": 1, "review": 1}
+        },
+        "snapshotDigest": "sha256:11e41d35abee17567370d13d0625bbec23747bed2330b68713fec609fdb2869d",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:a2e0e056e350b30f2f33ee47fbd6f4e3f054a2932f9e9b9f23c559e5f6ff8def"
+      }
+    },
+    {
+      "event": {
+        "eventId": "sig:m-1",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "signal.received",
+        "payload": {"data": null, "name": "approval", "outcome": "rejected"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"task": "t-1"},
+          "invocation": {
+            "actionId": "review",
+            "activationId": "review/2",
+            "attempt": 1,
+            "inputDigest": "sha256:3afe9ecf9680a214d8e64f216bf8dc7e69a83fa4ae38647fb103f30abf981c3a",
+            "invocationId": "inv_381a93f2634aa361b09831cc10653727",
+            "nodeId": "review",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {
+            "approve": {"outcome": "rejected", "output": null, "visit": 1},
+            "review": {"outcome": "ok", "output": "not an object", "visit": 1}
+          },
+          "position": {"activationId": "review/2", "nodeId": "review", "visit": 2},
+          "result": null,
+          "runId": "run_schemas",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"approve": 1, "review": 2}
+        },
+        "snapshotDigest": "sha256:3cf2c88b938e22a1aaa4bc9c44380383d34ff36286c75ed4b525eb4dce9b968b",
+        "commands": [
+          {
+            "commandId": "cmd_ca579b90903db3a4ae19dbc5f4f62687",
+            "activationId": "review/2",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "review",
+              "activationId": "review/2",
+              "attempt": 1,
+              "effectKey": "inv_381a93f2634aa361b09831cc10653727",
+              "input": {"task": "t-1"},
+              "invocationId": "inv_381a93f2634aa361b09831cc10653727",
+              "nodeId": "review",
+              "notBeforeMs": "1200"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:79360318089a4f8da517b447ae87477ef68ea2e63d1adcf111548d89ef09812b"
+      }
+    }
+  ]
+}

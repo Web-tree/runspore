@@ -1163,6 +1163,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runspore-schema"
+version = "0.1.0"
+dependencies = [
+ "runspore-types",
+ "serde_json",
+]
+
+[[package]]
 name = "runspore-store-conformance"
 version = "0.1.0"
 dependencies = [
