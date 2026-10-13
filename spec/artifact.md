@@ -7,7 +7,9 @@ never read again. `spore build` writes the artifact to disk, and `start` and `ru
 from a folder build it in memory and store it ([cli.md](cli.md)).
 
 The artifact is data. The shared kernel component runs the package inside it; nothing
-in the artifact is a kernel and nothing in it runs a step.
+in the artifact is a kernel and nothing in it runs a step. For a host that can load
+only one component, `spore build --composed` writes the **composed artifact** (§7): the
+same workflow artifact and the kernel component in one file.
 
 ## 1. The `runspore:artifact` world
 
@@ -138,3 +140,39 @@ and only `manifest()` and `blob()` are called.
 | `artifact.digest-mismatch` | `blob(main)` does not hash to `main` |
 
 Each exits 2 in the CLI.
+
+## 7. The composed artifact
+
+A second distribution form, for a host that can load one component but not two: a
+WebAssembly component that holds the kernel component and a workflow artifact and
+exports both of their worlds unchanged. `spore build <folder> --composed` writes it
+([cli.md](cli.md)); nothing else makes one, and `spore` itself never needs one.
+
+The composition is fixed. In order, the component holds:
+
+1. the kernel component, nested as it is: byte for byte the component the building
+   `spore` embeds and runs (host.md §1), so its `digest::hash("kernel", …)` is that
+   `spore`'s `kernel_digest()` and nothing new is certified per workflow;
+2. the workflow artifact of §1 to §4, nested as it is: the bytes `spore build` would
+   write without `--composed`;
+3. an instantiation of each, with no arguments, since neither imports anything;
+4. an export of the kernel instance's `runspore:machine/reducer@0.1.0` and of the
+   artifact instance's `runspore:artifact/reader@0.1.0`, each under its own name.
+
+The composed artifact imports nothing and exports exactly those two interfaces. A
+host that extracts the two nested components gets the kernel and the workflow
+artifact unchanged. The same kernel and artifact always compose to the same bytes.
+
+A host loads a composed artifact exactly as §5 loads a plain one: the `reader`
+interface is there, `manifest()` and `blob(main)` return what the plain artifact's
+do, and the package digest is the same, so a run from either file is the same run
+under the same start key. The artifact digest (§4) is of the composed file: a run
+started from it records that file as its provenance. `spore` reads only the `reader`
+interface of a composed artifact and runs the package with its own kernel; it never
+calls the kernel inside. A host with no kernel of its own instantiates the composed
+artifact once and drives `transition` on its `reducer` export with the package from
+`blob(main)`, and gets the decisions the building `spore` would make.
+
+A composed artifact is untrusted like a plain one (§5): it is instantiated in the
+sandbox, and only `manifest()` and `blob()` are called. A file that exports the
+`reducer` interface but not `reader` is `artifact.invalid`.

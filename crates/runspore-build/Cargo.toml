@@ -13,7 +13,7 @@ homepage.workspace = true
 runspore-types.workspace = true
 runspore-schema.workspace = true
 serde_json.workspace = true
-wasm-encoder = { version = "0.261.0", default-features = false }
+wasm-encoder = { version = "0.261.0", default-features = false, features = ["component-model"] }
 wit-component = { version = "0.261.0", default-features = false }
 wit-parser = { version = "0.261.0", default-features = false }
 

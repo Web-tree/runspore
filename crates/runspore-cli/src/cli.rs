@@ -13,6 +13,7 @@ use runspore_host::{
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
+use runspore_types::digest;
 use runspore_types::model::{ErrorInfo, Resolution, State};
 use runspore_types::reducer::Reducer;
 use runspore_types::store::{Disposition, RunKey, RunView, StoreFailureKind};
@@ -65,9 +66,14 @@ pub enum Command {
     Build {
         /// A workflow folder or its workflow.dot.
         folder: PathBuf,
-        /// The artifact file; by default `<folder>.wasm` beside the folder.
+        /// The artifact file; by default `<folder>.wasm` beside the folder, or
+        /// `<folder>-composed.wasm` with --composed.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Write the composed artifact: the kernel this spore runs and the workflow
+        /// artifact in one file, exporting both worlds.
+        #[arg(long)]
+        composed: bool,
     },
     /// Print an artifact's manifest and package, or a file a run's artifact holds. For
     /// debugging; not a stable interface.
@@ -237,7 +243,11 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Validate { workflow } => {
             return validate(cli, &project::workflow(workflow, &cwd)?)
         }
-        Command::Build { folder, output } => return build(cli, folder, output.as_deref()),
+        Command::Build {
+            folder,
+            output,
+            composed,
+        } => return build(cli, folder, output.as_deref(), *composed),
         Command::Inspect {
             artifact: Some(path),
             ..
@@ -447,8 +457,10 @@ fn missing_database(command: &Command, db: &Path) -> Result<Output, Fail> {
     }
 }
 
-/// Builds a folder, checks it as `validate` does, and writes its artifact.
-fn build(cli: &Cli, folder: &Path, output: Option<&Path>) -> Result<Output, Fail> {
+/// Builds a folder, checks it as `validate` does, and writes its artifact: the
+/// workflow artifact, or with `composed` the composed artifact holding the kernel too
+/// (spec/artifact.md §7).
+fn build(cli: &Cli, folder: &Path, output: Option<&Path>, composed: bool) -> Result<Output, Fail> {
     let folder = match runspore_build::entry(folder).map_err(build_fail)? {
         runspore_build::Entry::Folder(folder) => folder,
         runspore_build::Entry::Document(path) => {
@@ -464,23 +476,39 @@ fn build(cli: &Cli, folder: &Path, output: Option<&Path>) -> Result<Output, Fail
     };
     let source = Source::folder(&folder)?;
     source.validate(cli)?;
-    let artifact = &source.artifact;
+    let artifact = source.artifact;
+    // The kernel a composed artifact carries: the one this binary runs.
+    let kernel = composed.then_some(runspore_wasmtime::COMPONENT);
+    let (artifact, suffix) = match kernel {
+        Some(kernel) => {
+            let bytes = runspore_build::compose(kernel, &artifact.bytes)
+                .map_err(|message| Fail::internal("artifact.encode", message))?;
+            // The composition is checked the way any artifact is before it is written.
+            (load(&bytes, &folder)?, "-composed.wasm")
+        }
+        None => (artifact, ".wasm"),
+    };
     let target = match output {
         Some(path) => path.to_path_buf(),
-        None => beside(&folder)?,
+        None => beside(&folder, suffix)?,
     };
     std::fs::write(&target, &artifact.bytes)
         .map_err(|e| Fail::internal("file.unwritable", format!("{}: {e}", target.display())))?;
+    let mut json = json!({"artifact": target.display().to_string(), "artifactDigest": artifact.digest,
+                          "packageDigest": artifact.manifest.main,
+                          "bytes": artifact.bytes.len().to_string()});
+    if let Some(kernel) = kernel {
+        json["composed"] = json!(true);
+        json["kernelDigest"] = json!(digest::hash("kernel", &[kernel]));
+    }
     done(
-        json!({"artifact": target.display().to_string(), "artifactDigest": artifact.digest,
-               "packageDigest": artifact.manifest.main,
-               "bytes": artifact.bytes.len().to_string()}),
+        json,
         format!("built {} ({})", target.display(), artifact.digest),
     )
 }
 
-/// `<folder>.wasm` next to the folder: a sibling, never inside it.
-fn beside(folder: &Path) -> Result<PathBuf, Fail> {
+/// `<folder><suffix>` next to the folder: a sibling, never inside it.
+fn beside(folder: &Path, suffix: &str) -> Result<PathBuf, Fail> {
     let named = match folder.file_name() {
         Some(_) => folder.to_path_buf(),
         None => std::fs::canonicalize(folder)
@@ -495,7 +523,7 @@ fn beside(folder: &Path) -> Result<PathBuf, Fail> {
             ),
         )
     })?;
-    Ok(named.with_file_name(format!("{}.wasm", name.to_string_lossy())))
+    Ok(named.with_file_name(format!("{}{suffix}", name.to_string_lossy())))
 }
 
 /// The digest, manifest and package of an artifact file. Opens no database.

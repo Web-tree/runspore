@@ -51,6 +51,12 @@ trap, a watchdog stop or a refused memory growth is `artifact.invalid`; it never
 panics the host. Every entry path is checked on load (`artifact.invalid-path`), and
 the package bytes are checked against `main` before anything else reads them.
 
+A composed artifact (artifact.md §7) loads the same way: `load_artifact` finds its
+`reader` export beside the `reducer` export and reads nothing else. The kernel nested
+in it is never run by this host, which has its own; `runspore_build::compose(kernel,
+artifact)` is what `spore build --composed` calls with
+`runspore_wasmtime::COMPONENT`, the component of §1, as the kernel.
+
 ## 2. Engine
 
 `crates/runspore-host`. Constructed from an `Arc<dyn Store>`, an `Arc<dyn Reducer>`,

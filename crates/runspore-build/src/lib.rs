@@ -6,6 +6,7 @@
 //! Graphviz installation.
 
 mod component;
+mod compose;
 mod dot;
 mod json_lines;
 
@@ -20,6 +21,7 @@ use runspore_types::{canonical, digest};
 use serde_json::{Map, Value};
 
 pub use component::encode as encode_artifact;
+pub use compose::{compose, ARTIFACT_INTERFACE, MACHINE_INTERFACE};
 pub use dot::KINDS;
 
 /// The one dialect this build reads.

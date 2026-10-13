@@ -22,6 +22,10 @@ _Avoid_: compiled workflow, "the JSON"
 The immutable WebAssembly file a build makes from a workflow folder: the package and every file the workflow declares, listed in its manifest. A run records the artifact it was started from and never reads the folder again.
 _Avoid_: bundle, binary, "the wasm" (the kernel is a different component)
 
+**Composed artifact**:
+The workflow artifact and the kernel component nested unchanged in one WebAssembly component that exports both of their interfaces, for a host that can load only one component. `spore build --composed` writes it; `spore` itself reads only its artifact half.
+_Avoid_: kernel+graph wasm, standalone binary, fat artifact, bundle
+
 **Run**:
 One execution of a workflow, with its own identity and state.
 _Avoid_: workflow instance, job, session
