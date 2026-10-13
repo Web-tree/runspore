@@ -461,6 +461,26 @@ fn w01_output_schemas_need_format_0_2() {
     assert!(failure.details.starts_with("W01"), "{}", failure.details);
 }
 
+/// A 0.2 document may carry `inputSchema`, a JSON object the kernel never reads: a run
+/// whose input does not fit starts like any other. A 0.1 document carrying it violates
+/// W01, and a value that is not an object does not decode as a workflow.
+#[test]
+fn input_schema_is_carried_and_never_read() {
+    let declared = edited(
+        "/inputSchema",
+        json!({"type": "object", "required": ["repo"],
+               "properties": {"repo": {"type": "integer"}}}),
+    );
+    // `check` starts the run with {"repo": "r"}, which does not fit the schema.
+    let decision = check(&declared).expect("the kernel does not read inputSchema");
+    assert_eq!(decision.commands.len(), 1, "{decision:?}");
+    assert_invalid(&edited("/inputSchema", json!("object")));
+    assert_invalid(&edited("/inputSchema", json!(["object"])));
+    let failure = check(&with(declared, "/format", json!(WORKFLOW_FORMAT))).unwrap_err();
+    assert_eq!(failure.code, code::WORKFLOW_INVALID);
+    assert!(failure.details.starts_with("W01"), "{}", failure.details);
+}
+
 #[test]
 fn w13_output_schemas() {
     let object = json!({"type": "object"});

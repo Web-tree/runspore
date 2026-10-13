@@ -133,11 +133,12 @@ const STUCK_UNDER_0_2: &[&str] = &[
 ];
 
 /// Traces of a 0.2 document that pin a rule naming 0.2 (`from`, `$get` `default`,
-/// the stuck step, `outputSchemas`, loop limits, W14, W15): a 0.1 document is
-/// refused or runs differently there, by design.
+/// the stuck step, `outputSchemas`, `inputSchema`, loop limits, W14, W15): a 0.1
+/// document is refused or runs differently there, by design.
 const RULES_NAMING_0_2: &[&str] = &[
     "from-arrows",
     "get-default",
+    "input-schema-never-read",
     "loop-exhausted",
     "loop-exhausted-resets",
     "loop-other-outcome-resets",

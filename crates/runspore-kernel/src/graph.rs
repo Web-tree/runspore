@@ -98,6 +98,12 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
     }
 
     if workflow.format != WORKFLOW_FORMAT_0_2 {
+        if workflow.input_schema.is_some() {
+            return Err(violation(
+                "W01",
+                format!("inputSchema needs format {WORKFLOW_FORMAT_0_2:?}"),
+            ));
+        }
         if let Some(id) = nodes
             .keys()
             .find(|id| output_schemas(&nodes[*id]).is_some())
