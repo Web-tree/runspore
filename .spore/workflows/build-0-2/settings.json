@@ -271,6 +271,28 @@
               "id": "P3",
               "issue": "Max-Levitskiy/skills#62",
               "title": "Background Claude step: claude-spore run and check"
+            },
+            {
+              "id": "D1",
+              "issue": "Web-tree/runspore#104",
+              "title": "A newer spore continues runs started by an older one (engine upgrade keeps the database)"
+            }
+          ]
+        }
+      }
+    },
+    "wave_5b": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "5b"
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "D2",
+              "issue": "Web-tree/runspore#106",
+              "title": "Run the dogfood build with plain spore commands, no wrapper scripts"
             }
           ]
         },
