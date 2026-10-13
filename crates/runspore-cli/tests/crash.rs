@@ -24,6 +24,17 @@ const NATIVE: &[&str] = &[
     "--poll-ms",
     "20",
 ];
+/// The native kernel with a lease no load outlasts, for the run the SIGKILL sweep
+/// times: under the short lease a starved heartbeat parks its deploy (exit 4).
+const TIMING: &[&str] = &[
+    "--native-kernel",
+    "--lease-ms",
+    "3000",
+    "--heartbeat-ms",
+    "300",
+    "--poll-ms",
+    "20",
+];
 /// The default Wasmtime kernel, with a lease that outlives component compilation.
 const WASMTIME: &[&str] = &[
     "--lease-ms",
@@ -99,7 +110,7 @@ struct Case {
 impl Case {
     fn new(name: &str, kernel: &'static [&'static str]) -> Self {
         let dir = Dir::new(name);
-        dir.write("workflow.json", &workflow());
+        dir.folder("workflow", &workflow());
         Self { dir, kernel }
     }
 
@@ -132,7 +143,7 @@ fn invoke(dir: &Case, failpoint: Option<&str>, args: &[&str]) -> Out {
 }
 
 fn run_id(dir: &Case) -> String {
-    invoke(dir, None, &["start", "workflow.json", "--key", KEY]).json()["runId"]
+    invoke(dir, None, &["start", "workflow", "--key", KEY]).json()["runId"]
         .as_str()
         .unwrap()
         .to_string()
@@ -147,7 +158,7 @@ fn drive(dir: &Case, failpoint: Option<&str>, stage: usize, parked: bool) -> Res
     let mut calls = 0..;
     let mut armed = || failpoint.filter(|_| calls.next() == Some(stage));
     for round in 0..20 {
-        let out = invoke(dir, armed(), &["run", "workflow.json", "--key", KEY]);
+        let out = invoke(dir, armed(), &["run", "workflow", "--key", KEY]);
         if aborted(&out) {
             return Ok(true);
         }
@@ -360,7 +371,7 @@ fn failpoint_scenario(
         let held = invoke(
             &dir,
             Some("host.attempt.after-claim"),
-            &["run", "workflow.json", "--key", KEY],
+            &["run", "workflow", "--key", KEY],
         );
         if !aborted(&held) {
             return Some(Err("no lease left behind to expire".into()));
@@ -486,7 +497,7 @@ fn wasmtime_kernel_recovers_to_the_native_final_state() {
 #[test]
 fn sigkill_at_every_point_of_a_run_recovers() {
     let reference = reference(NATIVE);
-    let timed = Case::new("timing", NATIVE);
+    let timed = Case::new("timing", TIMING);
     let run = run_id(&timed);
     invoke(
         &timed,
@@ -494,10 +505,8 @@ fn sigkill_at_every_point_of_a_run_recovers() {
         &["signal", &run, "approval", "--outcome", "approved"],
     );
     let begin = Instant::now();
-    assert_eq!(
-        invoke(&timed, None, &["run", "workflow.json", "--key", KEY]).code(),
-        Some(0)
-    );
+    let out = invoke(&timed, None, &["run", "workflow", "--key", KEY]);
+    assert_eq!(out.code(), Some(0), "timed run: {}", out.stdout.trim());
     let duration = begin.elapsed();
     // Forty processes at once run slower than the one timed alone, so the kill points
     // span twice its duration; otherwise none lands in the deploy step.
@@ -539,7 +548,7 @@ fn kill_scenario(reference: &Reference, delay: Duration) -> Result<bool, String>
         ],
     );
     let mut args: Vec<&str> = dir.kernel.to_vec();
-    args.extend(["run", "workflow.json", "--key", KEY]);
+    args.extend(["run", "workflow", "--key", KEY]);
     let mut child = dir.spawn(&args);
     std::thread::sleep(delay);
     let _ = child.kill();

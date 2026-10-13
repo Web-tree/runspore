@@ -55,10 +55,10 @@ fn alive(group: i32) -> bool {
 /// Starts a worker on `body`, waits for try 1, and SIGKILLs the worker. Returns the
 /// try's process group and when the worker was killed.
 fn kill_worker_mid_command(dir: &Dir, body: &str, flags: &[&str]) -> (i32, Instant) {
-    dir.write("flow.json", &flow(body));
+    dir.folder("flow", &flow(body));
     let mut argv = vec!["--native-kernel", "--poll-ms", "20"];
     argv.extend_from_slice(flags);
-    argv.extend_from_slice(&["run", "flow.json", "--key", "g"]);
+    argv.extend_from_slice(&["run", "flow", "--key", "g"]);
     let mut worker = dir.spawn(&argv);
     let deadline = Instant::now() + Duration::from_secs(10);
     while tries(dir).is_empty() {
@@ -94,7 +94,7 @@ fn h12_a_killed_workers_command_is_stopped_before_the_next_try() {
     // The next worker starts at once; its try waits for the lease.
     let mut argv = vec!["--native-kernel", "--poll-ms", "20"];
     argv.extend_from_slice(&flags);
-    argv.extend_from_slice(&["run", "flow.json", "--key", "g"]);
+    argv.extend_from_slice(&["run", "flow", "--key", "g"]);
     let mut next = dir.spawn(&argv);
     let mut gone = None;
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -145,10 +145,10 @@ fn h15_a_command_trapping_sigterm_saves_its_work_before_it_goes() {
 fn leftover_is_stopped_before_the_next_try(name: &str, leaderless: bool) {
     let dir = Dir::new(name);
     let flags = ["--lease-ms", "2000", "--stop-grace-ms", "500"];
-    dir.write("flow.json", &flow("sleep 30 & wait"));
+    dir.folder("flow", &flow("sleep 30 & wait"));
     let mut argv = vec!["--native-kernel", "--poll-ms", "20"];
     argv.extend_from_slice(&flags);
-    argv.extend_from_slice(&["run", "flow.json", "--key", "g"]);
+    argv.extend_from_slice(&["run", "flow", "--key", "g"]);
     let mut worker = dir.spawn(&argv);
     let deadline = Instant::now() + Duration::from_secs(10);
     while tries(&dir).is_empty() {
@@ -201,8 +201,8 @@ fn h13_the_next_sweep_stops_a_leftover_group_without_its_leader() {
 #[test]
 fn status_shows_the_running_commands_process_record() {
     let dir = Dir::new("status-process");
-    dir.write("flow.json", &flow("sleep 3"));
-    let mut worker = dir.spawn(&["--native-kernel", "--poll-ms", "20", "run", "flow.json"]);
+    dir.folder("flow", &flow("sleep 3"));
+    let mut worker = dir.spawn(&["--native-kernel", "--poll-ms", "20", "run", "flow"]);
     let deadline = Instant::now() + Duration::from_secs(10);
     while tries(&dir).is_empty() {
         assert!(Instant::now() < deadline, "try 1 never started");

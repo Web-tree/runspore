@@ -35,6 +35,20 @@ impl Dir {
         path
     }
 
+    /// Writes `package` as the workflow folder `name` (spec/dot.md) and returns its path.
+    pub fn folder(&self, name: &str, package: &Value) -> PathBuf {
+        let path = self.file(name);
+        std::fs::create_dir_all(&path).unwrap();
+        let (dot, settings) = split(package);
+        std::fs::write(path.join("workflow.dot"), dot).unwrap();
+        std::fs::write(
+            path.join("settings.json"),
+            serde_json::to_vec_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+        path
+    }
+
     /// A command in this directory on its own database, with an effects log.
     pub fn cmd(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new(BIN);
@@ -95,6 +109,30 @@ pub fn run(mut cmd: Command) -> Out {
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
     }
+}
+
+/// A 0.2 package as the two files of its workflow folder: the name, start, kinds and
+/// outcomes as `workflow.dot`, everything else as `settings.json`.
+pub fn split(package: &Value) -> (String, Value) {
+    let mut settings = package.clone();
+    let top = settings.as_object_mut().unwrap();
+    let (name, start) = (top.remove("name").unwrap(), top.remove("start").unwrap());
+    let mut dot = format!("digraph {name} {{\n  dialect = \"runspore/0.2\";\n  start = {start};\n");
+    let mut edges = String::new();
+    let nodes = top.get_mut("nodes").unwrap().as_object_mut().unwrap();
+    for (id, node) in nodes {
+        let node = node.as_object_mut().unwrap();
+        let kind = node.remove("kind").unwrap();
+        dot += &format!("  \"{id}\" [kind={kind}];\n");
+        if let Some(Value::Object(outcomes)) = node.remove("outcomes") {
+            for (on, to) in outcomes {
+                edges += &format!("  \"{id}\" -> {to} [on={}];\n", Value::String(on));
+            }
+        }
+    }
+    dot += &edges;
+    dot += "}\n";
+    (dot, settings)
 }
 
 /// One line of the effects log: what really executed.

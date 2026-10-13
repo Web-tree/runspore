@@ -61,9 +61,9 @@ fn fix_input(status: &Value) -> Value {
 #[test]
 fn status_shows_the_arrow_taken_and_the_end() {
     let dir = Dir::new("arrival");
-    dir.write("flow.json", &coding_loop());
+    dir.folder("flow", &coding_loop());
     let run = dir
-        .run(&args(&["--json", "start", "flow.json", "--key", "a"]))
+        .run(&args(&["--json", "start", "flow", "--key", "a"]))
         .json()["runId"]
         .as_str()
         .unwrap()
@@ -74,7 +74,7 @@ fn status_shows_the_arrow_taken_and_the_end() {
         (&json!("created"), &Value::Null, &Value::Null)
     );
 
-    let parked = dir.run(&args(&["--json", "run", "flow.json", "--key", "a"]));
+    let parked = dir.run(&args(&["--json", "run", "flow", "--key", "a"]));
     assert_eq!(parked.code(), Some(3), "{}", parked.stdout);
     assert_eq!(
         parked.json()["position"]["from"],
@@ -114,7 +114,7 @@ fn status_shows_the_arrow_taken_and_the_end() {
         "--data",
         r#"{"hint": "smaller"}"#,
     ]));
-    dir.run(&args(&["run", "flow.json", "--key", "a"]));
+    dir.run(&args(&["run", "flow", "--key", "a"]));
     let again = status(&dir, &run);
     assert_eq!(again["position"]["activationId"], "approve/2");
     let fix = fix_input(&again);
@@ -132,7 +132,7 @@ fn status_shows_the_arrow_taken_and_the_end() {
         "--outcome",
         "approved",
     ]));
-    let done = dir.run(&args(&["--json", "run", "flow.json", "--key", "a"]));
+    let done = dir.run(&args(&["--json", "run", "flow", "--key", "a"]));
     assert_eq!(done.code(), Some(0));
     let done = status(&dir, &run);
     assert_eq!(done["status"], "completed");
@@ -153,8 +153,8 @@ fn the_start_node_was_entered_by_no_arrow() {
     let dir = Dir::new("arrival-start");
     let mut workflow = coding_loop();
     workflow["start"] = json!("approve");
-    dir.write("flow.json", &workflow);
-    let out = dir.run(&args(&["--json", "run", "flow.json", "--key", "s"]));
+    dir.folder("flow", &workflow);
+    let out = dir.run(&args(&["--json", "run", "flow", "--key", "s"]));
     assert_eq!(out.code(), Some(3), "{}", out.stdout);
     let position = &out.json()["position"];
     assert_eq!(
@@ -166,9 +166,9 @@ fn the_start_node_was_entered_by_no_arrow() {
 #[test]
 fn a_failed_run_ends_at_its_fail_node_or_the_step_that_failed() {
     let dir = Dir::new("arrival-failed");
-    dir.write("flow.json", &coding_loop());
+    dir.folder("flow", &coding_loop());
     let run = |key: &str| {
-        dir.run(&args(&["--json", "run", "flow.json", "--key", key]))
+        dir.run(&args(&["--json", "run", "flow", "--key", key]))
             .json()["runId"]
             .as_str()
             .unwrap()
@@ -183,7 +183,7 @@ fn a_failed_run_ends_at_its_fail_node_or_the_step_that_failed() {
         "abandoned",
     ]));
     assert_eq!(
-        dir.run(&args(&["run", "flow.json", "--key", "b"])).code(),
+        dir.run(&args(&["run", "flow", "--key", "b"])).code(),
         Some(1)
     );
     let failed = status(&dir, &abandoned);
@@ -197,14 +197,14 @@ fn a_failed_run_ends_at_its_fail_node_or_the_step_that_failed() {
     // ends at that step, and the arrow is the one that led into it.
     let mut broken = coding_loop();
     broken["actions"]["fix"]["argv"] = json!(["sh", "-c", "exit 7"]);
-    dir.write("broken.json", &broken);
+    dir.folder("broken", &broken);
     std::fs::remove_file(dir.file("green")).unwrap();
-    let out = dir.run(&args(&["--json", "run", "broken.json", "--key", "c"]));
+    let out = dir.run(&args(&["--json", "run", "broken", "--key", "c"]));
     assert_eq!(out.code(), Some(4), "{}", out.stdout);
     assert_eq!(out.json()["end"], Value::Null);
     let stuck = out.json()["runId"].as_str().unwrap().to_string();
     dir.run(&args(&["resolve", &stuck, "--fail", "giving up"]));
-    let out = dir.run(&args(&["--json", "run", "broken.json", "--key", "c"]));
+    let out = dir.run(&args(&["--json", "run", "broken", "--key", "c"]));
     assert_eq!(out.code(), Some(1), "{}", out.stdout);
     assert_eq!(
         out.json()["end"],

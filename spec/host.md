@@ -396,7 +396,7 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H4 | Kernel failure (budget exceeded) | Run quarantined, event still pending, no hot loop; `release` resumes |
 | H5 | Command runner result table | Every row above, including process-group kill on timeout; both result-mode shapes and a malformed one; a 200 KiB log in text mode arrives as its end with stderr ≤ 16 KiB, cut at UTF-8 boundaries, `truncated: true`; an undeclared outcome in every mode |
 | H7 | A node visited twice runs a command each time | `RUNSPORE_VISIT` is 1, then 2: the visit of the invocation's activation |
-| H6 | Crash at every host and store failpoint during a multi-step run, then restart | Final state equals the uninterrupted run's; idempotent steps ran at most `maxAttempts` times; an `unsafe` step interrupted after its effect leaves the run in `needs-intervention`, and resolving it completes the run with the effect performed once |
+| H6 | Crash at every host and store failpoint during a multi-step run of a workflow folder, then restart | Final state equals the uninterrupted run's; idempotent steps ran at most `maxAttempts` times; an `unsafe` step interrupted after its effect leaves the run in `needs-intervention`, and resolving it completes the run with the effect performed once |
 | H12 | **0.2.** SIGKILL the worker while a command runs | The command's group is gone within `stop_grace_ms` + 1 s; the next try starts only after it |
 | H14 | **0.2.** SIGKILL the worker while a command that ignores SIGTERM runs | The guard survives its own SIGTERM to the group and sends SIGKILL after `stop_grace_ms` |
 | H15 | **0.2.** SIGKILL the worker while a command that traps SIGTERM runs | The command writes its file before the group goes |
