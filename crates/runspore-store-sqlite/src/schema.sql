@@ -1,3 +1,7 @@
+CREATE TABLE meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE packages (
     digest TEXT PRIMARY KEY,
     body BLOB NOT NULL

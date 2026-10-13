@@ -1,7 +1,12 @@
-# CLI 0.1
+# CLI 0.2
 
 One binary, `spore`, the Runspore command line. It embeds the kernel component, the SQLite store, and the
 engine. It never listens on a network.
+
+Version 0.2 replaces 0.1 outright. `spore` 0.2 reads only workflow folders of dialect
+`runspore/0.2` and the artifacts built from them, and only databases written by 0.2
+(§Databases from another version); it tells you what to do with anything older. Rules
+marked **0.2** below are new since 0.1.
 
 ## Global options
 
@@ -33,19 +38,20 @@ engine. It never listens on a network.
 | `release <runId>` | Lifts a quarantine |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
-as [dot.md](dot.md) describes, a workflow artifact (a file starting with the
-WebAssembly magic bytes), or a JSON workflow document. JSON documents are still
-accepted until the cut-over to 0.2. A build error exits 2 and names the file and line
-(dot.md §6); an artifact that does not load exits 2 with its code (artifact.md §6).
-The command and crash tests give `spore` workflow folders; exactly one test gives it
-a JSON document, to show it is still accepted, so the cut-over removes that test and
-no other.
+as [dot.md](dot.md) describes, or a workflow artifact (a file starting with the
+WebAssembly magic bytes). Nothing else is read: any other file, such as a JSON
+workflow document of 0.1, exits 2 with `workflow.folder` and a message saying that a
+workflow is a folder holding `workflow.dot` and `settings.json`, or an artifact built
+from one. A folder of dialect `runspore/0.1`, or whose `settings.json` says
+`runspore.workflow/0.1`, is a build error that names the fix (dot.md §3). A build
+error exits 2 and names the file and line (dot.md §6); an artifact that does not load
+exits 2 with its code (artifact.md §6). JSON workflow documents remain an internal
+form: the package inside an artifact, and a test fixture.
 
 `start` and `run` from a folder build its artifact in memory, load it like a
 prebuilt one, and store it with the run; from an artifact they store that file. Either
 way the run never reads the folder or the file again: editing or deleting them
-changes nothing a started run sees. A run started from a JSON document has no
-artifact.
+changes nothing a started run sees. Every run `spore` starts has an artifact.
 
 `build` writes `<folder>.wasm` next to the folder, named after the folder (so
 `spore build deploy/` writes `deploy.wasm`), never inside it; `-o` names another file.
@@ -165,6 +171,23 @@ the absolute path of the database the worker uses (host.md §3). A `spore` call 
 inside a step therefore reaches the run's own database, even in a git worktree with
 its own `.spore/`, because `$RUNSPORE_DB` comes before walk-up.
 
+## Databases from another version (0.2)
+
+A database records which `spore` wrote its schema (store.md §3). Every command that
+opens one, whether it reads or writes, first checks that version, and refuses the
+file with exit 10 before it reads or changes anything else:
+
+- a database written by `spore` 0.1 is `schema.too-old`. The message names the
+  database, says it belongs to 0.1, and gives the fix: finish its runs with the 0.1
+  binary, or move the file aside;
+- a database written by a newer `spore` is `schema.too-new`. The message names the
+  database and the version that wrote it, and gives the same fix with that version.
+
+Two versions of `spore` therefore never share a database, and neither can damage the
+other's runs. A database written by an earlier 0.2 `spore` is upgraded in place and
+used. `init` opens no database; it refuses a 0.1 database at the root by its
+name (`project.legacy-database`, above).
+
 ## Exit codes
 
 | Code | Meaning |
@@ -175,16 +198,16 @@ its own `.spore/`, because `$RUNSPORE_DB` comes before walk-up.
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 10 | Store or internal error |
+| 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version) |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
 ## JSON output
 
-Every object carries `"format": "runspore.cli/0.1"`. Counters and timestamps are
-decimal strings. `status` output:
+Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
+`runspore.cli/0.1`. Counters and timestamps are decimal strings. `status` output:
 
 ```json
-{"format": "runspore.cli/0.1", "runId": "run_…", "status": "needs-intervention",
+{"format": "runspore.cli/0.2", "runId": "run_…", "status": "needs-intervention",
  "revision": "4", "packageDigest": "sha256:…", "artifactDigest": "sha256:…",
  "position": {"nodeId": "deploy", "activationId": "deploy/1", "visit": 1,
               "from": {"nodeId": "test", "outcome": "ok"}},
@@ -234,7 +257,8 @@ record cleared; an attempt whose worker died keeps its record.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.
 `artifactDigest` is the digest of the workflow artifact it was started from
-(artifact.md §4), or null for a run started from a JSON document.
+(artifact.md §4). It is null only for a run an embedding host started from a bare
+package (host.md §2); `spore` itself never starts one.
 
 Text output is for people and is not a stable interface.
 

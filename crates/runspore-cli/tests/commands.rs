@@ -59,7 +59,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
     let bad = dir.run(&["--json", "validate", "bad"]);
     assert_eq!(
         (bad.code(), bad.json()["format"].clone()),
-        (Some(2), json!("runspore.cli/0.1"))
+        (Some(2), json!("runspore.cli/0.2"))
     );
     assert_eq!(dir.run(&["frobnicate"]).code(), Some(2));
     assert_eq!(
@@ -106,7 +106,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
             let out = dir.run(&all);
             assert_eq!(out.code(), Some(0), "{cmd:?}: {}", out.stderr);
             if !mode.is_empty() {
-                assert_eq!(out.json()["format"], "runspore.cli/0.1");
+                assert_eq!(out.json()["format"], "runspore.cli/0.2");
             }
         }
     }
@@ -193,32 +193,130 @@ fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
     assert_eq!(dir.effects().len(), 1);
 }
 
-/// The one test that hands `spore` a JSON workflow document: it is accepted until the
-/// cut-over to 0.2 (spec/cli.md), and a run started from it has no artifact.
+/// spore 0.2 reads no JSON workflow document (spec/cli.md): `validate`, `start` and
+/// `run` refuse one with exit 2 and say that a workflow is a folder, and nothing is
+/// created.
 #[test]
-fn a_json_workflow_document_is_still_accepted() {
+fn a_json_workflow_document_is_refused() {
     let dir = Dir::new("document");
     dir.write("flow.json", &flow("0", "idempotent"));
-    assert_eq!(
-        dir.run(&["--json", "validate", "flow.json"]).json()["valid"],
-        true
+    for command in ["validate", "start", "run"] {
+        let out = dir.run(&args(
+            &["--json", command, "flow.json", "--key", "d"][..command_args(command)],
+        ));
+        let error = &out.json()["error"];
+        assert_eq!(
+            (out.code(), error["code"].clone()),
+            (Some(2), json!("workflow.folder")),
+            "{command}: {error}"
+        );
+        let message = error["message"].as_str().unwrap();
+        for wanted in ["flow.json", "folder", "workflow.dot", "settings.json"] {
+            assert!(
+                message.contains(wanted),
+                "{command}: no `{wanted}` in {message}"
+            );
+        }
+        assert!(
+            !dir.file("runspore.db").exists(),
+            "{command} created a database"
+        );
+    }
+    let text = dir.run(&["validate", "flow.json"]);
+    assert_eq!(text.code(), Some(2));
+    assert!(
+        text.stderr.starts_with("spore: workflow.folder: "),
+        "{}",
+        text.stderr
     );
-    let parked = dir.run(&args(&["--json", "run", "flow.json", "--key", "d"]));
-    let status = parked.json();
+}
+
+/// How many of `["--json", cmd, "flow.json", "--key", "d"]` a command takes:
+/// `validate` has no key.
+fn command_args(command: &str) -> usize {
+    if command == "validate" {
+        3
+    } else {
+        5
+    }
+}
+
+/// A database another spore wrote is refused by every command that opens one, with
+/// exit 10, the version that wrote it, and the fix (spec/cli.md, databases from
+/// another version). The file is left as it was.
+#[test]
+fn a_database_from_another_version_is_refused() {
+    let dir = Dir::new("other-version");
+    dir.folder("flow", &flow("0", "idempotent"));
+    let db = dir.file("runspore.db");
+
+    // A 0.1 database: schema version 1, which 0.2 never upgrades.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch("CREATE TABLE runs (run_id TEXT); PRAGMA user_version = 1;")
+        .unwrap();
+    drop(conn);
+    for command in [
+        &["list"][..],
+        &["status", "run_x"][..],
+        &["start", "flow", "--key", "k"][..],
+    ] {
+        let mut all = vec!["--json"];
+        all.extend_from_slice(command);
+        let out = dir.run(&all);
+        let error = &out.json()["error"];
+        assert_eq!(
+            (out.code(), error["code"].clone()),
+            (Some(10), json!("schema.too-old")),
+            "{command:?}: {error}"
+        );
+        let message = error["message"].as_str().unwrap();
+        for wanted in [
+            "runspore.db",
+            "spore 0.1",
+            "0.1 binary",
+            "move the file aside",
+        ] {
+            assert!(
+                message.contains(wanted),
+                "{command:?}: no `{wanted}` in {message}"
+            );
+        }
+    }
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    let journal: String = conn
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(
-        (
-            parked.code(),
-            status["position"]["nodeId"].clone(),
-            status["artifactDigest"].clone()
-        ),
-        (Some(3), json!("approve"), Value::Null)
+        (version, journal.as_str()),
+        (1, "delete"),
+        "the 0.1 database was changed"
     );
-    let run = status["runId"].as_str().unwrap();
-    let none = dir.run(&["--json", "inspect", "--run", run, "--file", "workflow.dot"]);
+    drop(conn);
+
+    // A database a newer spore wrote: it records its writer.
+    std::fs::remove_file(&db).unwrap();
+    let started = dir.run(&args(&["--json", "start", "flow", "--key", "k"]));
+    assert_eq!(started.code(), Some(0), "{}", started.stderr);
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch(
+        "UPDATE meta SET value = '9.9.9' WHERE key = 'writer'; PRAGMA user_version = 99;",
+    )
+    .unwrap();
+    drop(conn);
+    let out = dir.run(&["--json", "list"]);
+    let error = &out.json()["error"];
     assert_eq!(
-        (none.code(), none.json()["error"]["code"].clone()),
-        (Some(2), json!("artifact.none"))
+        (out.code(), error["code"].clone()),
+        (Some(10), json!("schema.too-new")),
+        "{error}"
     );
+    let message = error["message"].as_str().unwrap();
+    for wanted in ["runspore.db", "spore 9.9.9", "move the file aside"] {
+        assert!(message.contains(wanted), "no `{wanted}` in {message}");
+    }
 }
 
 #[test]

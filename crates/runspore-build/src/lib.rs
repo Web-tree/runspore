@@ -63,11 +63,12 @@ fn error(code: &'static str, file: &Path, line: usize, message: impl Into<String
 pub enum Entry {
     /// A workflow folder, given as the folder or its `workflow.dot`.
     Folder(PathBuf),
-    /// Any other file: a JSON workflow document.
+    /// Any other file: an artifact, or something `spore` does not read. The caller
+    /// decides.
     Document(PathBuf),
 }
 
-/// Resolves a workflow argument: a folder, its `workflow.dot`, or a JSON document.
+/// Resolves a workflow argument: a folder, its `workflow.dot`, or another file.
 /// Any other `.dot` file is refused, since a folder's file names are fixed.
 pub fn entry(path: &Path) -> Result<Entry, BuildError> {
     if path.is_dir() {

@@ -19,18 +19,25 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
+/// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
+/// refused, never upgraded (spec/store.md §3).
+const SCHEMA_VERSION_0_1: i64 = 1;
+/// The `spore` this adapter ships in, recorded as the writer of every schema it
+/// initializes or upgrades.
+pub const WRITER: &str = env!("CARGO_PKG_VERSION");
 const SCHEMA: &str = include_str!("schema.sql");
-/// Upgrades a version 1 database to version 2: the attempt's process record and the
-/// audit record's kind.
-const UPGRADE_1: &str = "ALTER TABLE attempts ADD COLUMN process BLOB;
-    ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'late-evidence';";
 /// Upgrades a version 2 database to version 3: the run's base folder.
 const UPGRADE_2: &str = "ALTER TABLE runs ADD COLUMN base_dir TEXT;";
 /// Upgrades a version 3 database to version 4: the artifact table and the run's
 /// artifact digest.
 const UPGRADE_3: &str = "CREATE TABLE artifacts (digest TEXT PRIMARY KEY, body BLOB NOT NULL);
     ALTER TABLE runs ADD COLUMN artifact_digest TEXT;";
+/// Upgrades a version 4 database to version 5: the `meta` table that records the
+/// writer.
+const UPGRADE_4: &str = "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);";
+/// The fix for a database another `spore` wrote.
+const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
 
@@ -56,8 +63,52 @@ pub struct SqliteStore {
 
 type R<T> = StoreResult<T>;
 
+/// The recorded writer, or `None` when the file has no `meta` table or no entry: a
+/// schema this adapter did not write, read without failing on its shape.
+fn writer(conn: &Connection) -> Option<String> {
+    conn.query_row("SELECT value FROM meta WHERE key = 'writer'", [], |r| {
+        r.get(0)
+    })
+    .ok()
+}
+
 fn fail(kind: StoreFailureKind, code: &str, message: impl Into<String>) -> StoreFailure {
     StoreFailure::new(kind, code, message)
+}
+
+fn user_version(conn: &Connection) -> R<i64> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(db)
+}
+
+/// The schema guard of spec/store.md §3: a file `spore` 0.1 wrote is
+/// `schema.too-old`, one with a newer schema is `schema.too-new`; both name the
+/// version that wrote it and the fix.
+fn guard(conn: &Connection, version: i64) -> R<()> {
+    if version > SCHEMA_VERSION {
+        let writer = writer(conn)
+            .map(|w| format!("spore {w}"))
+            .unwrap_or_else(|| format!("a newer spore (schema version {version})"));
+        return Err(fail(
+            StoreFailureKind::Incompatible,
+            "schema.too-new",
+            format!(
+                "this database was written by {writer}, newer than spore {WRITER} \
+                 (schema version {SCHEMA_VERSION}): {FIX}"
+            ),
+        ));
+    }
+    if version == SCHEMA_VERSION_0_1 {
+        return Err(fail(
+            StoreFailureKind::Incompatible,
+            "schema.too-old",
+            format!(
+                "this database belongs to spore 0.1, which spore {WRITER} does not read: \
+                 finish its runs with the 0.1 binary, or move the file aside"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn conflict(code: &str) -> StoreFailure {
@@ -342,11 +393,15 @@ impl SqliteStore {
         Self::open_with_clock(path, Arc::new(SystemClock))
     }
 
-    /// Opens or initializes the database at `path`. A newer schema version is
-    /// `incompatible` / `schema.too-new`.
+    /// Opens or initializes the database at `path`. A file written by `spore` 0.1 is
+    /// `incompatible` / `schema.too-old`; one with a newer schema is `incompatible` /
+    /// `schema.too-new`. Both name the version that wrote it and the fix, and leave
+    /// the file as it was (spec/store.md §3).
     pub fn open_with_clock(path: impl AsRef<Path>, clock: Arc<dyn Clock>) -> R<Self> {
         let mut conn = Connection::open(path).map_err(db)?;
         conn.busy_timeout(Duration::from_secs(5)).map_err(db)?;
+        // Before any pragma changes the file: a refused file is left as it was.
+        guard(&conn, user_version(&conn)?)?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db)?;
         conn.pragma_update(None, "synchronous", "FULL")
@@ -355,20 +410,13 @@ impl SqliteStore {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(db)?;
-        let version: i64 = tx
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .map_err(db)?;
-        if version > SCHEMA_VERSION {
-            return Err(fail(
-                StoreFailureKind::Incompatible,
-                "schema.too-new",
-                format!("schema version {version} is newer than {SCHEMA_VERSION}"),
-            ));
-        }
+        // Again under the write lock, in case another process changed it meanwhile.
+        let version = user_version(&tx)?;
+        guard(&tx, version)?;
         if version == 0 {
             tx.execute_batch(SCHEMA).map_err(db)?;
         } else {
-            for (from, upgrade) in [(1, UPGRADE_1), (2, UPGRADE_2), (3, UPGRADE_3)] {
+            for (from, upgrade) in [(2, UPGRADE_2), (3, UPGRADE_3), (4, UPGRADE_4)] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
                 }
@@ -377,12 +425,22 @@ impl SqliteStore {
         if version < SCHEMA_VERSION {
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)
                 .map_err(db)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('writer', ?1)",
+                [WRITER],
+            )
+            .map_err(db)?;
         }
         tx.commit().map_err(db)?;
         Ok(Self {
             conn: Mutex::new(conn),
             clock,
         })
+    }
+
+    /// The `spore` that wrote the schema, as the file records it.
+    pub fn writer(&self) -> R<Option<String>> {
+        self.read(|conn| Ok(writer(conn)))
     }
 
     fn lock(&self) -> MutexGuard<'_, Connection> {
