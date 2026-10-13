@@ -1,8 +1,8 @@
 {
   "format": "runspore.workflow/0.2",
   "limits": {
-    "maxVisitsPerNode": 5,
-    "maxActivations": 32
+    "maxVisitsPerNode": 16,
+    "maxActivations": 128
   },
   "actions": {
     "setup": {
@@ -121,6 +121,9 @@
     },
     "test": {
       "action": "test",
+      "loopLimits": {
+        "red": 3
+      },
       "input": {
         "worktree": {
           "$get": [
@@ -166,6 +169,9 @@
     },
     "ship": {
       "action": "ship",
+      "loopLimits": {
+        "red": 3
+      },
       "input": {
         "ticket": {
           "$get": [
@@ -189,6 +195,15 @@
             "summary"
           ]
         }
+      }
+    },
+    "stuck": {
+      "signal": "stuck"
+    },
+    "stopped": {
+      "error": {
+        "code": "ticket.stopped",
+        "message": "a person stopped the ticket run"
       }
     },
     "done": {

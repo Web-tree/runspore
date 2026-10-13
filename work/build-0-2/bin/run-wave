@@ -8,13 +8,15 @@ Input (stdin), one of:
 With `changes`, each change first becomes a ticket: an issue in runspore, or in the
 skills repo when it starts with `skills:`.
 
-Each open ticket gets a run of the `ticket` workflow, keyed `ticket:<issue>:<try>`,
+Each open ticket gets one run of the `ticket` workflow, keyed `ticket:<issue>:1`,
 so starting again names the same run. A ticket step that can't recover is stuck:
 its run waits, and the step comments on the issue with the error and the
-`spore resolve` commands that answer it. A failed run (over a visit limit) is tried
-once more; after that the step comments and waits for you (close the issue when it
-is done by hand). The step ends when every ticket's issue is closed. With `ask`, it then
-opens the checkpoint issue (or comments on it, on a later round) and prints JSON.
+`spore resolve` commands that answer it. A test or ship step that stays red past
+its loop limit sends the run to the `stuck` step, which waits for a signal; the
+step comments with the last failure and the `spore signal` commands that answer it.
+The step ends when every ticket's issue is closed (close it when the ticket is done
+by hand). With `ask`, it then opens the checkpoint issue (or comments on it, on a
+later round) and prints JSON.
 """
 import json
 import os
@@ -27,7 +29,6 @@ from buildlib import (DB, POLL_S, ROOT, SPORE, gh_json, load_state, log,  # noqa
                       runs, save_state, sh, split_issue, spore, workflow)
 
 RUNSPORE, SKILLS = "Web-tree/runspore", "Max-Levitskiy/skills"
-TRIES = 2
 STEPS = ROOT / ".spore/workflows/build-0-2"
 UPGRADE = """
 ## Try it on the newest spore
@@ -84,25 +85,42 @@ def tick(tickets, all_runs, st):
         if closed(t["issue"]):  # every poll: a reopened ticket counts as open again
             continue
         base = f"ticket:{t['issue']}:"
+        # The latest try: databases from before loop limits may hold a second one.
         mine = sorted((int(r["startKey"][len(base):]), r) for r in all_runs if r["startKey"].startswith(base))
-        last_try, last = mine[-1] if mine else (0, None)
-        if last is None or (last["status"] == "failed" and last_try < TRIES):
-            key = f"{base}{last_try + 1}"
+        last = mine[-1][1] if mine else None
+        if last is None:
+            key = f"{base}1"
             sh(SPORE, "--db", DB, "--json", "start", workflow("ticket"), "--key", key,
                "--input", json.dumps({"ticket": t}))
             log(f"started {key}")
         elif last["status"] == "needs-intervention":
             stuck(t, last, st)
-        elif last["status"] not in ("running", "waiting") and t["issue"] not in st["asked"]:
-            # failed after its last try, or quarantined
-            repo, num = split_issue(t["issue"])
-            sh("gh", "issue", "comment", str(num), "--repo", repo, "--body",
-               f"The build run's ticket run for this ticket is {last['status']} after {last_try} "
-               f"tries (run `{last['runId']}`; see `spore status {last['runId']}`). It needs you: "
-               "finish it by hand and close this issue, and the wave goes on.")
-            st["asked"].append(t["issue"])
+        elif last["status"] == "waiting":
+            gave_up(t, last, st)
         left.append(t)
     return left
+
+
+def gave_up(t, run, st):
+    """Comment once per visit of the `stuck` step: which step stayed red, its last
+    output, and how to answer."""
+    status = spore("status", run["runId"])
+    pos = status.get("position") or {}
+    mark = f"{t['issue']} {run['runId']} {pos.get('activationId')}"
+    if pos.get("nodeId") != "stuck" or mark in st["asked"]:
+        return
+    step = (pos.get("from") or {}).get("nodeId", "?")
+    result = (status.get("nodes") or {}).get(step) or {}
+    out = ((result.get("output") or {}).get("stdout") or "").strip()
+    cmd = f"spore --db {DB} signal {run['runId']} stuck --outcome"
+    repo, num = split_issue(t["issue"])
+    sh("gh", "issue", "comment", str(num), "--repo", repo, "--body",
+       f"The ticket run's `{step}` step used up its loop limit: it was red too many times in "
+       f"a row (run `{run['runId']}`). Its last output:\n\n```\n{out[-1500:]}\n```\n\n"
+       f"It waits for you. Fix the cause or not, then `{cmd} keep-going` to run the checks "
+       f"again with a fresh count; or `{cmd} stop` to end this run. Or finish the ticket by "
+       "hand and close this issue, and the wave goes on.")
+    st["asked"].append(mark)
 
 
 def stuck(t, run, st):
@@ -122,8 +140,8 @@ def stuck(t, run, st):
        f"> {error.get('code', '?')}: {error.get('message', '')[-1500:]}\n\n"
        f"It waits for you. Fix the cause, then `{cmd} --retry` for a new try; or "
        f"`{cmd} --complete ok` if the step's work is done; or `{cmd} --fail \"<why>\"` to "
-       "end this run (the wave then starts its last try, or asks you). Or finish the "
-       "ticket by hand and close this issue, and the wave goes on.")
+       "end this run. Or finish the ticket by hand and close this issue, and the wave "
+       "goes on.")
     st["asked"].append(mark)
 
 
