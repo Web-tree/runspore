@@ -40,6 +40,10 @@
       ],
       "description": "What an action does when a step runs it.",
       "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor",
+          "description": "`external`: which kind of actor does the step. A claim takes the step only\nwhen it names this label."
+        },
         "argv": {
           "description": "`command`: the program and its arguments. No shell: each item is one word.",
           "items": {
@@ -56,9 +60,8 @@
           "type": "array"
         },
         "async": {
-          "additionalProperties": true,
-          "description": "`command`: an asynchronous action's probe, watch and stop programs.",
-          "type": "object"
+          "$ref": "#/$defs/Async",
+          "description": "`command`, `external`: an asynchronous action's bounds and its probe, watch\nand stop programs."
         },
         "cwd": {
           "$ref": "#/$defs/Cwd",
@@ -112,6 +115,48 @@
         "kind",
         "effect"
       ],
+      "type": "object"
+    },
+    "Actor": {
+      "description": "`[a-z0-9][a-z0-9.-]{0,63}`: an actor label.",
+      "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+      "type": "string"
+    },
+    "Async": {
+      "additionalProperties": false,
+      "description": "An asynchronous action's bounds, and the programs that look after its holder.",
+      "properties": {
+        "channels": {
+          "description": "The result channels the action reports through, in order of preference.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "leaseMs": {
+          "$ref": "#/$defs/Positive",
+          "description": "How often the holder must renew, in milliseconds; smaller than `timeoutMs`.\nWithout it nobody renews."
+        },
+        "probe": {
+          "additionalProperties": true,
+          "description": "The program that tells whether the holder is still alive.",
+          "type": "object"
+        },
+        "stop": {
+          "additionalProperties": true,
+          "description": "The program that stops the holder when its run is cancelled.",
+          "type": "object"
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/Positive",
+          "description": "How long one try may be held, in milliseconds, counted from its claim or\nstart. Default \"3600000\"."
+        },
+        "watch": {
+          "additionalProperties": true,
+          "description": "The program that waits for the holder's result.",
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "Cwd": {
@@ -182,7 +227,8 @@
     "Kind": {
       "enum": [
         "command",
-        "native"
+        "native",
+        "external"
       ],
       "type": "string"
     },
@@ -230,6 +276,11 @@
         "result",
         "none"
       ],
+      "type": "string"
+    },
+    "Positive": {
+      "description": "A positive count of milliseconds written as a string of digits, such as `\"60000\"`.",
+      "pattern": "^[1-9][0-9]{0,18}$",
       "type": "string"
     },
     "Retry": {

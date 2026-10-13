@@ -14,13 +14,14 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
   of the eight operations named in spec section 3.
 
-## Schema (version 5, in `PRAGMA user_version`)
+## Schema (version 6, in `PRAGMA user_version`)
 
 An empty file is initialized from `src/schema.sql`, and `meta` records the crate
 version that wrote the schema (`writer`). A file written by an earlier 0.2 `spore` is
 upgraded in place, in one transaction, and the writer is recorded again: version 2 to
 3 adds `runs.base_dir`, version 3 to 4 adds the `artifacts` table and
-`runs.artifact_digest`, version 4 to 5 adds `meta`. Two files are refused with kind
+`runs.artifact_digest`, version 4 to 5 adds `meta`, version 5 to 6 adds
+`attempts.holder` and `attempts.deadline_ms`. Two files are refused with kind
 `incompatible` before anything else is read or written: version 1, which `spore` 0.1
 wrote, as `schema.too-old`, and a newer version as `schema.too-new`; both messages
 name the version that wrote the file and the fix (spec/store.md §3).
@@ -35,7 +36,7 @@ name the version that wrote the file and the fix (spec/store.md §3).
 | `transitions` | `(tenant, run_id, revision)`; unique `(tenant, run_id, consumed_sequence)` | one commit per revision and per consumed event |
 | `commands` | `(tenant, run_id, command_id)` | a command ID exists once per run (I3) |
 | `invocations` | `(tenant, run_id, invocation_id)` | an invocation is scheduled once |
-| `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null |
+| `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null; `holder` the canonical holder handle or null; `deadline_ms` the deadline `lease_until_ms` never passes, or null |
 | `receipts` | `(tenant, run_id, request_id)` | one applied mutation per request ID |
 | `audit` | `audit_id` | append-only; `kind` is `late-evidence` or `attempt.expired` |
 
@@ -67,6 +68,6 @@ may share a file; SQLite's file locks serialize their writers.
 
 ## Tests
 
-`tests/conformance.rs` runs S01–S18 from `runspore-store-conformance`. S01, S03 and S15
+`tests/conformance.rs` runs S01–S21 from `runspore-store-conformance`. S01, S03 and S15
 race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01 and
-Q03–Q09. Q03 runs `examples/crash.rs` as a child process at every failpoint.
+Q03–Q10. Q03 runs `examples/crash.rs` as a child process at every failpoint.

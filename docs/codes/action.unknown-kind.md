@@ -15,7 +15,7 @@ Action "build" has kind "shell", which this spore cannot run.
   5 │       "kind": "shell",
     │               ^^^^^^^
 
-To fix: use one of "command" | "native".
+To fix: use one of "command" | "native" | "external".
 ```
 
 The fix changes:

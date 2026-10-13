@@ -923,6 +923,16 @@ args = { outcome = "input" }
 example = "action.repeated-outcome"
 
 [[code]]
+code = "action.lease-too-long"
+severity = "problem"
+title = '''Lease not shorter than the deadline'''
+message = '''Action {action} asks whoever holds it to renew every {lease} ms, but the step ends after {timeout} ms anyway.'''
+fix = '''make "leaseMs" smaller than "timeoutMs", or remove it so the deadline alone bounds the step.'''
+why = '''a lease only helps when it runs out before the deadline: it frees a step whose holder stopped renewing.'''
+args = { lease = "input", timeout = "computed" }
+example = "action.lease-too-long"
+
+[[code]]
 code = "action.unknown-function"
 severity = "problem"
 title = '''Unknown native function'''

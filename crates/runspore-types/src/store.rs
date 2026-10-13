@@ -302,6 +302,9 @@ pub struct AttemptRef {
     pub fence: u64,
 }
 
+/// Largest holder handle a store keeps, in bytes of canonical JSON.
+pub const MAX_HOLDER_BYTES: usize = 4 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaimAttempt {
     pub mutation: Mutation,
@@ -309,6 +312,12 @@ pub struct ClaimAttempt {
     pub invocation_id: String,
     pub worker: String,
     pub lease_duration_ms: u64,
+    /// The holder handle: canonical JSON of at most [`MAX_HOLDER_BYTES`], kept and never
+    /// read by the store.
+    pub holder: Option<Vec<u8>>,
+    /// Sets `deadlineMs = now + this`, which no renewal passes; the lease ends at the
+    /// nearer bound. `None` leaves the attempt bounded by its lease alone.
+    pub deadline_duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +333,11 @@ pub struct Claim {
     pub input_digest: Digest,
     /// Canonical JSON.
     pub input: Vec<u8>,
+    /// Canonical JSON of the holder handle.
+    #[serde(default)]
+    pub holder: Option<Vec<u8>>,
+    #[serde(default, with = "u64_str::option")]
+    pub deadline_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,6 +389,31 @@ pub struct FinishAttempt {
     pub result: Evidence,
 }
 
+/// Why an attempt is expired. Only `Lease` waits for the lease to be due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExpireReason {
+    /// The lease or the deadline ran out.
+    Lease,
+    /// The action's probe answered that the holder is dead.
+    ProbeDead,
+    /// A person freed the step.
+    Abandoned,
+    /// The run was cancelled.
+    Cancelled,
+}
+
+impl ExpireReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lease => "lease",
+            Self::ProbeDead => "probe-dead",
+            Self::Abandoned => "abandoned",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpireAttempt {
     pub mutation: Mutation,
@@ -382,6 +421,9 @@ pub struct ExpireAttempt {
     /// The expiring host could not check the attempt's process record; the expiry's
     /// audit record notes `process.unchecked`.
     pub process_unchecked: bool,
+    /// Written to the audit record. Every reason but `Lease` expires the attempt
+    /// before its lease is due.
+    pub reason: ExpireReason,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -506,6 +548,13 @@ pub struct InvocationView {
     pub owner: Option<String>,
     /// The process record of the latest attempt.
     pub process: Option<ProcessRecord>,
+    /// The latest attempt's full reference, so a host can act on an attempt it did not
+    /// claim. A credential: never printed.
+    pub attempt: Option<AttemptRef>,
+    /// The latest attempt's holder handle, as canonical JSON.
+    pub holder: Option<Vec<u8>>,
+    /// The latest attempt's deadline, if it was claimed with one.
+    pub deadline_ms: Option<u64>,
 }
 
 #[async_trait]

@@ -1,0 +1,10 @@
+── Lease not shorter than the deadline ── action.lease-too-long/settings.json:8  action.lease-too-long
+Action "review" asks whoever holds it to renew every "600000" ms, but the step ends after "600000" ms anyway.
+
+  8 │       "async": { "timeoutMs": "600000", "leaseMs": "600000" }
+    │                                                    ^^^^^^^^
+
+To fix: make "leaseMs" smaller than "timeoutMs", or remove it so the deadline alone bounds the step.
+Why: a lease only helps when it runs out before the deadline: it frees a step whose holder stopped renewing.
+
+1 problem in review. Nothing was run.

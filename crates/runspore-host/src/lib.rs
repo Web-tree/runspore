@@ -9,6 +9,7 @@ mod arrival;
 mod command;
 mod engine;
 mod error;
+mod external;
 mod files;
 pub mod guard;
 pub mod process;
@@ -20,8 +21,10 @@ pub use activity::{
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
 pub use engine::{
-    validate_workflow, Engine, EngineConfig, RunIds, StartOutcome, TickReport, ARTIFACT_UNREADABLE,
-    FILES_DIR_MISSING, FILES_UNWRITABLE,
+    validate_workflow, Engine, EngineConfig, ExternalStep, RunIds, StartOutcome, StepClaim,
+    StepRenewed, StepReport, StepState, TickReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
+    FILES_UNWRITABLE, RESULT_CHANNEL,
 };
+pub use external::{StepToken, DEFAULT_TIMEOUT_MS as EXTERNAL_DEFAULT_TIMEOUT_MS};
 pub use error::HostError;
 pub use files::StepFiles;
