@@ -229,7 +229,7 @@ fn registry() -> ActivityRegistry {
     ActivityRegistry::with_builtins(work(json!("x"), Arc::new(AtomicUsize::new(0))))
 }
 
-/// H20: `start` checks the input against the package's `inputSchema` before anything
+/// H21: `start` checks the input against the package's `inputSchema` before anything
 /// is created; a package without one accepts any input.
 #[tokio::test]
 async fn start_checks_the_input_against_the_input_schema() {
@@ -267,7 +267,7 @@ async fn start_checks_the_input_against_the_input_schema() {
     engine.start(&plain, Value::Null, "k2").await.unwrap();
 }
 
-/// H20: an `inputSchema` whose root is not an object is refused like any schema
+/// H21: an `inputSchema` whose root is not an object is refused like any schema
 /// outside the subset, by `validate_workflow` and by `start`.
 #[tokio::test]
 async fn an_input_schema_root_must_be_an_object() {
