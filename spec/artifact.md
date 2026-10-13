@@ -130,6 +130,12 @@ A host loads an artifact before it validates or starts from it:
 An artifact is never trusted for anything but bytes: it runs only inside the sandbox,
 and only `manifest()` and `blob()` are called.
 
+When a run reaches a step, the host reads the step's `instructions` and `asset`
+entries from the run's stored artifact again, checks each blob against its digest,
+and delivers them as the step's read-only step files (host.md §3, Step files and
+work folders). An artifact that cannot be read then quarantines the run with
+`artifact.unreadable`.
+
 ## 6. Errors
 
 | Code | Cause |
@@ -139,7 +145,9 @@ and only `manifest()` and `blob()` are called.
 | `artifact.invalid-path` | An entry path that breaks §3 |
 | `artifact.digest-mismatch` | `blob(main)` does not hash to `main` |
 
-Each exits 2 in the CLI.
+Each exits 2 in the CLI. One more code is not a load error but a quarantine reason:
+`artifact.unreadable`, a run's stored artifact or one of its entry blobs that cannot
+be read when a step needs its files (§5).
 
 ## 7. The composed artifact
 

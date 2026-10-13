@@ -167,6 +167,10 @@ pub trait Hook: Send + Sync + 'static {
     fn get_run(&self) -> Option<StoreFailure> {
         None
     }
+    /// Whether `get_artifact` answers that no artifact is stored.
+    fn hides_artifacts(&self) -> bool {
+        false
+    }
 }
 
 /// A SQLite store whose answers a `Hook` may replace.
@@ -203,6 +207,9 @@ impl<H: Hook> Store for Hooked<H> {
         self.inner.get_package(d).await
     }
     async fn get_artifact(&self, d: &str) -> StoreResult<Option<Vec<u8>>> {
+        if self.hook.hides_artifacts() {
+            return Ok(None);
+        }
         self.inner.get_artifact(d).await
     }
     async fn commit_turn(&self, r: CommitTurn) -> StoreResult<Receipt<CommitReceipt>> {

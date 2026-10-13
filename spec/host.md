@@ -79,6 +79,7 @@ process on its own.
 | `run_ids` | the operating system's random source | Where the ID of each new run comes from; tests give a fixed sequence |
 | `stop_grace_ms` | 5000 | **0.2.** Time between SIGTERM and SIGKILL when a process group is stopped (§3) |
 | `guard` | the host's own executable | **0.2.** The executable whose guard mode runs in front of every process (§3) |
+| `files_dir` | none | **0.2.** Folder of step files and work folders (§3, Step files and work folders). Required for a workflow artifact with `instructions` or `asset` entries |
 
 ### Client operations
 
@@ -109,7 +110,10 @@ process on its own.
 - **0.2.** `start_artifact(artifact, input, start_key)`: `start` with the package of
   a loaded artifact. `create_run` carries the artifact's digest and bytes, so the
   store keeps the artifact and the run records its digest (store.md §2). A run found
-  by its start key keeps the artifact it was first started from.
+  by its start key keeps the artifact it was first started from. An artifact with an
+  `instructions` or `asset` entry is refused with `host.files-dir-missing`, before
+  anything is stored, when `files_dir` is unset, whatever its action kinds: its steps
+  could not be given their files.
 - `signal(key, message_id, name, outcome, data)`: `append_event` with event ID
   `ids::event_for_signal(message_id)`. **0.2:** first, the data is checked against
   the run's package: against the schema each await-signal node waiting for `name`
@@ -151,7 +155,9 @@ One bounded pass. It never blocks on an activity.
    carries a process record is first settled by the check before a lease expiry (§3),
    which may stop a leftover group, mark the expiry `processUnchecked`, or leave the
    attempt for the next pass. `request.digest-mismatch` means another sweeper expired
-   the attempt with the other mark; ignore.
+   the attempt with the other mark; ignore. **0.2:** with `files_dir` set, the sweep
+   also removes step files no unfinished run needs (§3, Step files and work folders),
+   at most once every 30 s per engine, starting with its first tick.
 2. **Coordinate.** For each key of `scan_ready`, up to `turns_per_run` times:
    `load_turn`; fetch the package (cached by digest); call `reducer.transition`;
    - on a decision: `commit_turn` with request ID
@@ -167,6 +173,9 @@ One bounded pass. It never blocks on an activity.
    read back through `scan_due`, is dispatched.
 3. **Dispatch.** For each `Outbox` item, while fewer than `max_concurrent_activities`
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
+   **0.2:** with `files_dir` set, before the claim, the host makes or checks the
+   step's files and its work folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
+   no attempt is spent and no lease runs out on a try that never started.
 
 `serve(shutdown)` repeats `tick`, sleeping `poll_ms` when a tick did nothing. On
 shutdown it stops claiming and waits up to `shutdown_grace_ms` for in-flight attempts.
@@ -240,8 +249,9 @@ pub trait ActivityRunner: Send + Sync {
 `ActivityContext` carries the run key, node ID, action ID, invocation ID, attempt
 number, visit number, effect key, and a stop signal that fires when the lease is lost or the engine
 shuts down. **0.2:** it also records the attempt's process record (§3,
-`record_process`), which the engine stores with `set_process`. The registry maps an
-action's `kind` to a runner.
+`record_process`), which the engine stores with `set_process`, and the step's files and
+work folder (below), when it has them. The registry maps an action's `kind` to a
+runner.
 
 ### `command`
 
@@ -279,6 +289,15 @@ action's `kind` to a runner.
 - **0.2:** with `db_path` set, every program the host starts gets `RUNSPORE_DB` set to
   it, after `env`, so a workflow cannot point it elsewhere. A `spore` call from inside a
   step reaches the run's own database (cli.md §Project folder).
+- **0.2:** it also gets `RUNSPORE_STEP_FILES`, `RUNSPORE_INSTRUCTIONS` and
+  `RUNSPORE_WORK_DIR` (Step files and work folders, below), after `env`. One of them
+  the step does not have is removed from the environment, so a value the worker
+  inherited never reaches the step.
+- **0.2:** an `argv[0]` of the form `./<p>`, where `<p>` is the path of an asset of the
+  action, runs the step files' copy: the host replaces it with the absolute path of
+  `<p>` in the step files. Any other `./…` keeps its 0.1 meaning, relative to `cwd`, so
+  a project's own `./test.sh` still runs the project's script. Other `argv` entries are
+  never rewritten.
 - **0.2** (replaces 0.1's "It runs in its own process group. On timeout or stop the
   whole group is killed."): it runs under a guard, below.
 - A command never learns the action's outcome names. The workflow maps its result to
@@ -422,6 +441,75 @@ Where the check cannot be made, the host signals nothing. A record from another 
 or another OS user therefore leaves the risk 0.1 had: a leftover there may still run
 beside the next try. Several machines on one database are not supported (store §3).
 
+### Step files and work folders (0.2)
+
+A workflow artifact seals each node's `instructions` file and each action's assets
+(artifact.md §2). The host delivers them to the step that declares them, the same way
+for every kind of action, from the run's stored artifact and never from the folder it
+was built from. Each visit of a step also gets a writable work folder.
+
+**Step files.** For a run of artifact `A` at activity node `N`, the step files are the
+folder `S = <files_dir>/steps/<hex>/<N>/`, where `<hex>` is the hexadecimal part of
+`A`'s digest. `S` holds exactly the manifest entries owned by `N` (its `instructions`
+entry) and those owned by `N`'s action (its `asset` entries, bundled probe, watch and
+stop programs included), each once, at its entry path. It holds nothing of any other
+node, so a step cannot quietly depend on a file it never declared. `S` exists, empty,
+for a node that declares no files.
+
+1. **Making `S`.** The host reads the stored artifact (store.md `get_artifact`), checks
+   that its bytes match the run's artifact digest, loads it in the sandbox (§1) and
+   reads each entry with `blob(digest)`, checking the bytes against the entry's digest.
+   It checks every path again (artifact.md §3) and writes each file into a fresh
+   sibling folder, mode `0444`, or `0555` when the entry is `executable`. It then sets
+   every folder in it to `0555` and renames it to `S`. When `S` appeared meanwhile, it
+   discards its own folder and uses `S` after checking it.
+2. **Checking `S`, before every use.** Before each dispatch that touches `N`, the files
+   under `S` must be exactly the entries of `N`: each a regular file, not a symbolic
+   link, with mode `0444` (`0555` when `executable`) and a matching digest, in folders
+   of mode `0555`. Otherwise the host moves `S` aside, removes it, and makes it again.
+   A hand-edited or extra file therefore never reaches a step. Read-only modes do not
+   stop a program that changes them during its own try; the check before the next use
+   repairs what it changed.
+3. **Failure.** When the stored artifact is missing, does not match its digest or does
+   not load, or an entry's blob is absent or does not match, the host does not claim
+   the attempt. It quarantines the run with code `artifact.unreadable`. A broken store
+   is not a business failure: no attempt is spent, and the host never falls back to the
+   source folder. `release` (§2) lets the next tick try again, after the store has
+   been repaired. When `S` or `W` cannot be written, the quarantine code is
+   `host.files-unwritable`. An engine without `files_dir` does none of this before
+   the claim; when it claims a step of a run whose artifact has files (a run started
+   by another engine), it quarantines the run with `host.files-dir-missing`, starts
+   nothing, and leaves the attempt to its lease, as after a crash.
+
+**Work folder.** Each invocation gets `W = <files_dir>/work/<runId>/<invocationId>/`,
+created with mode `0700` before its first try. Every try of the invocation gets the same
+folder, so a step's state survives between its tries. The host never removes it in this
+version; pruning finished runs and their folders is left to a later version.
+
+**Variables.** Every program the host runs for an invocation gets:
+
+| Variable | Value |
+| --- | --- |
+| `RUNSPORE_STEP_FILES` | Absolute path of `S`; unset for a run with no artifact, or when `files_dir` is unset |
+| `RUNSPORE_INSTRUCTIONS` | Absolute path of `N`'s instructions file in `S`; unset when `N` has none |
+| `RUNSPORE_WORK_DIR` | Absolute path of `W`; unset when `files_dir` is unset |
+
+A `native` function finds the same paths in its `ActivityContext`.
+
+**The sweep, under a lock.** Each artifact has a lock file,
+`<files_dir>/steps/<hex>.lock`. Checking and making `S` and the whole try that uses it
+hold the lock shared. The sweep (§2 `tick`) takes it exclusive without waiting, skipping
+an artifact whose lock is held. While it holds the lock, it reads the engine's runs and,
+when no unfinished run (status other than `completed` and `failed`) has the artifact's
+digest, renames `<files_dir>/steps/<hex>/` to a hidden trash name. It deletes the trash
+after releasing the lock. A run exists before anything is dispatched for it, so either
+the dispatch holds the lock first and the sweep then finds the run unfinished, or the
+sweep moves the folder first and the dispatch makes it again. Lock files are kept.
+
+`files_dir` is an engine setting. The CLI sets it to `<database path>.files`
+(cli.md §Project folder). An embedder must set it for any workflow artifact with
+`instructions` or `asset` entries (§2 `start_artifact`).
+
 ### `native`
 
 `{"kind": "native", "function": "<name>", ...}` calls a Rust closure registered under
@@ -456,3 +544,8 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H19 | **0.2.** A run started by an engine with one `base_dir` is worked by an engine with another and a `db_path` | The command runs in the folder recorded at `start` and sees `RUNSPORE_DB` equal to `db_path`, also when the action's `env` sets it |
 | H20 | **0.2.** A step makes a folder holding a `.spore/` of its own and returns its path, absolute or relative; the next step's `cwd` is `{"fromInput": …}` at that path. Then a pointer that names nothing, a value that is not a string, and a folder that does not exist | The second step runs in that folder, and a `spore` call from it reaches the run's database; each invalid case is `command.cwd-invalid`, not retryable, and the step is stuck after one try; `validate` refuses a malformed `cwd` object |
 | H21 | **0.2.** Input schema: `start` with input that does not fit the package's `inputSchema`, with input that fits, and with a package whose `inputSchema` root is not an object | The misfit is `input.invalid` with the failing paths and no run exists afterwards; the fit creates the run; `validate_workflow` and `start` refuse the package with `workflow.invalid-schema` |
+| H22 | **0.2.** A run of an artifact whose node has instructions and whose action has an executable asset, run as `./<asset>`, visited twice, with a try that fails | The command runs the step files' copy and sees the three variables; the step files hold only that node's files, modes `0444`/`0555`; both tries of a visit share one work folder of mode `0700`, the second visit gets another, and both are kept after the run ends; another node's step files hold none of them |
+| H23 | **0.2.** A step file edited, a file added and a mode changed between two visits | The next visit sees the built bytes and modes again |
+| H24 | **0.2.** `start_artifact` with files and no `files_dir` | Refused with `host.files-dir-missing`; nothing stored |
+| H25 | **0.2.** The stored artifact missing when a step is due, then restored | The run is quarantined `artifact.unreadable` with no attempt claimed; after `release` it completes. An artifact whose entry blob is absent quarantines the same way |
+| H26 | **0.2.** The sweep with one finished and one unfinished run of different artifacts, and with a finished run's lock held | The finished run's step files are removed and the unfinished run's kept; a held lock keeps them until the next sweep |

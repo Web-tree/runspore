@@ -11,6 +11,8 @@ use runspore_types::store::{ProcessRecord, RunKey};
 use serde_json::Value;
 use tokio::sync::watch;
 
+use crate::files::StepFiles;
+
 /// Default `stop_grace_ms`: SIGTERM to SIGKILL when a process group is stopped.
 pub const DEFAULT_STOP_GRACE_MS: u64 = 5_000;
 
@@ -66,6 +68,11 @@ pub struct ActivityContext {
     pub base_dir: PathBuf,
     /// The database's absolute path, given to every program as `RUNSPORE_DB`.
     pub db: Option<PathBuf>,
+    /// The step's files, given to every program as `RUNSPORE_STEP_FILES` and
+    /// `RUNSPORE_INSTRUCTIONS`; none for a run without an artifact or `files_dir`.
+    pub files: Option<StepFiles>,
+    /// The invocation's work folder, shared by its tries: `RUNSPORE_WORK_DIR`.
+    pub work_dir: Option<PathBuf>,
     /// The executable whose guard mode runs in front of every process an attempt
     /// starts. Defaults to this process's own executable.
     pub guard: PathBuf,
@@ -89,6 +96,8 @@ impl std::fmt::Debug for ActivityContext {
             .field("effect_key", &self.effect_key)
             .field("base_dir", &self.base_dir)
             .field("db", &self.db)
+            .field("files", &self.files)
+            .field("work_dir", &self.work_dir)
             .field("guard", &self.guard)
             .field("stop_grace", &self.stop_grace)
             .finish_non_exhaustive()
@@ -119,6 +128,8 @@ impl ActivityContext {
             effect_key,
             base_dir,
             db: None,
+            files: None,
+            work_dir: None,
             guard: crate::guard::own_executable(),
             stop_grace: Duration::from_millis(DEFAULT_STOP_GRACE_MS),
             process: Arc::new(|_| Box::pin(async { Ok(()) })),
