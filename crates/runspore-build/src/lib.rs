@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use runspore_schema::SchemaError;
 use runspore_types::artifact::{self, EntryKind, Manifest, Owner};
 use runspore_types::model::{OUTCOME_EXHAUSTED, OUTCOME_FAILED};
 use runspore_types::{canonical, digest};
@@ -260,7 +261,7 @@ struct Settings<'a> {
     files: RefCell<BTreeMap<(String, Option<Owner>), File>>,
 }
 
-const TOP_LEVEL: [&str; 4] = ["format", "limits", "actions", "nodes"];
+const TOP_LEVEL: [&str; 5] = ["format", "limits", "actions", "nodes", "inputSchema"];
 /// The build-only marker a node's input uses for a copy of its schemas.
 const MARKER: &str = "$outputSchemas";
 /// The level of a node's `input` in the package: the package, `nodes`, the node, `input`.
@@ -331,6 +332,12 @@ impl Settings<'_> {
         }
         let mut actions = self.object(&top, "actions")?;
         let mut nodes = self.object(&top, "nodes")?;
+        let input_schema = match top.get("inputSchema") {
+            None => None,
+            Some(schema) => {
+                Some(self.schema(&["inputSchema"], schema, runspore_schema::check_input)?)
+            }
+        };
 
         for (id, action) in &mut actions {
             let Value::Object(action) = action else {
@@ -398,6 +405,9 @@ impl Settings<'_> {
         }
         package.insert("actions".into(), Value::Object(actions));
         package.insert("nodes".into(), Value::Object(package_nodes));
+        if let Some(schema) = input_schema {
+            package.insert("inputSchema".into(), schema);
+        }
         Ok(Value::Object(package))
     }
 
@@ -507,48 +517,60 @@ impl Settings<'_> {
         let mut packaged = Map::new();
         for (outcome, schema) in schemas {
             let path = ["nodes", id, "outputSchemas", outcome];
-            let mut place = path.join(".");
-            let authored = match schema {
-                Value::Object(_) => schema.clone(),
-                Value::String(file) => {
-                    let target = self.reference(&path, schema, EntryKind::Source, None)?;
-                    place = format!("{place} ({file})");
-                    let bytes = std::fs::read(&target).map_err(|e| {
-                        self.at(
-                            runspore_schema::INVALID_SCHEMA,
-                            &path,
-                            format!("{place}: {e}"),
-                        )
-                    })?;
-                    runspore_types::canonical::parse(&bytes).map_err(|e| {
-                        self.at(
-                            runspore_schema::INVALID_SCHEMA,
-                            &path,
-                            format!("{place}: not JSON in the canonical domain: {e}"),
-                        )
-                    })?
-                }
-                _ => {
-                    return Err(self.invalid(
-                        &path,
-                        "a schema object, or the path of a JSON file holding one",
-                    ))
-                }
-            };
-            let schema = runspore_schema::inline(&authored)
-                .and_then(|schema| {
-                    runspore_schema::check(&schema, runspore_schema::ROOT_LEVEL).map(|()| schema)
-                })
-                .map_err(|e| {
-                    self.at(
-                        runspore_schema::INVALID_SCHEMA,
-                        &path,
-                        format!("{place}: {e}"),
-                    )
-                })?;
+            let schema = self.schema(&path, schema, |schema| {
+                runspore_schema::check(schema, runspore_schema::ROOT_LEVEL)
+            })?;
             packaged.insert(outcome.clone(), schema);
         }
         Ok(packaged)
+    }
+
+    /// One schema at `path` in package form: read from its file when `value` names one,
+    /// its `$ref`s inlined, and checked by `check` at its place in the package
+    /// (spec/schema.md). The file joins the artifact as a `source` entry.
+    fn schema(
+        &self,
+        path: &[&str],
+        value: &Value,
+        check: impl Fn(&Value) -> Result<(), SchemaError>,
+    ) -> Result<Value, BuildError> {
+        let mut place = path.join(".");
+        let authored = match value {
+            Value::Object(_) => value.clone(),
+            Value::String(file) => {
+                let target = self.reference(path, value, EntryKind::Source, None)?;
+                place = format!("{place} ({file})");
+                let bytes = std::fs::read(&target).map_err(|e| {
+                    self.at(
+                        runspore_schema::INVALID_SCHEMA,
+                        path,
+                        format!("{place}: {e}"),
+                    )
+                })?;
+                runspore_types::canonical::parse(&bytes).map_err(|e| {
+                    self.at(
+                        runspore_schema::INVALID_SCHEMA,
+                        path,
+                        format!("{place}: not JSON in the canonical domain: {e}"),
+                    )
+                })?
+            }
+            _ => {
+                return Err(self.invalid(
+                    path,
+                    "a schema object, or the path of a JSON file holding one",
+                ))
+            }
+        };
+        runspore_schema::inline(&authored)
+            .and_then(|schema| check(&schema).map(|()| schema))
+            .map_err(|e| {
+                self.at(
+                    runspore_schema::INVALID_SCHEMA,
+                    path,
+                    format!("{place}: {e}"),
+                )
+            })
     }
 
     /// Replaces each `{"$outputSchemas": {}}` in an evaluated position of a node's

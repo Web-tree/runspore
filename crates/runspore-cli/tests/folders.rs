@@ -39,7 +39,7 @@ fn settings() -> String {
     let argv = effect_argv("step", "true");
     format!(
         r#"{{
-  "format": "runspore.workflow/0.2",
+  "format": "runspore.workflow/0.2", "inputSchema": {{"type": "object", "properties": {{}}}},
   "limits": {{"maxVisitsPerNode": 4}},
   "actions": {{
     "step": {{"kind": "command", "effect": "idempotent", "argv": {argv},
@@ -209,6 +209,11 @@ const CASES: &[Case] = &[
     case("schema file not json", None, Some(("{\"type\": \"object\"}", "\"steps/work.md\"")), "workflow.invalid-schema", S, 11),
     case("schema with a remote ref", None, Some(("{\"type\": \"object\"}", "{\"$ref\": \"other.json\"}")), "workflow.invalid-schema", S, 11),
     case("schemas not an object", None, Some(("\"outputSchemas\": {\"approved\": {\"type\": \"object\"}}", "\"outputSchemas\": []")), "settings.invalid", S, 11),
+    case("input schema root not an object", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": {\"type\": \"string\"}")), "workflow.invalid-schema", S, 2),
+    case("input schema outside the subset", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": {\"type\": \"object\", \"pattern\": \"x\"}")), "workflow.invalid-schema", S, 2),
+    case("input schema not a schema", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": 5")), "settings.invalid", S, 2),
+    case("input schema file missing", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": \"schemas/nope.json\"")), "settings.reference", S, 2),
+    case("input schema file not json", None, Some(("\"inputSchema\": {\"type\": \"object\", \"properties\": {}}", "\"inputSchema\": \"steps/work.md\"")), "workflow.invalid-schema", S, 2),
     case("marker without schemas", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}}}")), "settings.invalid", S, 9),
     case("marker not alone", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}, \"x\": 1}}")), "settings.invalid", S, 9),
     case("dotted escape", None, Some(("steps/work.md", "steps/../../outside.md")), "settings.reference", S, 10),

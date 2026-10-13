@@ -200,8 +200,12 @@ impl From<HostError> for Fail {
             fail
         };
         let usage = match &e {
-            HostError::OutputInvalid(misfit) => return refused(misfit.to_string(), misfit.details()),
-            HostError::InputInvalid(misfit) => return refused(misfit.to_string(), misfit.details()),
+            HostError::OutputInvalid(misfit) => {
+                return refused(misfit.to_string(), misfit.details())
+            }
+            HostError::InputInvalid(misfit) => {
+                return refused(misfit.to_string(), misfit.details())
+            }
             HostError::Invalid { .. } | HostError::Kernel(_) => true,
             HostError::Store(f) => {
                 f.kind == StoreFailureKind::Conflict || f.code == "run.not-found"
@@ -632,6 +636,13 @@ impl StartRequest {
             }
             (None, None) => json!({}),
         };
+        // The input against the workflow's inputSchema before the database is opened,
+        // so a refused start leaves no file behind (spec/cli.md). The engine checks it
+        // again, after the schema itself.
+        if let Some(schema) = source.input_schema() {
+            runspore_schema::fit_input(&schema, &input)
+                .map_err(|misfit| Fail::from(HostError::InputInvalid(misfit)))?;
+        }
         Ok(Self {
             source,
             input,
@@ -835,6 +846,14 @@ impl Source {
             artifact: load(&sealed.bytes, folder)?,
             origin: folder.to_path_buf(),
         })
+    }
+
+    /// The package's `inputSchema`, when it has one that passes the schema checks; a
+    /// schema that does not is left for the engine to refuse as `workflow.invalid-schema`.
+    fn input_schema(&self) -> Option<Value> {
+        let package: Value = serde_json::from_slice(&self.artifact.package).ok()?;
+        let schema = package.get("inputSchema")?.clone();
+        runspore_schema::check_input(&schema).ok().map(|()| schema)
     }
 
     /// The checks of `start`, against no store; returns the canonical package bytes.

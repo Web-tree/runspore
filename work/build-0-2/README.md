@@ -29,7 +29,10 @@ work/build-0-2/bin/build             # goes on after a stop
 installs that commit's spore into `~/.local/share/runspore-build/<commit>`, and
 starts the run on it in a database of its own. Ticket worktrees go to
 `~/git/webtree/build-0-2/<repo>-<ticket>`. The worker runs up to 4 steps at once:
-a wave step plus up to 3 tickets.
+a wave step plus up to 3 tickets. A ticket run is started with
+`--input '{"ticket": {"id", "issue", "title"}}'`; the `ticket` folder declares that
+shape as its `inputSchema`, so `spore start ticket` without one is refused with
+`input.invalid` and starts nothing.
 
 ## Answer a checkpoint
 

@@ -1,5 +1,21 @@
 {
   "format": "runspore.workflow/0.2",
+  "inputSchema": {
+    "type": "object",
+    "required": ["ticket"],
+    "properties": {
+      "ticket": {
+        "type": "object",
+        "description": "The GitHub issue this run builds, tests and ships.",
+        "required": ["id", "issue", "title"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "description": "The ticket's short ID, such as R14."},
+          "issue": {"type": "string", "minLength": 1, "description": "The issue as owner/repo#number."},
+          "title": {"type": "string", "minLength": 1, "description": "The issue's title."}
+        }
+      }
+    }
+  },
   "limits": {
     "maxVisitsPerNode": 16,
     "maxActivations": 128
