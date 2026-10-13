@@ -60,6 +60,67 @@ fn folder(name: &str) -> Dir {
     dir
 }
 
+/// The repository's own workflow folders under `.spore/workflows`.
+fn dogfood(name: &str) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let folder = root.join(".spore/workflows").join(name);
+    folder.to_str().unwrap().to_string()
+}
+
+/// The build's checkpoints declare the shape of a `changes` answer; spore holds
+/// `work/build-0-2/bin/answer` to it. No step runs: nothing works the run.
+#[test]
+fn the_build_checks_checkpoint_answers() {
+    let dir = Dir::new("schemas-dogfood");
+    for name in ["build-0-2", "ticket"] {
+        let valid = dir.run(&args(&["--json", "validate", &dogfood(name)]));
+        assert_eq!(valid.code(), Some(0), "{name}: {}", valid.stdout);
+    }
+    let build = dogfood("build-0-2");
+    let started = dir.run(&args(&["--json", "start", &build, "--key", "build-0-2"]));
+    let run = started.json()["runId"].as_str().unwrap().to_string();
+    let answer = |data: &str| {
+        dir.run(&args(&[
+            "signal",
+            &run,
+            "checkpoint-a",
+            "--outcome",
+            "changes",
+            "--data",
+            data,
+        ]))
+    };
+    for (data, error) in [
+        (
+            r#"{"changes": []}"#,
+            "/changes: expected at least 1 items, got 0",
+        ),
+        (
+            r#"{"changes": [""]}"#,
+            "/changes/0: expected at least 1 characters, got 0",
+        ),
+        (
+            r#"{"change": ["x"]}"#,
+            "/change: not allowed; allowed properties: changes",
+        ),
+    ] {
+        let refused = answer(data);
+        assert_eq!(refused.code(), Some(2), "{data}");
+        assert!(refused.stderr.contains(error), "{data}: {}", refused.stderr);
+    }
+    assert_eq!(
+        event_count(&dir, &run),
+        1,
+        "a refused answer is not recorded"
+    );
+    assert_eq!(
+        answer(r#"{"changes": ["Errors should name the key"]}"#).code(),
+        Some(0)
+    );
+    let go = ["signal", &run, "checkpoint-a", "--outcome", "go"];
+    assert_eq!(dir.run(&args(&go)).code(), Some(0), "`go` has no schema");
+}
+
 fn args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
     let mut all = FAST.to_vec();
     all.extend_from_slice(extra);

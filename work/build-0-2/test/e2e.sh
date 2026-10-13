@@ -10,8 +10,9 @@
 # `gh pr merge` squash-merges into their bare origins). Checks: the first
 # `build --upgrade` runs the fast lane and asks checkpoint 0; `go` runs waves 1-2
 # (R9 goes red once and is fixed; R10's implement step can't recover, is stuck,
-# and `spore resolve --retry` gets it merged) and checkpoint A asks; a `changes`
-# answer builds two feedback tickets and asks again; `go` moves on to checkpoint B;
+# and `spore resolve --retry` gets it merged) and checkpoint A asks; spore refuses
+# answers that do not fit its schema; a `changes` answer builds two feedback tickets
+# and asks again; `go` moves on to checkpoint B;
 # upgrading to a newer commit starts a new database and replays to B without
 # asking again.
 set -euo pipefail
@@ -103,6 +104,12 @@ check "s['issues']['Web-tree/runspore#59']['state'] == 'CLOSED'"
 test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R9: ')" = 1 || { echo "FAIL: R9 not merged once"; exit 1; }
 test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R10: ')" = 1 || { echo "FAIL: R10 not merged once"; exit 1; }
 echo "ok: waves 1-2 merged, checkpoint A asked"
+
+refused="$("$bin/answer" a changes 2>&1)" && { echo "FAIL: a changes answer with no change was accepted"; exit 1; }
+case "$refused" in *"/changes: expected at least 1 items, got 0"*) ;; *) echo "FAIL: no schema error: $refused"; exit 1;; esac
+"$bin/answer" a changes "" > /dev/null 2>&1 && { echo "FAIL: an empty change was accepted"; exit 1; }
+wait_for waiting checkpoint_a 1
+echo "ok: spore refused answers that do not fit checkpoint A's schema, and recorded nothing"
 
 "$bin/answer" a changes "Errors should name the settings key" "skills: the menu needs a hint line" > /dev/null
 "$bin/answer" a changes "Errors should name the settings key" "skills: the menu needs a hint line" > /dev/null  # a repeat
