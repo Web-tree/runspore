@@ -90,6 +90,11 @@ process on its own.
   2. Build the `run.started` evidence with that run ID; canonicalize the workflow;
      reject it if any action's `kind` has no registered runner or the runner's
      `validate` fails; run a dry `run.started` transition and reject on failure.
+     **0.2:** then the checks of `validate_workflow` below, and, when the package
+     carries `inputSchema`, check `input` against it ([schema.md](schema.md) §4):
+     input that does not fit is refused with `invalid-input` / `input.invalid` and
+     the errors, and nothing is created. A package without `inputSchema` accepts any
+     input.
   3. `create_run` with request ID `start/<start_key>` and, in 0.2, `base_dir` as the
      run's base folder. `applied` is a new run;
      `duplicate` is the run found, not new; `run.exists` (the key names a run with
@@ -125,7 +130,10 @@ process on its own.
   canonical package bytes. `start` uses it. **0.2:** after the dry transition, every
   schema in a node's `outputSchemas` is checked against the subset, its depth counted
   from the package root ([schema.md](schema.md) §1); one outside it is
-  `workflow.invalid-schema`, naming the node, the outcome and the keyword's path.
+  `workflow.invalid-schema`, naming the node, the outcome and the keyword's path. The
+  package's `inputSchema`, when it has one, is checked the same way and for its
+  object root (schema.md §4); the error names `inputSchema`. `validate_workflow` has
+  no input to check: only `start` checks one.
 - `release(key)`: `release_run`, with a request ID derived from the quarantine it
   lifts, so repeating it is a duplicate.
 - Read-through views: `get_run`, `get_package`, `get_artifact` (0.2), `list_runs`,
@@ -446,3 +454,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H17 | **0.2.** Output schemas: a command and a native function whose output does not fit; a signal, before and at its node, and a `complete` resolution whose data does not fit; a workflow with a schema outside the subset | The result is `output.invalid`, not retryable, and the step is stuck or takes its `failed` route; the client operations return `output.invalid` with the errors and append nothing; fitting data is accepted; `validate_workflow` refuses the workflow with `workflow.invalid-schema` |
 | H19 | **0.2.** A run started by an engine with one `base_dir` is worked by an engine with another and a `db_path` | The command runs in the folder recorded at `start` and sees `RUNSPORE_DB` equal to `db_path`, also when the action's `env` sets it |
 | H20 | **0.2.** A step makes a folder holding a `.spore/` of its own and returns its path, absolute or relative; the next step's `cwd` is `{"fromInput": …}` at that path. Then a pointer that names nothing, a value that is not a string, and a folder that does not exist | The second step runs in that folder, and a `spore` call from it reaches the run's database; each invalid case is `command.cwd-invalid`, not retryable, and the step is stuck after one try; `validate` refuses a malformed `cwd` object |
+| H21 | **0.2.** Input schema: `start` with input that does not fit the package's `inputSchema`, with input that fits, and with a package whose `inputSchema` root is not an object | The misfit is `input.invalid` with the failing paths and no run exists afterwards; the fit creates the run; `validate_workflow` and `start` refuse the package with `workflow.invalid-schema` |

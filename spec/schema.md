@@ -1,4 +1,4 @@
-# Output schemas 0.2
+# Schemas 0.2
 
 A workflow may declare an **output schema** for each way a step can end: the shape
 the step's data must have when it ends with that outcome. A node carries them in
@@ -6,6 +6,12 @@ the step's data must have when it ends with that outcome. A node carries them in
 The host checks every result against the schema of its outcome the moment the result
 arrives ([host.md](host.md) §2, §3). An outcome with no schema, and a node with none,
 is not checked.
+
+A workflow may also declare an **input schema**: the shape of the input a run of it
+accepts. The package carries it at top level in `inputSchema` ([kernel.md](kernel.md)
+§2), so it is part of the run's identity. The host checks a run's input against it
+when the run starts, before anything is created (§4; [host.md](host.md) §2). A
+workflow without one accepts any input.
 
 The schema language is a subset of JSON Schema 2020-12. The crate
 `runspore-schema` implements it; the build and the host share it.
@@ -41,8 +47,10 @@ A schema is part of the package, so the package's depth limit (32 levels of obje
 and arrays, [kernel.md](kernel.md) §1) counts from the package root, not from the
 schema. The root object of a schema in `outputSchemas` is the fifth level (the
 package, `nodes`, the node, `outputSchemas`, the schema), which leaves the schema 28
-levels. Each nested property uses two (`properties`, then the property's schema); a
-`required`, `enum` or `anyOf` list uses one. A schema that does not fit is refused.
+levels; the root of `inputSchema` is the second (the package, the schema), which
+leaves it 31. Each nested property uses two (`properties`, then the property's
+schema); a `required`, `enum` or `anyOf` list uses one. A schema that does not fit is
+refused.
 
 ### Size
 
@@ -109,9 +117,26 @@ people, the errors come one per line, path first, with `(root)` standing for `""
 
 Missing data (a signal without data, a result without output) is `null`.
 
-## 4. Errors
+## 4. The input schema
+
+`inputSchema` is one schema of the subset (§1), written in the authoring form (§2)
+in a workflow folder, with one more rule: its root is `"type": "object"`, so a run's
+input always has named fields, and each property's `description` can say what to ask
+for. A root of any other type, or one with no `type` (such as a bare `anyOf`), is
+refused as `workflow.invalid-schema` at `/type`.
+
+A run's input is checked against it exactly as data is checked against an output
+schema (§3): every place it does not fit is collected, up to 16. Input that does not
+fit is refused with the code `input.invalid` and the details
+`{"errors": [{"path": "…", "message": "…"}, …]}`, printed for people the same way,
+one error per line. A run started with no input has the input `{}`, which fits a
+schema with no `required` names. Nothing is created for a refused start, so the same
+start can be sent again with corrected input.
+
+## 5. Errors
 
 | Code | Where | Cause |
 | --- | --- | --- |
-| `workflow.invalid-schema` | `spore build`, `validate`, `start`; the host's `validate_workflow` | A schema outside the subset, too deep, too large (§1), or with a bad reference (§2). The error names the node, the outcome and the JSON Pointer of the offending keyword within the schema |
+| `workflow.invalid-schema` | `spore build`, `validate`, `start`; the host's `validate_workflow` | A schema outside the subset, too deep, too large (§1), or with a bad reference (§2); an `inputSchema` whose root is not `"type": "object"` (§4). The error names the node and the outcome, or `inputSchema`, and the JSON Pointer of the offending keyword within the schema |
 | `output.invalid` | A step's result, a signal, a resolution | Data that does not fit its outcome's schema (§3) |
+| `input.invalid` | `spore start`, `run`; the host's `start` | A run's input that does not fit the workflow's `inputSchema` (§4) |

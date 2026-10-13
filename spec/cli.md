@@ -27,7 +27,7 @@ marked **0.2** below are new since 0.1.
 | `build <folder> [-o <file>] [--composed]` | **0.2.** Builds a workflow folder (or its `workflow.dot`), checks it as `validate` does, and writes the workflow artifact to `<file>`, by default `<folder>.wasm` beside the folder. With `--composed`, the composed artifact (artifact.md §7), by default `<folder>-composed.wasm` |
 | `inspect <artifact>` | **0.2.** Loads an artifact and prints its digest, manifest and package as JSON |
 | `inspect --run <runId> --file <path>` | **0.2.** Prints the file the run's artifact holds at `<path>`, for example `workflow.dot` |
-| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder |
+| `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder. The input is checked against the workflow's `inputSchema` (0.2) |
 | `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation |
@@ -112,6 +112,25 @@ In JSON mode the error object carries `details`:
 `{"outcome": "rejected", "errors": [{"path": "", "message": "expected type \"object\", got null"}]}`.
 `validate`, `start` and `run` refuse a schema outside the subset with exit 2 and
 `workflow.invalid-schema` (dot.md §6).
+
+**0.2: input schema.** When the workflow declares `inputSchema`
+([schema.md](schema.md) §4), `start` and `run` check the input (`--input`,
+`--input-file`, or `{}` when neither is given) against it before the database is
+touched. Input that does not fit exits 2 with code `input.invalid` and creates no run
+and no database file: the same command can be sent again with corrected input. The
+output has the shape of `output.invalid`'s, without an outcome:
+
+```text
+spore: input.invalid: the input does not fit the workflow's inputSchema
+/task: required, but missing
+/branch: expected type "string", got integer (7)
+```
+
+In JSON mode the error object carries `details`:
+`{"errors": [{"path": "/task", "message": "required, but missing"}, …]}`. An
+`inputSchema` whose root is not `"type": "object"` is refused by `validate`, `start`
+and `run` with `workflow.invalid-schema`, like any schema outside the subset. A
+workflow without `inputSchema` accepts any input.
 
 ## Project folder (0.2)
 
