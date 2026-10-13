@@ -53,7 +53,7 @@ without regard to case, as in Graphviz.
 | `dialect` | graph | yes | `runspore/0.2` |
 | `start` | graph | yes | The ID of a node in the graph |
 | `kind` | node | no, default `activity` | `activity`, `await-signal`, `complete` or `fail` |
-| `on` | edge | no, default `ok` | One outcome: `[a-z0-9][a-z0-9-]{0,63}`, or `failed` |
+| `on` | edge | no, default `ok` | One outcome: `[a-z0-9][a-z0-9-]{0,63}`, `failed` or `exhausted` |
 
 `dialect` is checked before any other rule: a missing or unknown dialect is the first
 error the build reports. `runspore/0.2` is the only dialect this version reads; a
@@ -62,7 +62,9 @@ folder marked `runspore/0.1` is refused with the fix (change the dialect line, a
 
 `label` is render-only and never carries meaning. An edge routes one outcome; to
 route two outcomes to one node, draw two edges. `on="failed"` routes a failure of the
-step; it is never declared in an action's `outcomes`.
+step; it is never declared in an action's `outcomes`. `on="exhausted"` is where the run
+goes when one of the node's loop limits (`loopLimits`, §4) is used up; it is never
+declared either, and only a node with `loopLimits` may draw it.
 
 A node may appear in several statements. It is created by its first mention, in a
 node or an edge statement, and gets `kind` from whichever statement sets it; two
@@ -104,8 +106,8 @@ The fields a node may carry depend on its kind in the DOT:
 
 | Kind | Fields |
 | --- | --- |
-| `activity` | `action` (required), `input`, `instructions`, `outputSchemas` |
-| `await-signal` | `signal` (required), `instructions`, `outputSchemas` |
+| `activity` | `action` (required), `input`, `instructions`, `outputSchemas`, `loopLimits` |
+| `await-signal` | `signal` (required), `instructions`, `outputSchemas`, `loopLimits` |
 | `complete` | `output` |
 | `fail` | `error` (required) |
 
@@ -130,6 +132,12 @@ form, so a program the step runs can read its own schemas without the workflow
 writing them twice. A marker on a node with no `outputSchemas`, or one with another
 key or a value other than `{}`, is an error.
 
+`loopLimits` goes into the package as it is: an object from an outcome the node
+routes to how many times in a row it may route it, for example `{"red": 3}` on the
+step that judges a loop. The next `red` takes the node's `exhausted` edge, which the
+node must draw (kernel.md §2, W12). The number is not drawn in the DOT; a renderer
+may show it on the edge from the settings.
+
 A file reference must be a relative path to a regular file that stays inside the
 folder once `..` and every symbolic link are resolved. An absolute path, an escape,
 or a missing file is an error naming the reference.
@@ -144,8 +152,8 @@ or a missing file is an error naming the reference.
    dialect.
 4. Merge: every node in `settings.json` is in the DOT, and every node the DOT needs
    settings for has them. Each `activity` node's action exists; every outcome the
-   action declares has an edge, and every edge's `on` is a declared outcome or
-   `failed`.
+   action declares has an edge, and every edge's `on` is a declared outcome,
+   `failed`, or `exhausted` when the node has `loopLimits`.
 5. Check and strip the file references. Read each `outputSchemas` file, inline the
    `$ref`s and check every schema against the subset at its place in the package
    (schema.md §1); then replace each `$outputSchemas` marker, checking that the copy
@@ -154,7 +162,8 @@ or a missing file is an error naming the reference.
    and `actions` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
    `on` to its target. The package then passes the kernel's validation (kernel.md
-   §2) like any other.
+   §2) like any other, including W12 (loop limits), W14 (every node is reachable
+   from `start`) and W15 (an end is reachable from every node).
 
 ## 6. Errors
 

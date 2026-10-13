@@ -5,11 +5,12 @@
 //! records the result of every node it leaves and then enters that result's route,
 //! so the arrow into the new node is found from the snapshot before the transition
 //! and the one after it: start at the node the run was parked at and follow, node by
-//! node, the route of the result each node now holds. Following each node's latest
-//! result skips any loop the transition went round, and ends with its last arrow.
+//! node, the route of the result each node now holds (its `exhausted` route when that
+//! result used up a loop limit). Following each node's latest result skips any loop
+//! the transition went round, and ends with its last arrow.
 //! This module only reads routes; it decides nothing.
 
-use runspore_types::model::{Node, RunResult, RunStatus, State, Workflow};
+use runspore_types::model::{Node, RunResult, RunStatus, State, Workflow, OUTCOME_EXHAUSTED};
 
 /// An arrow: the node whose result routed the run, and the outcome it routed on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,22 +136,33 @@ impl<'a> Trail<'a> {
     ) -> Option<Arrow> {
         let mut node_id = first.to_string();
         for _ in 0..=self.workflow.nodes.len() {
-            let outcome = &state.nodes.get(&node_id)?.outcome;
-            let routes = match self.workflow.nodes.get(&node_id)? {
-                Node::Activity { outcomes, .. } | Node::AwaitSignal { outcomes, .. } => outcomes,
-                Node::Complete { .. } | Node::Fail { .. } => return None,
-            };
-            let target = routes.get(outcome)?;
+            let node = self.workflow.nodes.get(&node_id)?;
+            let outcome = taken(state, &node_id, node)?;
+            let target = node.outcomes()?.get(outcome)?;
             if arrived(target, self.workflow.nodes.get(target)?) {
                 return Some(Arrow {
                     node_id,
-                    outcome: outcome.clone(),
+                    outcome: outcome.to_string(),
                 });
             }
             node_id = target.clone();
         }
         None
     }
+}
+
+/// The outcome whose route a node's recorded result took. A limited outcome with no
+/// streak left took the `exhausted` route: *Route* (kernel §7.4) keeps a streak after
+/// every limited outcome except the one that used the limit up.
+fn taken<'s>(state: &'s State, node_id: &str, node: &Node) -> Option<&'s str> {
+    let outcome = state.nodes.get(node_id)?.outcome.as_str();
+    let limited = node
+        .loop_limits()
+        .is_some_and(|limits| limits.contains_key(outcome));
+    if limited && !state.streaks.contains_key(node_id) {
+        return Some(OUTCOME_EXHAUSTED);
+    }
+    Some(outcome)
 }
 
 #[cfg(test)]
@@ -286,6 +298,23 @@ mod tests {
                     from: arrow("gate2", "end"),
                 }),
             }
+        );
+    }
+
+    /// A used-up loop limit routes `exhausted`, and the arrow says so; the `red` before
+    /// it is an ordinary arrow.
+    #[test]
+    fn a_used_up_loop_limit_is_an_exhausted_arrow() {
+        let mut workflow = gates();
+        workflow["nodes"]["work"]["loopLimits"] = json!({"red": 1});
+        workflow["nodes"]["work"]["outcomes"]["exhausted"] = json!("gate2");
+        assert_eq!(
+            arrival(&workflow, &[result(1, "red")]).from,
+            arrow("work", "red")
+        );
+        assert_eq!(
+            arrival(&workflow, &[result(1, "red"), result(2, "red")]).from,
+            arrow("work", "exhausted")
         );
     }
 
