@@ -1,13 +1,14 @@
 //! Rendering of store views as CLI JSON objects and text. Counters and timestamps are
 //! decimal strings.
 
-use runspore_host::{Arrival, Arrow};
+use runspore_host::{Arrival, Arrow, ExternalStep};
 use runspore_types::model::State;
 use runspore_types::store::{EventRecord, InvocationView, RunView};
 use serde_json::{json, Value};
 
-/// The exit code a parked run maps to: quarantine first, then the run status.
-pub fn exit_for(view: &RunView) -> u8 {
+/// The exit code a parked run maps to: quarantine first, then the run status. A
+/// running run parked at an external step waits on an actor.
+pub fn exit_for(view: &RunView, step: Option<&ExternalStep>) -> u8 {
     if view.quarantine.is_some() {
         return 5;
     }
@@ -16,8 +17,40 @@ pub fn exit_for(view: &RunView) -> u8 {
         "failed" => 1,
         "waiting" => 3,
         "needs-intervention" => 4,
+        "running" if step.is_some() => 6,
         _ => 10,
     }
+}
+
+/// The `step` object of `status`: the external step the run is at, or null. Never its
+/// input or token.
+pub fn step_json(step: Option<&ExternalStep>) -> Value {
+    step.map_or(Value::Null, |s| {
+        json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
+               "attempt": s.attempt, "holder": s.holder,
+               "deadlineMs": s.deadline_ms.map(|d| d.to_string()),
+               "leaseUntilMs": s.lease_until_ms.map(|l| l.to_string())})
+    })
+}
+
+pub fn step_text(step: Option<&ExternalStep>) -> String {
+    let Some(s) = step else {
+        return String::new();
+    };
+    let actor = s
+        .actor
+        .as_deref()
+        .map_or_else(String::new, |a| format!(" for {a}"));
+    let mut text = format!(
+        "step       {} {}{actor}, attempt {}",
+        s.kind,
+        s.state.as_str(),
+        s.attempt
+    );
+    if let Some(deadline) = s.deadline_ms {
+        text += &format!(", deadline {deadline} ms");
+    }
+    text + "\n"
 }
 
 fn state(view: &RunView) -> Option<State> {

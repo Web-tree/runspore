@@ -30,7 +30,9 @@ Failure codes are part of the contract. `kind` is in parentheses.
 Protocol 0.2 adds `find_run`, an attempt's process record with `set_process`, the
 audit record of an expiry, the run's base folder, the artifact table with
 `get_artifact` and the run's artifact digest, the schema guard that names the version
-that wrote a database (§3), and scenarios S15 to S18; everything else is as in 0.1.
+that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
+at the deadline, the reason of an expiry, the full reference of an invocation's latest
+attempt, and scenarios S15 to S21; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -141,11 +143,29 @@ attemptNumber)`, the claiming worker as owner, that fence, `leaseUntilMs = now +
 leaseDurationMs`, status `running`; the invocation becomes `running`. Returns the
 `Claim`. A fence is never reused within a run.
 
+**0.2:** the request also carries `holder` and `deadlineDurationMs`, for an attempt
+held outside the worker (host §2, Steps outside the worker):
+
+- `holder` is the **holder handle**: canonical JSON of at most 4 KiB that the store
+  keeps and never reads, or null. A larger one is `quota` / `holder.too-large` and
+  writes nothing.
+- `deadlineDurationMs`, when given, sets the attempt's `deadlineMs = now +
+  deadlineDurationMs`, a bound no renewal passes, and `leaseUntilMs` becomes the
+  nearer of `now + leaseDurationMs` and `deadlineMs`. Null leaves `deadlineMs` null:
+  the attempt is bounded by its lease alone, as in 0.1.
+
+The `Claim` returns both. Who the owner is stays the caller's choice: a host gives an
+attempt held outside the worker a fresh owner per claim (host §2, Steps outside the worker), so its token names
+that claim alone.
+
 ### heartbeat
 
 Predicate: the attempt is `running`, its ID, owner, and fence match, and now <
 `leaseUntilMs` (`stale` / `lease.lost` for all of these). Writes `leaseUntilMs = now +
 extendMs`. A replayed receipt returns the historical deadline and extends nothing.
+
+**0.2:** an attempt with a `deadlineMs` is extended to the nearer of `now + extendMs`
+and `deadlineMs`, never past it. `heartbeat` is how a holder renews its lease.
 
 ### set_process (0.2)
 
@@ -189,6 +209,13 @@ check the attempt's process record (host §3). In the same transaction the store
 one audit record for the attempt: `{"reason": "lease"}`, with `"notes":
 ["process.unchecked"]` when `processUnchecked` is true.
 
+**0.2:** the request also carries a `reason`: `lease`, `probe-dead`, `abandoned` or
+`cancelled`. Only `lease` requires now ≥ `leaseUntilMs`; the others end a running
+attempt at once, before its lease is due, and fence its holder out: a later
+`heartbeat` or `finish_attempt` with its reference is `lease.lost`. The appended event
+is the same `expired` result whatever the reason. The audit record names the reason,
+`{"reason": "<reason>"}`, with the notes above.
+
 ### record_late_evidence
 
 Predicate: the attempt exists (`not-found` / `attempt.not-found`). Writes one audit
@@ -212,12 +239,17 @@ and are idempotent on an already matching state.
   ascending by deadline then attempt ID; then `Outbox` items for `pending` invocations
   with `notBeforeMs ≤ now` in runs that are not quarantined, ascending by
   `notBeforeMs` then invocation ID. **0.2:** a `Lease` item carries the attempt's
-  process record, or null, so the sweeping host needs no second read.
+  process record, or null, so the sweeping host needs no second read. **0.2:**
+  `leaseUntilMs` never passes `deadlineMs`, so every running attempt past its deadline
+  is among the `Lease` items, and the ordinary sweep expires it.
 - `get_run`, `list_runs` (ascending by run ID within a tenant), `list_events`
   (ascending by sequence, with the consuming revision and that commit's diagnostics),
   `list_invocations` (ascending by invocation ID). **0.2:** an invocation shows the
   process record of its latest attempt, or null. **0.2:** a run shows its artifact
-  digest, or null.
+  digest, or null. **0.2:** an invocation also shows its latest attempt's full
+  reference (`attemptId`, `owner`, `fence`), its holder handle and its `deadlineMs`, or
+  nulls before its first claim, so a host can act on an attempt it did not claim. The
+  reference is a credential: a host never prints the fence (host §2, Steps outside the worker).
 
 ## 3. SQLite adapter
 
@@ -240,7 +272,8 @@ and are idempotent on an already matching state.
   A version written by an earlier 0.2 `spore` is upgraded in place in one transaction,
   and the writer is recorded again: version 2 to 3 adds the run's base folder, null
   for runs created before; version 3 to 4 adds the artifact table and the run's
-  artifact digest; version 4 to 5 adds the writer. The refusal happens before any
+  artifact digest; version 4 to 5 adds the writer; version 5 to 6 adds an attempt's
+  holder handle and deadline, null for attempts claimed before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
@@ -280,6 +313,9 @@ Written once, generic over a store factory and a manual clock, in
 | S16 | `set_process` on a running attempt, then with another owner or fence, at and after the deadline, and after expiry (0.2) | The record shows in `list_invocations` and in the `Lease` item of `scan_due`; null clears it; the lease is not extended; a replay is `duplicate` with the historical record; every other call is `lease.lost` and changes nothing; an expiry with `processUnchecked` is applied |
 | S17 | `create_run` with a base folder, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first folder; the repeat is `duplicate`; a run created with null shows null |
 | S18 | `create_run` with an artifact; again with the same start key and another artifact; with an artifact whose digest does not match its bytes (0.2) | The artifact is returned by `get_artifact` and its digest by `get_run`; the second start is `duplicate` and the run keeps the first artifact digest; the third is `artifact.digest-mismatch` and writes nothing; a run started without one shows none |
+| S19 | `claim_attempt` with a holder handle, a lease and a deadline; `heartbeat` before and at the deadline; a holder over 4 KiB (0.2) | The claim returns the holder and `deadlineMs`, and `leaseUntilMs` is the nearer bound; `list_invocations` shows the holder, the deadline and the full reference; a renewal stops at the deadline; the large holder is `holder.too-large` and claims nothing |
+| S20 | `expire_attempt` with each reason, before the lease is due (0.2) | `abandoned`, `probe-dead` and `cancelled` are applied at once and append one `expired` result; `lease` is `lease.not-due`; the old holder's `heartbeat` and `finish_attempt` are then `lease.lost`, and its result can be kept as late evidence |
+| S21 | An attempt claimed with a deadline shorter than its lease; the clock passes the deadline (0.2) | The attempt is a `Lease` item of `scan_due` from its deadline on, and `expire_attempt` with reason `lease` is applied |
 
 SQLite-specific, in the adapter crate:
 
@@ -294,3 +330,4 @@ SQLite-specific, in the adapter crate:
 | Q07 | Open a version 2 file (0.2) | Upgraded to the current version; its runs are kept with a null base folder; a new run records its folder |
 | Q08 | Open a version 3 file (0.2) | Upgraded to the current version; its runs are kept and show no artifact; a new run stores its artifact |
 | Q09 | Open a version 4 file (0.2) | Upgraded to the current version; its runs are kept; the file records this `spore` as its writer |
+| Q10 | Open a version 5 file (0.2) | Upgraded to the current version; its attempts are kept with no holder and no deadline; a new claim records both |

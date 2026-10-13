@@ -26,9 +26,14 @@ use tokio::task::JoinSet;
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::arrival::{Arrival, Trail};
 use crate::error::HostError;
+use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
 use crate::process::{self, Leftover};
+
+mod steps;
+
+pub use steps::{ExternalStep, StepClaim, StepRenewed, StepReport, StepState, RESULT_CHANNEL};
 
 /// Quarantine code of a run whose stored artifact cannot be read.
 pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
@@ -281,6 +286,8 @@ struct Inner {
     /// When the sweep last looked at the step files.
     files_swept: Mutex<Option<Instant>>,
     inflight: Mutex<HashSet<(RunKey, String)>>,
+    /// Invocations of `external` actions, which dispatch leaves to actors.
+    external: Mutex<HashSet<(RunKey, String)>>,
     tasks: Mutex<JoinSet<()>>,
     settled: Notify,
     /// Set by `shutdown`: no attempt is claimed from then on.
@@ -418,6 +425,13 @@ fn check_workflow(
         let kind = action.get("kind").and_then(Value::as_str).ok_or_else(|| {
             HostError::invalid("action.kind-missing", format!("action `{action_id}`"))
         })?;
+        // An external action has no runner: an actor outside the worker does it.
+        if kind == external::KIND {
+            external::parse(action).map_err(|e| {
+                HostError::invalid("action.invalid", format!("action `{action_id}`: {e}"))
+            })?;
+            continue;
+        }
         let runner = activities.get(kind).ok_or_else(|| {
             HostError::invalid(
                 "action.kind-unregistered",
@@ -490,6 +504,7 @@ impl Engine {
                 manifests: Mutex::new(HashMap::new()),
                 files_swept: Mutex::new(None),
                 inflight: Mutex::new(HashSet::new()),
+                external: Mutex::new(HashSet::new()),
                 tasks: Mutex::new(JoinSet::new()),
                 settled: Notify::new(),
                 closing: AtomicBool::new(false),
@@ -939,7 +954,8 @@ impl Engine {
     }
 
     /// Ticks until the run is terminal, `waiting`, `needs-intervention` or quarantined,
-    /// with no pending event and nothing of it in flight.
+    /// or waits for an actor at an external step, with no pending event and nothing of
+    /// it in flight.
     pub async fn run_until_parked(&self, key: &RunKey) -> Result<RunView, HostError> {
         let inner = &self.inner;
         loop {
@@ -948,7 +964,7 @@ impl Engine {
             let view = self.get_run(key).await?.ok_or_else(|| {
                 HostError::invalid("run.not-found", format!("run {} does not exist", key.run))
             })?;
-            if !busy && parked(&view) {
+            if !busy && (parked(&view) || self.waits_on_actor(&view).await?) {
                 return Ok(view);
             }
             if !report.did_work() {
@@ -1056,6 +1072,7 @@ impl Inner {
             )?,
             attempt,
             process_unchecked,
+            reason: ExpireReason::Lease,
         };
         match retry(true, || self.store.expire_attempt(request.clone())).await {
             Ok(_) => Ok(true),
@@ -1216,6 +1233,10 @@ impl Inner {
         if this.closing.load(Ordering::SeqCst) || lock(&this.inflight).contains(&slot) {
             return Ok(Dispatched::Not);
         }
+        // An actor claims an external step; the worker never does.
+        if this.is_external(&key, &invocation_id).await {
+            return Ok(Dispatched::Not);
+        }
         let delivery = match this.deliver(&key, &invocation_id).await? {
             Ok(delivery) => delivery,
             Err(Undeliverable::Quarantined) => return Ok(Dispatched::Quarantined),
@@ -1236,6 +1257,8 @@ impl Inner {
             invocation_id,
             worker: this.config.worker_id.clone(),
             lease_duration_ms: this.config.lease_ms,
+            holder: None,
+            deadline_duration_ms: None,
         };
         let receipt = match retry(true, || this.store.claim_attempt(request.clone())).await {
             Ok(receipt) => receipt,
@@ -1259,6 +1282,44 @@ impl Inner {
             task.settled.notify_waiters();
         });
         Ok(Dispatched::Started)
+    }
+
+    /// The invocation's view and its run's package; `None` when either is gone.
+    async fn invocation_package(
+        &self,
+        key: &RunKey,
+        invocation_id: &str,
+    ) -> Result<Option<(InvocationView, Arc<Package>)>, HostError> {
+        let Some(view) = retry(false, || self.store.get_run(key)).await? else {
+            return Ok(None);
+        };
+        let package = self.package(&view.package_digest).await?;
+        let invocations = retry(false, || self.store.list_invocations(key)).await?;
+        Ok(invocations
+            .into_iter()
+            .find(|i| i.invocation_id == invocation_id)
+            .map(|invocation| (invocation, package)))
+    }
+
+    /// Whether a due invocation belongs to an `external` action. Remembered, since an
+    /// invocation's action never changes; a run that cannot be read counts as not
+    /// external and is left to the usual dispatch.
+    async fn is_external(&self, key: &RunKey, invocation_id: &str) -> bool {
+        let slot = (key.clone(), invocation_id.to_string());
+        if lock(&self.external).contains(&slot) {
+            return true;
+        }
+        let found = match self.invocation_package(key, invocation_id).await {
+            Ok(Some((invocation, package))) => package
+                .actions
+                .get(&invocation.action_id)
+                .is_some_and(external::is_external),
+            _ => false,
+        };
+        if found {
+            lock(&self.external).insert(slot);
+        }
+        found
     }
 
     /// The step files and work folder of a due invocation (host §3, Step files and

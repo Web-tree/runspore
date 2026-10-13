@@ -64,6 +64,24 @@ pub mod u64_str {
         }
         Ok(value)
     }
+
+    /// The same for an optional counter: a decimal string, or null.
+    pub mod option {
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        pub fn serialize<S: Serializer>(value: &Option<u64>, ser: S) -> Result<S::Ok, S::Error> {
+            match value {
+                Some(value) => super::serialize(value, ser),
+                None => ser.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Option<u64>, D::Error> {
+            #[derive(Deserialize)]
+            struct Counter(#[serde(with = "super")] u64);
+            Ok(Option::<Counter>::deserialize(de)?.map(|c| c.0))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

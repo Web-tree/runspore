@@ -8,6 +8,7 @@ Every problem and warning `spore validate` can report, with its help page. `spor
 | --- | --- | --- |
 | [`action.bad-name`](action.bad-name.md) | problem | Action name with other characters |
 | [`action.bad-outcome`](action.bad-outcome.md) | problem | Not an outcome name |
+| [`action.lease-too-long`](action.lease-too-long.md) | problem | Lease not shorter than the deadline |
 | [`action.no-effect`](action.no-effect.md) | problem | Missing "effect" |
 | [`action.no-kind`](action.no-kind.md) | problem | Missing "kind" |
 | [`action.no-outcomes`](action.no-outcomes.md) | problem | Empty "outcomes" |

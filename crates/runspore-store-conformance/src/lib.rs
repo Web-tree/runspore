@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S17 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S21 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::fmt::Debug;
@@ -195,6 +195,30 @@ pub fn claim(
         invocation_id: invocation_id.to_string(),
         worker: worker.to_string(),
         lease_duration_ms: lease_ms,
+        holder: None,
+        deadline_duration_ms: None,
+    }
+}
+
+/// A claim held outside the worker: with a holder handle and a deadline.
+pub fn claim_held(
+    key: &RunKey,
+    request_id: &str,
+    invocation_id: &str,
+    lease_ms: u64,
+    holder: Option<Value>,
+    deadline_ms: u64,
+) -> ClaimAttempt {
+    let holder = holder.map(|h| canonical::encode(&h).expect("holder"));
+    ClaimAttempt {
+        mutation: mutation(
+            "claim_attempt",
+            request_id,
+            json!([key, invocation_id, "actor", lease_ms, holder, deadline_ms]),
+        ),
+        holder,
+        deadline_duration_ms: Some(deadline_ms),
+        ..claim(key, request_id, invocation_id, "actor", lease_ms)
     }
 }
 
@@ -235,10 +259,20 @@ pub fn finish(attempt: &AttemptRef, request_id: &str, number: u32) -> FinishAtte
 }
 
 pub fn expire(attempt: &AttemptRef, request_id: &str) -> ExpireAttempt {
+    expire_for(attempt, request_id, ExpireReason::Lease)
+}
+
+/// An `expire_attempt` with the given reason.
+pub fn expire_for(attempt: &AttemptRef, request_id: &str, reason: ExpireReason) -> ExpireAttempt {
     ExpireAttempt {
-        mutation: mutation("expire_attempt", request_id, json!([attempt, false])),
+        mutation: mutation(
+            "expire_attempt",
+            request_id,
+            json!([attempt, false, reason]),
+        ),
         attempt: attempt.clone(),
         process_unchecked: false,
+        reason,
     }
 }
 
@@ -1303,6 +1337,199 @@ pub async fn s18_artifact(factory: &dyn StoreFactory) {
     );
 }
 
+/// S19: a claim held outside the worker keeps its holder handle and a deadline that no
+/// renewal passes.
+pub async fn s19_holder_and_deadline(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s19").await;
+    let invocation = w.scheduled(0).await;
+    let large = json!("x".repeat(MAX_HOLDER_BYTES));
+    let refused = w
+        .store()
+        .claim_attempt(claim_held(
+            &w.key,
+            "claim-large",
+            &invocation,
+            100,
+            Some(large),
+            250,
+        ))
+        .await;
+    assert_eq!(
+        failure(refused),
+        (StoreFailureKind::Quota, "holder.too-large".into())
+    );
+    assert_eq!(w.invocations().await[0].status, InvocationStatus::Pending);
+    assert_eq!(
+        w.store().get_receipt(&w.key, "claim-large").await.unwrap(),
+        None
+    );
+
+    let holder = json!({"pid": 7});
+    let claimed = w
+        .store()
+        .claim_attempt(claim_held(
+            &w.key,
+            "claim",
+            &invocation,
+            100,
+            Some(holder.clone()),
+            250,
+        ))
+        .await
+        .unwrap()
+        .value;
+    let encoded = canonical::encode(&holder).unwrap();
+    assert_eq!(
+        (&claimed.holder, claimed.deadline_ms, claimed.lease_until_ms),
+        (&Some(encoded.clone()), Some(1_250), 1_100)
+    );
+    let shown = &w.invocations().await[0];
+    assert_eq!(shown.attempt.as_ref(), Some(&claimed.attempt));
+    assert_eq!(
+        (&shown.holder, shown.deadline_ms, shown.lease_until_ms),
+        (&Some(encoded), Some(1_250), Some(1_100))
+    );
+
+    w.clock.set(1_050);
+    let renewed = w
+        .store()
+        .heartbeat(heartbeat(&claimed.attempt, "renew-1", 100))
+        .await
+        .unwrap();
+    assert_eq!(renewed.value.lease_until_ms, 1_150);
+    w.clock.set(1_140);
+    let capped = w
+        .store()
+        .heartbeat(heartbeat(&claimed.attempt, "renew-2", 200))
+        .await
+        .unwrap();
+    assert_eq!(
+        capped.value.lease_until_ms, 1_250,
+        "never past the deadline"
+    );
+    w.clock.set(1_250);
+    let at = w
+        .store()
+        .heartbeat(heartbeat(&claimed.attempt, "renew-3", 100))
+        .await;
+    assert_eq!(failure(at), (StoreFailureKind::Stale, "lease.lost".into()));
+}
+
+/// S20: every reason but `lease` expires a running attempt before its lease is due, and
+/// fences its holder out.
+pub async fn s20_expire_reasons(factory: &dyn StoreFactory) {
+    let lease = World::new(factory, "s20-lease").await;
+    let invocation = lease.scheduled(0).await;
+    let attempt = lease
+        .store()
+        .claim_attempt(claim(&lease.key, "claim", &invocation, "w1", 1_000))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    let early = lease
+        .store()
+        .expire_attempt(expire_for(&attempt, "expire", ExpireReason::Lease))
+        .await;
+    assert_eq!(
+        failure(early),
+        (StoreFailureKind::Conflict, "lease.not-due".into())
+    );
+
+    for reason in [
+        ExpireReason::ProbeDead,
+        ExpireReason::Abandoned,
+        ExpireReason::Cancelled,
+    ] {
+        let w = World::new(factory, &format!("s20-{}", reason.as_str())).await;
+        let invocation = w.scheduled(0).await;
+        let attempt = w
+            .store()
+            .claim_attempt(claim(&w.key, "claim", &invocation, "w1", 1_000))
+            .await
+            .unwrap()
+            .value
+            .attempt;
+        let expired = w
+            .store()
+            .expire_attempt(expire_for(&attempt, "expire", reason))
+            .await
+            .unwrap();
+        assert_eq!(expired.disposition, Disposition::Applied, "{reason:?}");
+        let events = w.events().await;
+        let results: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == "activity.result")
+            .collect();
+        assert_eq!(results.len(), 1, "{reason:?}");
+        let result: ActivityResult = canonical::decode(&results[0].body).unwrap();
+        assert_eq!(result.status, AttemptStatus::Expired);
+        assert_eq!(w.invocations().await[0].status, InvocationStatus::Settled);
+
+        let renewed = w.store().heartbeat(heartbeat(&attempt, "renew", 100)).await;
+        assert_eq!(
+            failure(renewed),
+            (StoreFailureKind::Stale, "lease.lost".into())
+        );
+        let late = w
+            .store()
+            .finish_attempt(finish(&attempt, "finish", 1))
+            .await;
+        assert_eq!(
+            failure(late),
+            (StoreFailureKind::Stale, "lease.lost".into())
+        );
+        let kept = w
+            .store()
+            .record_late_evidence(RecordLateEvidence {
+                mutation: mutation("record_late_evidence", "late", json!([attempt])),
+                attempt: attempt.clone(),
+                evidence: success(&attempt, 1),
+            })
+            .await
+            .unwrap();
+        assert_eq!(kept.disposition, Disposition::Applied);
+        assert_eq!(
+            w.events().await.len(),
+            events.len(),
+            "late evidence appends nothing"
+        );
+    }
+}
+
+/// S21: an attempt past its deadline is a `Lease` item of `scan_due`, even when its
+/// lease alone would run longer.
+pub async fn s21_deadline_sweep(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s21").await;
+    let invocation = w.scheduled(0).await;
+    let claimed = w
+        .store()
+        .claim_attempt(claim_held(&w.key, "claim", &invocation, 1_000, None, 200))
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(
+        (claimed.lease_until_ms, claimed.deadline_ms),
+        (1_200, Some(1_200))
+    );
+    w.clock.set(1_199);
+    assert_eq!(w.due().await, vec![]);
+    w.clock.set(1_200);
+    assert_eq!(
+        w.due().await,
+        vec![DueItem::Lease {
+            attempt: claimed.attempt.clone(),
+            process: None,
+        }]
+    );
+    let expired = w
+        .store()
+        .expire_attempt(expire(&claimed.attempt, "expire"))
+        .await
+        .unwrap();
+    assert_eq!(expired.disposition, Disposition::Applied);
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1313,7 +1540,7 @@ macro_rules! store_conformance_tests {
             s07_concurrent_appends s08_atomic_commit s09_not_before s10_fences
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
             s15_start_key_race s16_process_record s17_base_dir
-            s18_artifact);
+            s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

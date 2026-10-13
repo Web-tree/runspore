@@ -19,7 +19,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -36,6 +36,9 @@ const UPGRADE_3: &str = "CREATE TABLE artifacts (digest TEXT PRIMARY KEY, body B
 /// Upgrades a version 4 database to version 5: the `meta` table that records the
 /// writer.
 const UPGRADE_4: &str = "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);";
+/// Upgrades a version 5 database to version 6: an attempt's holder handle and deadline.
+const UPGRADE_5: &str = "ALTER TABLE attempts ADD COLUMN holder BLOB;
+    ALTER TABLE attempts ADD COLUMN deadline_ms INTEGER;";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -272,12 +275,13 @@ struct AttemptRow {
     status: String,
     lease_until_ms: u64,
     attempt_number: u32,
+    deadline_ms: Option<u64>,
 }
 
 /// The attempt named by `a` if its invocation, owner and fence all match.
 fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
     c.query_row(
-        "SELECT status, lease_until_ms, attempt_number FROM attempts
+        "SELECT status, lease_until_ms, attempt_number, deadline_ms FROM attempts
          WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3
            AND invocation_id = ?4 AND owner = ?5 AND fence = ?6",
         params![
@@ -293,6 +297,7 @@ fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
                 status: r.get(0)?,
                 lease_until_ms: r.get::<_, i64>(1)? as u64,
                 attempt_number: r.get(2)?,
+                deadline_ms: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
             })
         },
     )
@@ -416,7 +421,12 @@ impl SqliteStore {
         if version == 0 {
             tx.execute_batch(SCHEMA).map_err(db)?;
         } else {
-            for (from, upgrade) in [(2, UPGRADE_2), (3, UPGRADE_3), (4, UPGRADE_4)] {
+            for (from, upgrade) in [
+                (2, UPGRADE_2),
+                (3, UPGRADE_3),
+                (4, UPGRADE_4),
+                (5, UPGRADE_5),
+            ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
                 }
@@ -706,9 +716,20 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     if now < not_before {
         return Err(conflict("invocation.not-due"));
     }
+    if q.holder
+        .as_ref()
+        .is_some_and(|h| h.len() > MAX_HOLDER_BYTES)
+    {
+        return Err(fail(
+            StoreFailureKind::Quota,
+            "holder.too-large",
+            "holder.too-large",
+        ));
+    }
     let fence = run.fence + 1;
     let attempt_id = ids::attempt(&q.invocation_id, number);
-    let lease_until_ms = now.saturating_add(q.lease_duration_ms);
+    let deadline_ms = q.deadline_duration_ms.map(|d| now.saturating_add(d));
+    let lease_until_ms = capped(now.saturating_add(q.lease_duration_ms), deadline_ms);
     c.execute(
         "UPDATE runs SET fence = ?3 WHERE tenant = ?1 AND run_id = ?2",
         params![q.key.tenant, q.key.run, i(fence)],
@@ -716,8 +737,8 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     .map_err(db)?;
     c.execute(
         "INSERT INTO attempts (tenant, run_id, attempt_id, invocation_id, attempt_number, owner,
-                               fence, lease_until_ms, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running')",
+                               fence, lease_until_ms, status, holder, deadline_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9, ?10)",
         params![
             q.key.tenant,
             q.key.run,
@@ -726,7 +747,9 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
             number,
             q.worker,
             i(fence),
-            i(lease_until_ms)
+            i(lease_until_ms),
+            q.holder,
+            deadline_ms.map(i)
         ],
     )
     .map_err(db)?;
@@ -750,7 +773,14 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
         effect_key,
         input_digest,
         input,
+        holder: q.holder.clone(),
+        deadline_ms,
     })
+}
+
+/// A lease end that never passes the attempt's deadline.
+fn capped(lease_until_ms: u64, deadline_ms: Option<u64>) -> u64 {
+    deadline_ms.map_or(lease_until_ms, |d| lease_until_ms.min(d))
 }
 
 fn set_quarantine(
@@ -1026,11 +1056,11 @@ impl Store for SqliteStore {
 
     async fn heartbeat(&self, q: Heartbeat) -> R<Receipt<LeaseExtended>> {
         self.mutate("heartbeat", Some("heartbeat"), &q.attempt.key, &q.mutation, |c, now| {
-            match attempt_row(c, &q.attempt)? {
-                Some(a) if a.status == "running" && now < a.lease_until_ms => {}
+            let deadline_ms = match attempt_row(c, &q.attempt)? {
+                Some(a) if a.status == "running" && now < a.lease_until_ms => a.deadline_ms,
                 _ => return Err(stale("lease.lost")),
-            }
-            let lease_until_ms = now.saturating_add(q.extend_ms);
+            };
+            let lease_until_ms = capped(now.saturating_add(q.extend_ms), deadline_ms);
             c.execute(
                 "UPDATE attempts SET lease_until_ms = ?4 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
                 params![q.attempt.key.tenant, q.attempt.key.run, q.attempt.attempt_id, i(lease_until_ms)],
@@ -1103,14 +1133,14 @@ impl Store for SqliteStore {
                 if row.status != "running" {
                     return Err(stale("lease.lost"));
                 }
-                if now < row.lease_until_ms {
+                if q.reason == ExpireReason::Lease && now < row.lease_until_ms {
                     return Err(conflict("lease.not-due"));
                 }
                 let body = encode(&ActivityResult::expired(
                     &q.attempt.invocation_id,
                     row.attempt_number,
                 ))?;
-                let mut audit = json!({"reason": "lease"});
+                let mut audit = json!({"reason": q.reason.as_str()});
                 if q.process_unchecked {
                     audit["notes"] = json!(["process.unchecked"]);
                 }
@@ -1307,7 +1337,7 @@ impl Store for SqliteStore {
             let mut stmt = c
                 .prepare(
                     "SELECT i.invocation_id, i.node_id, i.action_id, i.status, i.attempt_number, i.not_before_ms,
-                            a.lease_until_ms, a.owner, a.process
+                            a.lease_until_ms, a.owner, a.process, a.attempt_id, a.fence, a.holder, a.deadline_ms
                      FROM invocations i LEFT JOIN attempts a ON a.tenant = i.tenant AND a.run_id = i.run_id
                        AND a.invocation_id = i.invocation_id AND a.attempt_number = i.attempt_number
                      WHERE i.tenant = ?1 AND i.run_id = ?2 ORDER BY i.invocation_id",
@@ -1320,16 +1350,31 @@ impl Store for SqliteStore {
                         "running" => InvocationStatus::Running,
                         _ => InvocationStatus::Settled,
                     };
+                    let invocation_id: String = r.get(0)?;
+                    let owner: Option<String> = r.get(7)?;
+                    let attempt = match (r.get::<_, Option<String>>(9)?, &owner) {
+                        (Some(attempt_id), Some(owner)) => Some(AttemptRef {
+                            key: key.clone(),
+                            invocation_id: invocation_id.clone(),
+                            attempt_id,
+                            owner: owner.clone(),
+                            fence: r.get::<_, i64>(10)? as u64,
+                        }),
+                        _ => None,
+                    };
                     Ok(InvocationView {
-                        invocation_id: r.get(0)?,
+                        invocation_id,
                         node_id: r.get(1)?,
                         action_id: r.get(2)?,
                         status,
                         attempt_number: r.get(4)?,
                         not_before_ms: r.get::<_, i64>(5)? as u64,
                         lease_until_ms: r.get::<_, Option<i64>>(6)?.map(|v| v as u64),
-                        owner: r.get(7)?,
+                        owner,
                         process: process_column(r, 8)?,
+                        attempt,
+                        holder: r.get(11)?,
+                        deadline_ms: r.get::<_, Option<i64>>(12)?.map(|v| v as u64),
                     })
                 })
                 .and_then(Iterator::collect)

@@ -168,14 +168,15 @@ async fn h3_a_lost_lease_stops_the_runner_and_keeps_late_evidence() {
     assert_eq!(audits(&path), 1, "late evidence was not recorded");
 }
 
-/// Answers `get_run` with a `corrupt` failure once, when armed.
-struct Unreadable(AtomicBool);
+/// Answers every `get_run` with a `corrupt` failure while armed, and counts them.
+struct Unreadable(AtomicBool, AtomicUsize);
 
 impl Hook for Unreadable {
     fn get_run(&self) -> Option<StoreFailure> {
-        self.0
-            .swap(false, Ordering::SeqCst)
-            .then(|| StoreFailure::new(StoreFailureKind::Corrupt, "db.corrupt", "unreadable"))
+        self.0.load(Ordering::SeqCst).then(|| {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            StoreFailure::new(StoreFailureKind::Corrupt, "db.corrupt", "unreadable")
+        })
     }
 }
 
@@ -185,7 +186,7 @@ async fn an_attempt_whose_run_cannot_be_read_is_abandoned_to_lease_expiry() {
     let clock = ManualClock::new(1_000_000);
     let store = Arc::new(Hooked {
         inner: Arc::new(SqliteStore::open_with_clock(&path, clock.clone()).unwrap()),
-        hook: Unreadable(AtomicBool::new(false)),
+        hook: Unreadable(AtomicBool::new(false), AtomicUsize::new(0)),
     });
     let count = Arc::new(AtomicUsize::new(0));
     let config = EngineConfig {
@@ -208,8 +209,9 @@ async fn an_attempt_whose_run_cannot_be_read_is_abandoned_to_lease_expiry() {
     while engine.in_flight() > 0 {
         tokio::task::yield_now().await;
     }
+    store.hook.0.store(false, Ordering::SeqCst);
     assert!(
-        !store.hook.0.load(Ordering::SeqCst),
+        store.hook.1.load(Ordering::SeqCst) > 0,
         "the attempt never read its run"
     );
     assert!(

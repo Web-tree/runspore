@@ -23,6 +23,8 @@ const ERROR_CODE: &str = "^[a-z0-9][a-z0-9.-]{0,63}$";
 const SIGNAL: &str = "^[A-Za-z0-9_.-]{1,64}$";
 /// A count of milliseconds as a canonical decimal string.
 const DECIMAL: &str = "^(0|[1-9][0-9]{0,18})$";
+/// A positive count of milliseconds as a canonical decimal string.
+const POSITIVE: &str = "^[1-9][0-9]{0,18}$";
 /// A JSON Pointer (RFC 6901): empty, or `/` and its steps, each `~` followed by `0`
 /// or `1`.
 const POINTER: &str = "^(/([^~/]|~[01])*)*$";
@@ -121,14 +123,72 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "BTreeMap<String, String>")]
     pub exit_outcomes: Option<BTreeMap<String, String>>,
-    /// `command`: an asynchronous action's probe, watch and stop programs.
+    /// `command`, `external`: an asynchronous action's bounds and its probe, watch
+    /// and stop programs.
     #[serde(default, rename = "async")]
-    #[schemars(with = "BTreeMap<String, Value>")]
-    pub asynchronous: Option<Value>,
+    #[schemars(with = "Async")]
+    pub asynchronous: Option<Async>,
     /// `native`: the function the host registered under this name.
     #[serde(default)]
     #[schemars(with = "String")]
     pub function: Option<String>,
+    /// `external`: which kind of actor does the step. A claim takes the step only
+    /// when it names this label.
+    #[serde(default)]
+    #[schemars(with = "Actor")]
+    pub actor: Option<String>,
+}
+
+/// An asynchronous action's bounds, and the programs that look after its holder.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Async {
+    /// How long one try may be held, in milliseconds, counted from its claim or
+    /// start. Default "3600000".
+    #[serde(default)]
+    #[schemars(with = "Positive")]
+    pub timeout_ms: Option<String>,
+    /// How often the holder must renew, in milliseconds; smaller than `timeoutMs`.
+    /// Without it nobody renews.
+    #[serde(default)]
+    #[schemars(with = "Positive")]
+    pub lease_ms: Option<String>,
+    /// The program that tells whether the holder is still alive.
+    #[serde(default)]
+    #[schemars(with = "BTreeMap<String, Value>")]
+    pub probe: Option<Value>,
+    /// The program that waits for the holder's result.
+    #[serde(default)]
+    #[schemars(with = "BTreeMap<String, Value>")]
+    pub watch: Option<Value>,
+    /// The program that stops the holder when its run is cancelled.
+    #[serde(default)]
+    #[schemars(with = "BTreeMap<String, Value>")]
+    pub stop: Option<Value>,
+    /// The result channels the action reports through, in order of preference.
+    #[serde(default)]
+    #[schemars(with = "Vec<String>")]
+    pub channels: Option<Vec<String>>,
+}
+
+/// `[a-z0-9][a-z0-9.-]{0,63}`: an actor label.
+#[derive(JsonSchema)]
+#[schemars(transform = actor)]
+#[allow(dead_code)]
+struct Actor(String);
+
+fn actor(schema: &mut schemars::Schema) {
+    schema.insert("pattern".into(), json!(ERROR_CODE));
+}
+
+/// A positive count of milliseconds written as a string of digits, such as `"60000"`.
+#[derive(JsonSchema)]
+#[schemars(transform = positive)]
+#[allow(dead_code)]
+struct Positive(String);
+
+fn positive(schema: &mut schemars::Schema) {
+    schema.insert("pattern".into(), json!(POSITIVE));
 }
 
 /// A `command` action needs `argv`; a `native` one needs `function`.
@@ -148,6 +208,7 @@ fn kind_needs(schema: &mut schemars::Schema) {
 pub enum Kind {
     Command,
     Native,
+    External,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]

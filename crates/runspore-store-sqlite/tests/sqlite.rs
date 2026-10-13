@@ -1,14 +1,16 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q09 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q10 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use runspore_store_conformance::{claim, create_run, expire, schedule, ManualClock};
+use runspore_store_conformance::{
+    claim, claim_held, create_run, expire, expire_for, schedule, ManualClock,
+};
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
-    InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact, Turn,
-    DEFAULT_TENANT,
+    ExpireReason, InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact,
+    Turn, DEFAULT_TENANT,
 };
 use serde_json::{json, Value};
 
@@ -269,11 +271,18 @@ async fn q05_an_expiry_writes_its_audit_record() {
     unchecked.mutation =
         Mutation::new("expire_attempt", "expire", &json!([attempt, true])).unwrap();
     store.expire_attempt(unchecked).await.unwrap();
+    drop(store);
+    let (store, attempt) = expired_lease(&path, "abandoned").await;
+    store
+        .expire_attempt(expire_for(&attempt, "expire", ExpireReason::Abandoned))
+        .await
+        .unwrap();
     assert_eq!(
         audits(&path, "attempt.expired"),
         [
             json!({"reason": "lease"}),
-            json!({"reason": "lease", "notes": ["process.unchecked"]})
+            json!({"reason": "lease", "notes": ["process.unchecked"]}),
+            json!({"reason": "abandoned"})
         ]
     );
     assert!(audits(&path, "late-evidence").is_empty());
@@ -288,7 +297,9 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN process;
+        "ALTER TABLE attempts DROP COLUMN holder;
+         ALTER TABLE attempts DROP COLUMN deadline_ms;
+         ALTER TABLE attempts DROP COLUMN process;
          ALTER TABLE audit DROP COLUMN kind;
          ALTER TABLE runs DROP COLUMN base_dir;
          ALTER TABLE runs DROP COLUMN artifact_digest;
@@ -338,7 +349,9 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN base_dir;
+        "ALTER TABLE attempts DROP COLUMN holder;
+         ALTER TABLE attempts DROP COLUMN deadline_ms;
+         ALTER TABLE runs DROP COLUMN base_dir;
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
          DROP TABLE meta;
@@ -371,7 +384,9 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN artifact_digest;
+        "ALTER TABLE attempts DROP COLUMN holder;
+         ALTER TABLE attempts DROP COLUMN deadline_ms;
+         ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
          DROP TABLE meta;
          PRAGMA user_version = 3;",
@@ -419,8 +434,13 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
         .unwrap();
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE meta; PRAGMA user_version = 4;")
-        .unwrap();
+    conn.execute_batch(
+        "ALTER TABLE attempts DROP COLUMN holder;
+         ALTER TABLE attempts DROP COLUMN deadline_ms;
+         DROP TABLE meta;
+         PRAGMA user_version = 4;",
+    )
+    .unwrap();
     drop(conn);
 
     let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
@@ -431,4 +451,56 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     );
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!(kept.revision, 0);
+}
+
+/// Q10: a version 5 file gains an attempt's holder handle and deadline; the attempts it
+/// holds keep neither.
+#[tokio::test]
+async fn q10_a_version_5_file_is_upgraded() {
+    let path = fresh_path();
+    let (store, attempt) = expired_lease(&path, "old").await;
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE attempts DROP COLUMN holder;
+         ALTER TABLE attempts DROP COLUMN deadline_ms;
+         PRAGMA user_version = 5;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    let shown = store
+        .list_invocations(&attempt.key)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        (shown.attempt.as_ref(), shown.holder, shown.deadline_ms),
+        (Some(&attempt), None, None)
+    );
+    store
+        .expire_attempt(expire(&attempt, "expire"))
+        .await
+        .unwrap();
+
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    store
+        .create_run(create_run(&new, "create", 1))
+        .await
+        .unwrap();
+    let turn = store.load_turn(&new).await.unwrap().unwrap();
+    let (command, invocation) = schedule(&new, "a", 0);
+    let commit = runspore_store_conformance::commit(&turn, "commit", 0, vec![command]);
+    store.commit_turn(commit).await.unwrap();
+    let holder = Some(json!({"pid": 1}));
+    let held = store
+        .claim_attempt(claim_held(&new, "claim", &invocation, 100, holder, 50))
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(held.deadline_ms, Some(1_150));
+    let shown = store.list_invocations(&new).await.unwrap().remove(0);
+    assert_eq!(shown.holder, Some(b"{\"pid\":1}".to_vec()));
 }

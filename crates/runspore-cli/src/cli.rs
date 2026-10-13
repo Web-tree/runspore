@@ -8,8 +8,8 @@ use std::sync::Arc;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
-    validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner,
-    StartOutcome,
+    validate_workflow, ActivityRegistry, Arrival, Engine, EngineConfig, ExternalStep, HostError,
+    NativeRunner, StartOutcome, StepClaim, StepReport,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
@@ -17,7 +17,7 @@ use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::digest;
 use runspore_types::model::{ErrorInfo, Resolution, State};
 use runspore_types::reducer::Reducer;
-use runspore_types::store::{Disposition, RunKey, RunView, StoreFailureKind};
+use runspore_types::store::{Disposition, InvocationView, RunKey, RunView, StoreFailureKind};
 use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
@@ -152,6 +152,48 @@ pub enum Command {
     },
     /// Lift a quarantine.
     Release { run_id: String },
+    /// Claim, renew, complete, fail or abandon an external step: one an actor outside
+    /// the worker does.
+    #[command(subcommand)]
+    Step(StepCommand),
+}
+
+#[derive(Subcommand)]
+pub enum StepCommand {
+    /// Claim a ready external step: the run's, or the oldest in the database. Prints the
+    /// token, the input and the instructions.
+    Claim {
+        run_id: Option<String>,
+        /// Take only steps with this actor label; without it, only unlabelled steps.
+        #[arg(long)]
+        actor: Option<String>,
+        /// The holder handle: JSON kept with the attempt, shown by `status`.
+        #[arg(long)]
+        holder: Option<String>,
+    },
+    /// Extend the claimed attempt's lease, never past its deadline.
+    Renew { token: String },
+    /// Report the step done with an outcome.
+    Complete {
+        token: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Report the step failed.
+    Fail {
+        token: String,
+        #[arg(long)]
+        error: String,
+        #[arg(long)]
+        code: Option<String>,
+        /// Another try could help: the kernel may retry, up to `maxAttempts`.
+        #[arg(long)]
+        retryable: bool,
+    },
+    /// Free the run's held external step at once.
+    Abandon { run_id: String },
 }
 
 #[derive(Args)]
@@ -248,7 +290,9 @@ impl From<HostError> for Fail {
             }
             HostError::Invalid { .. } | HostError::Kernel(_) => true,
             HostError::Store(f) => {
-                f.kind == StoreFailureKind::Conflict || f.code == "run.not-found"
+                f.kind == StoreFailureKind::Conflict
+                    || f.code == "run.not-found"
+                    || f.code == "lease.lost"
             }
         };
         let fail = if usage { Fail::usage } else { Fail::internal };
@@ -391,15 +435,10 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         }
         Command::Status { run_id } => {
             let view = existing(&engine, run_id).await?;
-            let arrival = engine.arrival(&view).await?;
-            let package = package(&engine, &view).await?;
-            let invocations = engine.list_invocations(&view.key).await?;
-            let mut json = view::status_json(&view, &arrival, package.as_ref(), &invocations);
+            let shown = Shown::read(&engine, &view).await?;
+            let mut json = shown.json(&view);
             json["db"] = json!(db);
-            done(
-                json,
-                view::status_text(&view, &arrival, package.as_ref(), &invocations),
-            )
+            done(json, shown.text(&view))
         }
         Command::List => list(&engine, &db).await,
         Command::Events { run_id } => events(&engine, run_id).await,
@@ -477,6 +516,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
                 format!("resolution {disposition} (request ID {request_id})"),
             )
         }
+        Command::Step(command) => step(&engine, command).await,
         Command::Release { run_id } => {
             let key = existing(&engine, run_id).await?.key;
             let receipt = engine.release(&key).await?;
@@ -883,31 +923,186 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
         view = engine.run_until_parked(key) => Some(view?),
         () = stop.wait() => None,
     };
-    let (view, exit) = match parked {
-        Some(view) => {
-            let exit = view::exit_for(&view);
-            (view, exit)
-        }
+    let (view, interrupted) = match parked {
+        Some(view) => (view, false),
         None => {
             engine.shutdown().await;
-            (existing(engine, &key.run).await?, EXIT_INTERRUPTED)
+            (existing(engine, &key.run).await?, true)
         }
     };
-    let arrival = engine.arrival(&view).await?;
-    let package = package(engine, &view).await?;
-    let invocations = engine.list_invocations(&view.key).await?;
-    let mut json = view::status_json(&view, &arrival, package.as_ref(), &invocations);
+    let shown = Shown::read(engine, &view).await?;
+    let exit = if interrupted {
+        EXIT_INTERRUPTED
+    } else {
+        view::exit_for(&view, shown.step.as_ref())
+    };
+    let mut json = shown.json(&view);
     json["db"] = json!(db);
-    if exit == EXIT_INTERRUPTED {
+    if interrupted {
         json["interrupted"] = json!(true);
     }
     Ok(Output {
-        text: view::status_text(&view, &arrival, package.as_ref(), &invocations),
+        text: shown.text(&view),
         json,
         raw: None,
         stderr: String::new(),
         exit,
     })
+}
+
+/// What `status` shows of a run beside its view.
+struct Shown {
+    arrival: Arrival,
+    package: Option<Value>,
+    invocations: Vec<InvocationView>,
+    step: Option<ExternalStep>,
+}
+
+impl Shown {
+    async fn read(engine: &Engine, view: &RunView) -> Result<Self, Fail> {
+        Ok(Self {
+            arrival: engine.arrival(view).await?,
+            package: package(engine, view).await?,
+            invocations: engine.list_invocations(&view.key).await?,
+            step: engine.external_step(view).await?,
+        })
+    }
+
+    fn json(&self, view: &RunView) -> Value {
+        let (package, invocations) = (self.package.as_ref(), &self.invocations);
+        let mut json = view::status_json(view, &self.arrival, package, invocations);
+        json["step"] = view::step_json(self.step.as_ref());
+        json
+    }
+
+    fn text(&self, view: &RunView) -> String {
+        let (package, invocations) = (self.package.as_ref(), &self.invocations);
+        view::status_text(view, &self.arrival, package, invocations)
+            + &view::step_text(self.step.as_ref())
+    }
+}
+
+/// `spore step …` (spec/cli.md, Steps outside the worker).
+async fn step(engine: &Engine, command: &StepCommand) -> Result<Output, Fail> {
+    let reported = |report: StepReport| {
+        let disposition = disposition(&report.disposition);
+        done(
+            json!({"runId": report.key.run, "invocationId": report.invocation_id,
+                   "attempt": report.attempt, "disposition": disposition}),
+            format!(
+                "step {} attempt {} {disposition}",
+                report.invocation_id, report.attempt
+            ),
+        )
+    };
+    match command {
+        StepCommand::Claim {
+            run_id,
+            actor,
+            holder,
+        } => {
+            if let Some(run) = run_id {
+                existing(engine, run).await?;
+            }
+            let holder = holder
+                .as_deref()
+                .map(|h| parse_json("--holder", h))
+                .transpose()?;
+            let claim = engine
+                .claim_step(run_id.as_deref(), actor.as_deref(), holder)
+                .await?;
+            match (claim, run_id) {
+                (Some(claim), _) => claimed(&claim),
+                (None, Some(run)) => {
+                    let label = match actor {
+                        Some(actor) => format!("for actor {actor}"),
+                        None => "without an actor label".to_string(),
+                    };
+                    Err(Fail::usage(
+                        "step.not-ready",
+                        format!("run {run} has no ready external step {label}"),
+                    ))
+                }
+                (None, None) => done(json!({"claimed": false}), "nothing to claim".into()),
+            }
+        }
+        StepCommand::Renew { token } => {
+            let renewed = engine.renew_step(token).await?;
+            done(
+                json!({"runId": renewed.key.run,
+                       "leaseUntilMs": renewed.lease_until_ms.to_string(),
+                       "deadlineMs": renewed.deadline_ms.map(|d| d.to_string())}),
+                format!("lease renewed until {} ms", renewed.lease_until_ms),
+            )
+        }
+        StepCommand::Complete {
+            token,
+            outcome,
+            output,
+        } => {
+            let output = output
+                .as_deref()
+                .map(|o| parse_json("--output", o))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            reported(engine.complete_step(token, outcome, output).await?)
+        }
+        StepCommand::Fail {
+            token,
+            error,
+            code,
+            retryable,
+        } => {
+            let code = code.as_deref();
+            reported(engine.fail_step(token, error, code, *retryable).await?)
+        }
+        StepCommand::Abandon { run_id } => {
+            let key = existing(engine, run_id).await?.key;
+            reported(engine.abandon_step(&key).await?)
+        }
+    }
+}
+
+/// A claim as JSON, and as text for a person: the step, how to report it, then its
+/// instructions.
+fn claimed(claim: &StepClaim) -> Result<Output, Fail> {
+    let path = |p: &Option<PathBuf>| p.as_ref().map(|p| p.display().to_string());
+    let token = claim.token.to_string();
+    let json = json!({
+        "claimed": true, "token": token, "runId": claim.key.run,
+        "nodeId": claim.node_id, "actionId": claim.action_id,
+        "invocationId": claim.invocation_id, "attempt": claim.attempt,
+        "input": claim.input, "outcomes": claim.outcomes,
+        "outputSchemas": claim.output_schemas,
+        "deadlineMs": claim.deadline_ms.to_string(),
+        "leaseUntilMs": claim.lease_until_ms.to_string(),
+        "resultChannel": claim.result_channel,
+        "files": path(&claim.files), "instructions": path(&claim.instructions),
+        "workDir": path(&claim.work_dir),
+    });
+    let mut text = format!(
+        "claimed step {} of run {} (attempt {})\n",
+        claim.node_id, claim.key.run, claim.attempt
+    );
+    text += &format!("outcomes   {}\n", claim.outcomes.join(", "));
+    text += &format!("deadline   {} ms\n", claim.deadline_ms);
+    text += &format!("input      {}\n", claim.input);
+    if let Some(dir) = &claim.work_dir {
+        text += &format!("work dir   {}\n", dir.display());
+    }
+    text += &format!("token      {token}\n\nreport with:\n");
+    text += &format!("  spore step complete {token} --outcome <outcome> [--output <json>]\n");
+    text += &format!("  spore step fail {token} --error <message> [--retryable]\n");
+    if let Some(instructions) = &claim.instructions {
+        let content = std::fs::read_to_string(instructions).map_err(|e| {
+            Fail::internal(
+                "file.unreadable",
+                format!("{}: {e}", instructions.display()),
+            )
+        })?;
+        text += &format!("\ninstructions ({}):\n\n{content}", instructions.display());
+    }
+    done(json, text)
 }
 
 /// The ID of the run's outstanding invocation, which `resolve` answers by default.

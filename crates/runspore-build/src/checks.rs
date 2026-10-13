@@ -26,6 +26,8 @@ const GET: &str = "$get";
 const LITERAL: &str = "$literal";
 const DEFAULT: &str = "default";
 const ROOTS: [&str; 4] = ["input", "nodes", "run", "from"];
+/// An external action's `async.timeoutMs` when it gives none (spec/host.md §2).
+const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
 /// Characters a shell would treat specially: a command line holding one is not
 /// split into words safely.
 const SHELL: &[char] = &[
@@ -468,8 +470,13 @@ impl<'a> Checks<'a> {
             }
         }
         self.bundled_programs(id, &raw);
-        for field in ["backoffMs", "maxBackoffMs"] {
-            let at = pointer(&pointer(&here, "retry"), field);
+        for (object, field) in [
+            ("retry", "backoffMs"),
+            ("retry", "maxBackoffMs"),
+            ("async", "timeoutMs"),
+            ("async", "leaseMs"),
+        ] {
+            let at = pointer(&pointer(&here, object), field);
             let ms = self.value.pointer(&at).and_then(Value::as_str);
             let too_large = ms
                 .and_then(|ms| ms.parse::<u64>().ok())
@@ -505,6 +512,10 @@ impl<'a> Checks<'a> {
         let Ok(action) = serde_json::from_value::<Action>(raw.clone()) else {
             return;
         };
+        if action.kind == Kind::External {
+            self.lease(id, &action);
+            return;
+        }
         if action.kind == Kind::Native {
             if let (Some(known), Some(function)) = (&self.machine.functions, &action.function) {
                 if !known.contains(function) {
@@ -550,6 +561,33 @@ impl<'a> Checks<'a> {
                 );
             }
         }
+    }
+
+    /// An external action's holder renews within `leaseMs`, so it must be shorter than
+    /// the deadline, `timeoutMs` (spec/host.md §2, Steps outside the worker).
+    fn lease(&mut self, id: &str, action: &Action) {
+        let Some(spec) = &action.asynchronous else {
+            return;
+        };
+        let at = pointer(&pointer(&pointer("/actions", id), "async"), "leaseMs");
+        let millis = |text: &Option<String>| text.as_deref().map(str::parse::<u64>);
+        let timeout = match millis(&spec.timeout_ms) {
+            None => DEFAULT_TIMEOUT_MS,
+            Some(Ok(timeout)) => timeout,
+            Some(Err(_)) => return,
+        };
+        let Some(Ok(lease)) = millis(&spec.lease_ms) else {
+            return;
+        };
+        if lease < timeout || self.broken.touches(&at) {
+            return;
+        }
+        self.push(
+            Diagnostic::new("action.lease-too-long", At::value(&at))
+                .arg("lease", Arg::Input(at.clone()))
+                .arg("timeout", Arg::Computed(json!(timeout.to_string())))
+                .fix(Fix::review(vec![Edit::Remove { at: at.clone() }])),
+        );
     }
 
     /// `argv[0]` holding a whole command line, or a program this machine lacks.
