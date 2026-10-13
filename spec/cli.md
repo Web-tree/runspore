@@ -37,6 +37,11 @@ marked **0.2** below are new since 0.1.
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
 | `release <runId>` | Lifts a quarantine |
+| `step claim [<runId>] [--actor <label>] [--holder <json>]` | **0.2.** Claims a ready external step and prints what the actor needs (§Steps outside the worker) |
+| `step renew <token>` | **0.2.** Extends the claimed attempt's lease, never past its deadline |
+| `step complete <token> --outcome <o> [--output <json>]` | **0.2.** Reports the step done with an outcome |
+| `step fail <token> --error <message> [--code <c>] [--retryable]` | **0.2.** Reports the step failed |
+| `step abandon <runId>` | **0.2.** Frees the run's held external step at once |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
 as [dot.md](dot.md) describes, or a workflow artifact (a file starting with the
@@ -113,6 +118,69 @@ In JSON mode the error object carries `details`:
 `{"outcome": "rejected", "errors": [{"path": "", "message": "expected type \"object\", got null"}]}`.
 A folder's schema outside the subset is the diagnostic `schema.outside-subset` (dot.md
 §6).
+
+## Steps outside the worker (0.2)
+
+An external step (host.md §2, Steps outside the worker) is done by an actor, who
+claims it, works, and reports back with `spore step`. `run` and `worker
+--until-parked` stop when the run reaches one, with exit 6: the worker has nothing to
+do until an actor reports or the attempt expires. A worker still sweeps the step's
+attempt: once its lease or deadline passes, it is expired and the action's effect
+decides (a repeatable step is ready again, an `unsafe` one needs intervention).
+
+**`step claim [<runId>] [--actor <label>] [--holder <json>]`.** With `<runId>`, claims
+that run's ready external step; a run that has none exits 2 with `step.not-ready`.
+Without it, claims the oldest ready matching step in the database, like a task queue;
+when there is none it exits 0 and prints `{"claimed": false}` (text: `nothing to
+claim`). Without `--actor` it takes only steps whose action has no `actor`; with
+`--actor <label>`, only steps with that label. `--holder` is the holder handle,
+canonical JSON of at most 4 KiB kept with the attempt and shown by `status` (exit 2,
+`holder.invalid`, otherwise). It prints:
+
+```json
+{"format": "runspore.cli/0.2", "claimed": true, "token": "…",
+ "runId": "run_…", "nodeId": "review", "actionId": "review", "invocationId": "inv_…",
+ "attempt": 1, "input": {…}, "outcomes": ["approved", "changes"],
+ "outputSchemas": {"changes": {…}}, "deadlineMs": "…", "leaseUntilMs": "…",
+ "resultChannel": "store", "files": "/…/steps/…/review", "instructions": "/…/review.md",
+ "workDir": "/…/work/run_…/inv_…"}
+```
+
+`files`, `instructions` and `workDir` are the step's files, its instructions file and
+its work folder (host.md §3), each null when it has none. The token is the claim's
+credential; treat it as opaque. Text mode prints the step, its outcomes, its deadline,
+the token and the commands that report with it, and then the instructions themselves,
+so a person at a terminal can start at once.
+
+**`step renew <token>`.** Extends the lease by the action's `leaseMs` (or `timeoutMs`),
+never past the deadline, and prints `{runId, leaseUntilMs, deadlineMs}`.
+
+**`step complete <token> --outcome <o> [--output <json>]`.** Reports success.
+Missing output is `null`. It exits 2 and records nothing when the outcome is not one
+the action declares (`step.undeclared-outcome`), the output is not canonical JSON
+(integers only, depth at most 32; `step.output-not-canonical`), the result is over
+64 KiB (`step.output-too-large`), or the output does not fit the outcome's schema
+(`output.invalid`, printed as for `signal`). The same report sent again is a
+`duplicate`.
+
+**`step fail <token> --error <message> [--code <c>] [--retryable]`.** Reports failure
+with code `step.failed`, or `<c>`, which must match `[a-z0-9][a-z0-9.-]{0,63}` (exit 2,
+`step.bad-code`). With `--retryable` the kernel may try again, up to the action's
+`maxAttempts`; without it, or once they are used up, the run takes the node's
+`failed` arrow or the step is stuck.
+
+`complete` and `fail` print `{runId, invocationId, attempt, disposition}`. A report
+with a token that names no attempt of the run's external step exits 2 with
+`step.token-invalid`. A report for an attempt that has already ended, because it was
+abandoned, expired or reported, exits 2 with `lease.lost`; spore keeps what it said
+as late evidence, and the run does not move.
+
+**`step abandon <runId>`.** Expires the run's held external attempt at once, whatever
+its lease, and fences its holder out: a later report from it is `lease.lost`. The
+action's effect then decides, as for any expiry. A run with no held external step
+exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
+
+The `step` commands are writing commands (§Project folder).
 
 ## Validation (0.2)
 
@@ -284,7 +352,7 @@ database is `<dir>/.spore/runspore.db`, add whichever of these lines are missing
 every other line, and create the file if it is absent.
 
 **Only writing commands create a database.** The writing commands are `start`, `run`,
-`worker`, `signal`, `resolve` and `release`. The read-only commands `status`, `list`
+`worker`, `signal`, `resolve`, `release` and `step`. The read-only commands `status`, `list`
 and `events` treat a missing database as empty: `list` shows no runs, and `status` and
 `events` exit 2 with `run.not-found`. They never create the file. `validate` and
 `init` open no database.
@@ -328,6 +396,7 @@ name (`project.legacy-database`, above).
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
+| 6 | **0.2.** The run is waiting on an external step: an actor must claim it or report it |
 | 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version) |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
@@ -345,7 +414,7 @@ Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
                 "error": {"code": "command.exit", "message": "exit code 1", "nodeId": "deploy",
                           "details": {…}}},
  "streaks": {"test": {"outcome": "red", "count": 2, "limit": 3}},
- "result": null, "end": null, "quarantine": null}
+ "step": null, "result": null, "end": null, "quarantine": null}
 ```
 
 `position.from` is the arrow the run took into its position: the node whose result
@@ -384,6 +453,14 @@ node returned (kernel.md §4).
 (store.md §2 `set_process`): `{"host", "boot", "pgid", "started"}`, or null when the
 attempt has none. A running command shows its record; a command that ended has had its
 record cleared; an attempt whose worker died keeps its record.
+
+**0.2:** `step` describes the external step the run is at (§Steps outside the
+worker), or is null anywhere else: `{"kind": "external", "actor", "state", "attempt",
+"holder", "deadlineMs", "leaseUntilMs"}`. `actor` is the action's label or null.
+`state` is `ready` while nobody holds the step and `held` while a claimed attempt
+runs; `holder` is the handle given with `--holder` (or null), and the two times are
+those of the held attempt, null while ready. It never shows the step's input or the
+token.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.
 `artifactDigest` is the digest of the file it was started from, a workflow artifact or

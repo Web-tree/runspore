@@ -173,6 +173,7 @@ One bounded pass. It never blocks on an activity.
    read back through `scan_due`, is dispatched.
 3. **Dispatch.** For each `Outbox` item, while fewer than `max_concurrent_activities`
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
+   **0.2:** an invocation of an `external` action is skipped: an actor claims it.
    **0.2:** with `files_dir` set, before the claim, the host makes or checks the
    step's files and its work folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
    no attempt is spent and no lease runs out on a try that never started.
@@ -188,7 +189,8 @@ process exits. The same sequence is available as `shutdown()`; after it the engi
 never claims again.
 
 `run_until_parked(key)` ticks until that run is terminal, `waiting`,
-`needs-intervention`, or quarantined, and nothing of it is in flight.
+`needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or at
+an external step (Steps outside the worker, below).
 
 ### One attempt
 
@@ -225,6 +227,95 @@ never claims again.
 
 The host does not look at the action's `effect`. Reporting `unknown` honestly is its
 whole job; the kernel decides what an unknown outcome means.
+
+### Steps outside the worker (0.2)
+
+An **external step** is an `activity` node bound to an action of kind `external`. Its
+work is done by an **actor** outside the worker, a person or a program the workflow
+does not start, who claims the step's attempt, does the work, and reports the result.
+The worker never claims or runs it. The kernel schedules its invocation like any
+other, since it reads only an action's `outcomes`, `effect` and `retry` (kernel §2);
+attempts, fences, effect classes, retries and stuck steps apply unchanged.
+
+```json
+{"kind": "external", "actor": "reviewer", "effect": "unsafe",
+ "outcomes": ["approved", "changes"],
+ "async": {"timeoutMs": "7200000", "leaseMs": "600000"}}
+```
+
+- `actor`: optional, `[a-z0-9][a-z0-9.-]{0,63}`, an **actor label**. A claim that
+  names a label takes only steps with that label; a claim that names none takes only
+  unlabelled steps, so a generic claimer never takes a step meant for someone else.
+  The label is a filter, not a permission: whoever can write the database can claim
+  any label.
+- `async`: optional; absent means every default.
+  - `timeoutMs`: a positive decimal string, default `"3600000"` (1 hour). Every claim
+    sets the attempt's deadline that long after it, and no renewal passes it.
+  - `leaseMs`: a positive decimal string smaller than `timeoutMs`, optional. When set,
+    the holder must renew within it (`renew_step`); when absent, nobody renews and the
+    deadline alone bounds the attempt, since a person working by hand cannot.
+
+  This host reads only these two fields of an external action's `async`; `probe`,
+  `watch`, `stop` and `channels` are kept in the package and not yet acted on.
+
+`validate_workflow` and `start` check these fields and refuse a bad one with
+`action.invalid`, like a runner's `validate`. An external action needs no runner.
+
+**Dispatch.** `tick` never claims an invocation of an external action: dispatch reads
+the action's kind from the run's package first and leaves it pending for an actor.
+The sweep treats its attempts like any other: once the lease or the deadline has
+passed, `expire_attempt` with reason `lease` (store §2), and the kernel retries a
+repeatable effect or parks an `unsafe` one in `needs-intervention` (kernel §7.3).
+
+**Waiting on a step.** A run is **at an external step** when it is `running`, has no
+pending event, and its outstanding invocation (kernel §3) is `scheduled` with an
+external action. The step is `ready` while that invocation is pending and `held` while
+an attempt of it runs. `run_until_parked` also returns there, since the worker has
+nothing to do until an actor reports or the attempt expires.
+`Engine::external_step(view)` describes it: the action's kind and actor, `ready` or
+`held`, the attempt number, and while held the holder handle, `deadlineMs` and
+`leaseUntilMs`. It never shows the input, the owner or the fence.
+
+**Client operations.** Each takes or returns a **token**: the claimed attempt's
+reference (run, invocation, attempt number, owner and fence) as one string. Only its
+bearer can renew, complete or fail the attempt.
+
+- `claim_step(run, actor, holder)`: claims a ready external step whose action's label
+  equals `actor` (both absent counts as equal). With a run, that run's step; without
+  one, the oldest matching ready step of the tenant: the first in `scan_due` order,
+  which is oldest `notBeforeMs` first. None is `Ok(None)`. The `holder` handle is
+  canonical JSON of at most 4 KiB (`invalid-input` / `holder.invalid` otherwise). Before
+  the claim, the host makes or checks the step's files and work folder as for any
+  dispatch (§3, Step files and work folders), and quarantines the run instead when it
+  cannot. The claim goes to `claim_attempt` with a fresh owner, the holder, `leaseMs`
+  (or `timeoutMs` when there is none) as the lease, and `timeoutMs` as the deadline. It
+  returns the token, the run, node, action and invocation IDs, the attempt number, the
+  evaluated input, the declared outcomes, the node's `outputSchemas`, `deadlineMs`,
+  `leaseUntilMs`, the result channel (`store`), and the paths of the step files, its
+  instructions file and its work folder (null without `files_dir`).
+- `renew_step(token)`: `heartbeat` by `leaseMs` (or `timeoutMs`), capped at the
+  deadline (store §2). Returns the new `leaseUntilMs`.
+- `complete_step(token, outcome, output)`: refuses, with nothing recorded, an outcome
+  the action does not declare (`invalid-input` / `step.undeclared-outcome`), output
+  outside the canonical JSON domain (integers only, depth at most 32;
+  `step.output-not-canonical`), a result body over 64 KiB (`step.output-too-large`),
+  and output that does not fit the node's schema for the outcome (`output.invalid`, as
+  the other client operations, above). Then `finish_attempt` with a `success` result.
+  The kernel never sees an undeclared outcome from an actor.
+- `fail_step(token, error, retryable)`: `finish_attempt` with a `failure` result: the
+  error (code `step.failed` unless the actor names one of the pattern
+  `[a-z0-9][a-z0-9.-]{0,63}`) and whether another try could help, which the kernel
+  then honours up to `maxAttempts`.
+- `abandon_step(key)`: expires the run's held external attempt at once with reason
+  `abandoned` (store §2), whatever its lease; the effect class then decides. A run with
+  no held external step is `invalid-input` / `step.not-held`. It is a person's act,
+  never automatic: the old holder may still be at work.
+
+A token that does not name an attempt of the run's external step is
+`invalid-input` / `step.token-invalid`. A report whose attempt has already ended
+(abandoned, expired, or reported before) is refused with `stale` / `lease.lost`, and
+its result is kept with `record_late_evidence`: a stale report never moves the run, and
+nothing it says is lost.
 
 ### Failpoints
 
@@ -549,3 +640,5 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H24 | **0.2.** `start_artifact` with files and no `files_dir` | Refused with `host.files-dir-missing`; nothing stored |
 | H25 | **0.2.** The stored artifact missing when a step is due, then restored | The run is quarantined `artifact.unreadable` with no attempt claimed; after `release` it completes. An artifact whose entry blob is absent quarantines the same way |
 | H26 | **0.2.** The sweep with one finished and one unfinished run of different artifacts, and with a finished run's lock held | The finished run's step files are removed and the unfinished run's kept; a held lock keeps them until the next sweep |
+| H27 | **0.2.** A run at an external step, worked by an engine, then claimed with and without the step's label, completed, failed and abandoned | The engine never claims it and `run_until_parked` returns there; only a claim naming the label takes it; a completion with an undeclared outcome, misfitting or oversize output records nothing; a completion routes the run; a retryable failure brings a new attempt; an abandoned `unsafe` step needs intervention and the old holder's report is `lease.lost` and kept as late evidence |
+| H28 | **0.2.** External attempts past their lease and past their deadline, with a repeatable and an `unsafe` effect | The sweep expires each; the repeatable step is ready again with the next attempt, the `unsafe` one needs intervention; renewals never pass the deadline |

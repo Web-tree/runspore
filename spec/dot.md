@@ -113,7 +113,11 @@ own Rust types, published at
 against the same schema whether or not it does. An action takes only the fields the
 schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, and per kind: for
 `command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
-`native`, `function`), so a misspelt field is a problem rather than ignored.
+`native`, `function`; for `external` (0.2), `actor` and `async`), so a misspelt field
+is a problem rather than ignored. `async` takes `timeoutMs` and `leaseMs`, positive
+decimal strings, and `probe`, `watch`, `stop` and `channels`; an `external` action's
+`leaseMs` must be smaller than its `timeoutMs` (default `"3600000"`), else
+`action.lease-too-long` (host.md §2, Steps outside the worker).
 
 The fields a node may carry depend on its kind in the DOT:
 
