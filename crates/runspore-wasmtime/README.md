@@ -92,6 +92,12 @@ let mut reader = ArtifactReader::open(&bytes)?;
 let dot = reader.entry(&artifact.manifest.entry("workflow.dot").unwrap().digest)?;
 ```
 
+A composed artifact (`spec/artifact.md` §7, `runspore_build::compose(COMPONENT,
+&artifact)`) loads through the same call: it exports the `reader` interface beside the
+kernel's `reducer`, and `load_artifact` reads only the former. The same file also
+compiles as a kernel, `WasmtimeReducer::from_component(&composed, guards)`, for a host
+that has none of its own.
+
 ## Measurements
 
 Measured on this machine (Apple Silicon, macOS, release build) with the **stub

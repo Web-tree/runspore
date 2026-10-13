@@ -148,6 +148,89 @@ fn build_writes_the_artifact_beside_the_folder_and_inspect_reads_it() {
     );
 }
 
+/// A run's status with what differs between two runs of one workflow removed.
+fn decisions(mut status: serde_json::Value) -> serde_json::Value {
+    let fields = status.as_object_mut().unwrap();
+    for own in ["runId", "startKey", "artifactDigest", "db"] {
+        fields.remove(own);
+    }
+    status
+}
+
+#[test]
+fn build_composed_writes_one_file_that_runs_like_the_plain_artifact() {
+    let dir = folder("artifact-composed");
+    let plain = dir.run(&["--json", "build", "flow"]).json();
+    let built = dir.run(&["--json", "build", "flow", "--composed"]);
+    assert_eq!(built.code(), Some(0), "{}{}", built.stdout, built.stderr);
+    let out = built.json();
+    assert_eq!(out["artifact"], json!("flow-composed.wasm"));
+    let bytes = std::fs::read(dir.file("flow-composed.wasm")).expect("beside the folder");
+    assert_eq!(out["artifactDigest"], json!(digest::artifact(&bytes)));
+    assert_ne!(out["artifactDigest"], plain["artifactDigest"]);
+    assert_eq!(out["packageDigest"], plain["packageDigest"]);
+    assert_eq!(out["composed"], json!(true));
+    assert_eq!(
+        out["kernelDigest"],
+        json!(digest::hash("kernel", &[runspore_wasmtime::COMPONENT])),
+        "the kernel inside is the one this spore runs"
+    );
+    assert_eq!(plain.get("composed"), None);
+    assert!(
+        bytes.len() > std::fs::read(dir.file("flow.wasm")).unwrap().len(),
+        "the composed file carries the kernel too"
+    );
+
+    let named = dir.run(&["--json", "build", "flow", "--composed", "-o", "one.wasm"]);
+    assert_eq!(named.code(), Some(0), "{}", named.stdout);
+    assert_eq!(std::fs::read(dir.file("one.wasm")).unwrap(), bytes);
+
+    let inspect = dir.run(&["--json", "inspect", "flow-composed.wasm"]);
+    assert_eq!(inspect.code(), Some(0), "{}", inspect.stdout);
+    let plain_inspect = dir.run(&["--json", "inspect", "flow.wasm"]).json();
+    assert_eq!(inspect.json()["manifest"], plain_inspect["manifest"]);
+    assert_eq!(inspect.json()["package"], plain_inspect["package"]);
+
+    // The same decisions from either file.
+    std::fs::remove_dir_all(dir.file("flow")).unwrap();
+    let from_plain = dir.run(&args(&["--json", "run", "flow.wasm", "--key", "plain"]));
+    let from_composed = dir.run(&args(&[
+        "--json",
+        "run",
+        "flow-composed.wasm",
+        "--key",
+        "composed",
+    ]));
+    assert_eq!(from_plain.code(), Some(3), "{}", from_plain.stdout);
+    assert_eq!(from_composed.code(), Some(3), "{}", from_composed.stdout);
+    assert_eq!(
+        from_composed.json()["artifactDigest"],
+        out["artifactDigest"],
+        "a run from the composed file pins that file"
+    );
+    assert_eq!(
+        decisions(from_composed.json()),
+        decisions(from_plain.json())
+    );
+    let mut ended = Vec::new();
+    for parked in [&from_plain, &from_composed] {
+        let run = parked.json()["runId"].as_str().unwrap().to_string();
+        let signal = ["signal", run.as_str(), "approval", "--outcome", "approved"];
+        assert_eq!(dir.run(&args(&signal)).code(), Some(0));
+        let done = dir.run(&args(&[
+            "--json",
+            "worker",
+            "--run",
+            &run,
+            "--until-parked",
+        ]));
+        assert_eq!(done.code(), Some(0), "{}", done.stdout);
+        ended.push(decisions(done.json()));
+    }
+    assert_eq!(ended[0], ended[1]);
+    assert_eq!(ended[0]["result"]["output"], json!("v1"));
+}
+
 #[test]
 fn a_run_pins_its_artifact_and_never_reads_the_folder_again() {
     let dir = folder("artifact-pin");

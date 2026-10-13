@@ -6,13 +6,14 @@ mod common;
 use common::Dir;
 use serde_json::{json, Value};
 
-/// The heartbeat renews the lease well before it runs out on a busy machine.
+/// No test here lets a lease run out, so the lease is long enough that a stalled
+/// heartbeat on a busy CI machine does not expire a step and stop the run at exit 4.
 const FAST: [&str; 7] = [
     "--native-kernel",
     "--poll-ms",
     "20",
     "--lease-ms",
-    "500",
+    "5000",
     "--heartbeat-ms",
     "100",
 ];

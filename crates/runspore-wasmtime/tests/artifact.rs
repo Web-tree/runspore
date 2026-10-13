@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use runspore_types::artifact::{Entry, EntryKind, Manifest, Owner, DIALECT, FORMAT};
 use runspore_types::digest;
-use runspore_wasmtime::{load_artifact, ArtifactReader, COMPONENT};
+use runspore_types::reducer::{Envelope, Identity, Limits, Reducer, TransitionRequest};
+use runspore_wasmtime::{load_artifact, ArtifactReader, Guards, WasmtimeReducer, COMPONENT};
 use wasmparser::{Parser, Payload};
 
 const DOT: &str = r#"digraph deploy {
@@ -107,6 +108,94 @@ fn top_level_names(bytes: &[u8]) -> (Vec<String>, Vec<String>) {
         }
     }
     (imports, exports)
+}
+
+/// The bytes of each component nested directly in the top-level component.
+fn nested_components(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let (mut nested, mut depth) = (Vec::new(), 0usize);
+    for payload in Parser::new(0).parse_all(bytes) {
+        match payload.expect("component parses") {
+            Payload::Version { .. } => depth += 1,
+            Payload::End(_) => depth -= 1,
+            Payload::ComponentSection {
+                unchecked_range, ..
+            } if depth == 1 => {
+                let range = unchecked_range.start as usize..unchecked_range.end as usize;
+                nested.push(bytes[range].to_vec());
+            }
+            _ => {}
+        }
+    }
+    nested
+}
+
+#[test]
+fn the_composed_artifact_holds_the_kernel_unchanged_and_exports_both_worlds() {
+    let folder = Folder::new("composed");
+    let sealed = runspore_build::build(folder.path())
+        .unwrap()
+        .seal()
+        .unwrap();
+    let composed =
+        runspore_build::compose(COMPONENT, &sealed.bytes).expect("the composition encodes");
+
+    let (imports, exports) = top_level_names(&composed);
+    assert_eq!(imports, Vec::<String>::new());
+    assert_eq!(
+        exports,
+        [
+            "runspore:machine/reducer@0.1.0",
+            "runspore:artifact/reader@0.1.0"
+        ]
+    );
+    assert_eq!(
+        nested_components(&composed),
+        [COMPONENT.to_vec(), sealed.bytes.clone()],
+        "the certified kernel and the workflow artifact, byte for byte"
+    );
+    assert_eq!(
+        runspore_build::compose(COMPONENT, &sealed.bytes).unwrap(),
+        composed,
+        "the same inputs compose to the same bytes"
+    );
+
+    // A host with its own kernel reads the composed file like the plain artifact.
+    let plain = load_artifact(&sealed.bytes).unwrap();
+    let loaded = load_artifact(&composed).expect("the composed artifact loads");
+    assert_eq!(loaded.manifest, plain.manifest);
+    assert_eq!(loaded.package, plain.package);
+    assert_eq!(loaded.digest, digest::artifact(&composed));
+    assert_ne!(
+        loaded.digest, plain.digest,
+        "provenance names the file started from"
+    );
+
+    // A host with no kernel of its own runs the one inside, and gets the same decisions.
+    let kernel = WasmtimeReducer::from_component(&composed, Guards::default())
+        .expect("the composed file runs as a kernel");
+    assert_eq!(kernel.describe(), runspore_kernel::describe());
+    let request = TransitionRequest {
+        identity: Identity {
+            package_digest: plain.manifest.main.clone(),
+            kernel_digest: digest::hash("kernel", &[COMPONENT]),
+            semantics_version: "0.2".to_string(),
+            codec_version: "jcs-1".to_string(),
+        },
+        graph: plain.package.clone(),
+        snapshot: None,
+        input_event: Envelope {
+            event_id: "evt-start".to_string(),
+            sequence: 1,
+            accepted_at_ms: 1_759_752_000_123,
+            kind: "run.started".to_string(),
+            payload: br#"{"input":{}}"#.to_vec(),
+        },
+        frozen_limits: Limits::default(),
+    };
+    assert_eq!(
+        kernel.transition(&request),
+        runspore_kernel::transition(&request)
+    );
 }
 
 #[test]

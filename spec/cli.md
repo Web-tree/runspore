@@ -24,7 +24,7 @@ marked **0.2** below are new since 0.1.
 | --- | --- |
 | `init` | **0.2.** Creates the project folder (§Project folder) |
 | `validate <workflow>` | Builds the workflow and checks it and its actions without touching the database |
-| `build <folder> [-o <file>]` | **0.2.** Builds a workflow folder (or its `workflow.dot`), checks it as `validate` does, and writes the workflow artifact to `<file>`, by default `<folder>.wasm` beside the folder |
+| `build <folder> [-o <file>] [--composed]` | **0.2.** Builds a workflow folder (or its `workflow.dot`), checks it as `validate` does, and writes the workflow artifact to `<file>`, by default `<folder>.wasm` beside the folder. With `--composed`, the composed artifact (artifact.md §7), by default `<folder>-composed.wasm` |
 | `inspect <artifact>` | **0.2.** Loads an artifact and prints its digest, manifest and package as JSON |
 | `inspect --run <runId> --file <path>` | **0.2.** Prints the file the run's artifact holds at `<path>`, for example `workflow.dot` |
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder |
@@ -56,7 +56,18 @@ changes nothing a started run sees. Every run `spore` starts has an artifact.
 `build` writes `<folder>.wasm` next to the folder, named after the folder (so
 `spore build deploy/` writes `deploy.wasm`), never inside it; `-o` names another file.
 It overwrites an existing file. The same folder built by the same `spore` gives the
-same bytes.
+same bytes. Its JSON output is `{"artifact", "artifactDigest", "packageDigest",
+"bytes"}`: the file written, its digest, the package digest and the file's size.
+
+`build --composed` writes the composed artifact (artifact.md §7) instead:
+`<folder>-composed.wasm` beside the folder, or the file `-o` names. The kernel inside
+is the one this `spore` embeds, so the output carries `"composed": true` and
+`"kernelDigest"`, the `kernel_digest()` of that kernel; `artifactDigest` is the digest
+of the composed file. A composed artifact is a `<workflow>` like any other artifact:
+`validate`, `start`, `run` and `inspect` read its `reader` interface and run the
+package with the embedded kernel of the `spore` at hand, never the one in the file. A
+run started from a composed artifact records that file's digest, and gives the same
+decisions as a run from the plain artifact of the same folder.
 
 `inspect` is for debugging; its output is not a stable interface. `inspect --run`
 reads the run's stored artifact, never the folder: it prints any entry's raw bytes to
@@ -256,9 +267,9 @@ attempt has none. A running command shows its record; a command that ended has h
 record cleared; an attempt whose worker died keeps its record.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.
-`artifactDigest` is the digest of the workflow artifact it was started from
-(artifact.md §4). It is null only for a run an embedding host started from a bare
-package (host.md §2); `spore` itself never starts one.
+`artifactDigest` is the digest of the file it was started from, a workflow artifact or
+a composed artifact (artifact.md §4, §7). It is null only for a run an embedding host
+started from a bare package (host.md §2); `spore` itself never starts one.
 
 Text output is for people and is not a stable interface.
 

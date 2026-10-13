@@ -184,6 +184,9 @@ it becomes an entry of each. No reference may name `workflow.dot` or `settings.j
    bytes, its blob digest and `executable` when the file had an execute bit
    (artifact.md §2). The same folder always gives the same manifest and the same
    package.
+8. With `--composed` only: nest the sealed artifact and the kernel component in the
+   composed artifact (artifact.md §7). The artifact inside is the one step 7 sealed,
+   byte for byte.
 
 ## 6. Errors
 
