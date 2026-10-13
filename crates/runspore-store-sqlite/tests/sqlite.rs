@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use runspore_store_conformance::{
-    claim, create_run, expire, process_record, schedule, set_process, ManualClock,
-};
+use runspore_store_conformance::{claim, create_run, expire, schedule, ManualClock};
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
     InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact, Turn,
