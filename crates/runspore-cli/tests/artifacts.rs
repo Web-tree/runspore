@@ -7,7 +7,7 @@ mod common;
 use common::{effect_argv, Dir};
 use runspore_types::artifact::{Entry, EntryKind, Manifest, DIALECT, FORMAT};
 use runspore_types::digest;
-use serde_json::{json, Value};
+use serde_json::json;
 
 const FAST: [&str; 7] = [
     "--native-kernel",
@@ -223,28 +223,6 @@ fn a_prebuilt_artifact_validates_starts_and_runs() {
         text.stdout.contains(&format!("artifact   {digest}")),
         "{}",
         text.stdout
-    );
-}
-
-#[test]
-fn a_run_from_a_json_document_has_no_artifact() {
-    let dir = Dir::new("artifact-none");
-    let workflow = dir.write(
-        "w.json",
-        &json!({"format": "runspore.workflow/0.2", "name": "doc", "start": "done",
-                "nodes": {"done": {"kind": "complete"}}}),
-    );
-    let out = dir.run(&args(&["--json", "run", workflow.to_str().unwrap()]));
-    let status: Value = out.json();
-    assert_eq!(
-        (out.code(), status["artifactDigest"].clone()),
-        (Some(0), Value::Null)
-    );
-    let run = status["runId"].as_str().unwrap();
-    let none = dir.run(&["--json", "inspect", "--run", run, "--file", "workflow.dot"]);
-    assert_eq!(
-        (none.code(), none.json()["error"]["code"].clone()),
-        (Some(2), json!("artifact.none"))
     );
 }
 

@@ -194,7 +194,7 @@ fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
 }
 
 /// The one test that hands `spore` a JSON workflow document: it is accepted until the
-/// cut-over to 0.2 (spec/cli.md).
+/// cut-over to 0.2 (spec/cli.md), and a run started from it has no artifact.
 #[test]
 fn a_json_workflow_document_is_still_accepted() {
     let dir = Dir::new("document");
@@ -204,9 +204,20 @@ fn a_json_workflow_document_is_still_accepted() {
         true
     );
     let parked = dir.run(&args(&["--json", "run", "flow.json", "--key", "d"]));
+    let status = parked.json();
     assert_eq!(
-        (parked.code(), parked.json()["position"]["nodeId"].clone()),
-        (Some(3), json!("approve"))
+        (
+            parked.code(),
+            status["position"]["nodeId"].clone(),
+            status["artifactDigest"].clone()
+        ),
+        (Some(3), json!("approve"), Value::Null)
+    );
+    let run = status["runId"].as_str().unwrap();
+    let none = dir.run(&["--json", "inspect", "--run", run, "--file", "workflow.dot"]);
+    assert_eq!(
+        (none.code(), none.json()["error"]["code"].clone()),
+        (Some(2), json!("artifact.none"))
     );
 }
 
