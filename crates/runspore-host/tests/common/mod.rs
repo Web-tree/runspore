@@ -202,6 +202,9 @@ impl<H: Hook> Store for Hooked<H> {
     async fn get_package(&self, d: &str) -> StoreResult<Option<Vec<u8>>> {
         self.inner.get_package(d).await
     }
+    async fn get_artifact(&self, d: &str) -> StoreResult<Option<Vec<u8>>> {
+        self.inner.get_artifact(d).await
+    }
     async fn commit_turn(&self, r: CommitTurn) -> StoreResult<Receipt<CommitReceipt>> {
         self.inner.commit_turn(r).await
     }

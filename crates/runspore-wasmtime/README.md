@@ -77,6 +77,21 @@ Any engine error is `Failure { kind: InvariantViolation, code, details }` with c
 (everything else, including instantiation errors). The host never panics on a guest
 fault.
 
+## Workflow artifacts
+
+`load_artifact(bytes)` loads a workflow artifact (`spec/artifact.md` §5) in the same
+sandbox: the kernel's engine settings, no imports, a fresh store with its own fuel and
+a 1 GiB memory ceiling. It reads and checks the manifest, then the package by its
+digest. `ArtifactReader` reads any other blob of an artifact. Every failure, including
+a trap or a watchdog stop, is an `ArtifactError` (`artifact.invalid` and the codes of
+`spec/artifact.md` §6), never a panic.
+
+```rust
+let artifact = load_artifact(&bytes)?;           // digest, manifest, package bytes
+let mut reader = ArtifactReader::open(&bytes)?;
+let dot = reader.entry(&artifact.manifest.entry("workflow.dot").unwrap().digest)?;
+```
+
 ## Measurements
 
 Measured on this machine (Apple Silicon, macOS, release build) with the **stub

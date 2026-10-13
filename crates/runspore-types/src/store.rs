@@ -195,6 +195,17 @@ pub struct CreateRun {
     /// The run's base folder, where its commands run. Not part of the run's identity:
     /// a repeat with another folder is a duplicate and keeps the first.
     pub base_dir: Option<String>,
+    /// The workflow artifact the run is started from, if any; stored
+    /// content-addressed. Provenance only: never compared for an existing run.
+    pub artifact: Option<StoredArtifact>,
+}
+
+/// A workflow artifact as the store keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredArtifact {
+    /// `digest::artifact(bytes)`.
+    pub digest: Digest,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -445,6 +456,8 @@ pub struct RunView {
     pub key: RunKey,
     pub start_key: String,
     pub package_digest: Digest,
+    /// The workflow artifact the run was started from, if any.
+    pub artifact_digest: Option<Digest>,
     /// `State.status` wire string, or `created` before the first commit.
     pub status: String,
     pub revision: u64,
@@ -505,6 +518,8 @@ pub trait Store: Send + Sync {
     /// `None` when the run has no pending event or is quarantined.
     async fn load_turn(&self, key: &RunKey) -> StoreResult<Option<Turn>>;
     async fn get_package(&self, digest: &str) -> StoreResult<Option<Vec<u8>>>;
+    /// The workflow artifact bytes stored under `digest`.
+    async fn get_artifact(&self, digest: &str) -> StoreResult<Option<Vec<u8>>>;
     async fn commit_turn(&self, request: CommitTurn) -> StoreResult<Receipt<CommitReceipt>>;
 
     /// Absent is not proof that an in-flight original request aborted.

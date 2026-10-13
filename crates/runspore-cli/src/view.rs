@@ -90,6 +90,8 @@ pub fn status_json(
         "startKey": view.start_key,
         "status": view.status,
         "revision": view.revision.to_string(),
+        "packageDigest": view.package_digest,
+        "artifactDigest": view.artifact_digest,
         "position": position,
         "invocation": invocation,
         "streaks": state.as_ref().map_or(Value::Null, |s| streaks_json(s, package)),
@@ -118,9 +120,12 @@ pub fn status_text(
 ) -> String {
     let s = status_json(view, arrival, package, invocations);
     let mut text = format!(
-        "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\n",
-        view.key.run, view.start_key, view.status, view.revision
+        "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\npackage    {}\n",
+        view.key.run, view.start_key, view.status, view.revision, view.package_digest
     );
+    if let Some(artifact) = &view.artifact_digest {
+        text += &format!("artifact   {artifact}\n");
+    }
     if let Some(p) = s["position"].as_object() {
         text += &format!(
             "position   {} ({}{})\n",

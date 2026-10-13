@@ -19,7 +19,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 const SCHEMA: &str = include_str!("schema.sql");
 /// Upgrades a version 1 database to version 2: the attempt's process record and the
 /// audit record's kind.
@@ -27,6 +27,10 @@ const UPGRADE_1: &str = "ALTER TABLE attempts ADD COLUMN process BLOB;
     ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'late-evidence';";
 /// Upgrades a version 2 database to version 3: the run's base folder.
 const UPGRADE_2: &str = "ALTER TABLE runs ADD COLUMN base_dir TEXT;";
+/// Upgrades a version 3 database to version 4: the artifact table and the run's
+/// artifact digest.
+const UPGRADE_3: &str = "CREATE TABLE artifacts (digest TEXT PRIMARY KEY, body BLOB NOT NULL);
+    ALTER TABLE runs ADD COLUMN artifact_digest TEXT;";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
 
@@ -292,7 +296,8 @@ fn cursor_u64(value: &Value, index: usize) -> R<i64> {
 
 const RUN_VIEW: &str = "SELECT tenant, run_id, start_key, package_digest, status, revision,
     applied_sequence, next_sequence, snapshot, snapshot_digest, quarantine_code,
-    quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms, base_dir FROM runs";
+    quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms, base_dir,
+    artifact_digest FROM runs";
 
 fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
     let code: Option<String> = r.get(10)?;
@@ -300,6 +305,7 @@ fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
         key: RunKey::new(r.get::<_, String>(0)?, r.get::<_, String>(1)?),
         start_key: r.get(2)?,
         package_digest: r.get(3)?,
+        artifact_digest: r.get(16)?,
         status: r.get(4)?,
         revision: r.get::<_, i64>(5)? as u64,
         applied_sequence: r.get::<_, i64>(6)? as u64,
@@ -359,14 +365,14 @@ impl SqliteStore {
                 format!("schema version {version} is newer than {SCHEMA_VERSION}"),
             ));
         }
-        match version {
-            0 => tx.execute_batch(SCHEMA).map_err(db)?,
-            1 => {
-                tx.execute_batch(UPGRADE_1).map_err(db)?;
-                tx.execute_batch(UPGRADE_2).map_err(db)?;
+        if version == 0 {
+            tx.execute_batch(SCHEMA).map_err(db)?;
+        } else {
+            for (from, upgrade) in [(1, UPGRADE_1), (2, UPGRADE_2), (3, UPGRADE_3)] {
+                if version <= from {
+                    tx.execute_batch(upgrade).map_err(db)?;
+                }
             }
-            2 => tx.execute_batch(UPGRADE_2).map_err(db)?,
-            _ => {}
         }
         if version < SCHEMA_VERSION {
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -728,46 +734,89 @@ impl Store for SqliteStore {
     }
 
     async fn create_run(&self, q: CreateRun) -> R<Receipt<RunCreated>> {
-        self.mutate("create_run", Some("create-run"), &q.key, &q.mutation, |c, now| {
-            if q.package_digest != digest::package(&q.package) {
-                return Err(conflict("package.digest-mismatch"));
-            }
-            verify(&q.started)?;
-            let created = RunCreated { key: q.key.clone(), started_sequence: 1 };
-            let by_start: Option<String> = c
-                .query_row(
-                    "SELECT run_id FROM runs WHERE tenant = ?1 AND start_key = ?2",
-                    params![q.key.tenant, q.start_key],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(db)?;
-            if by_start.is_some_and(|run| run != q.key.run) {
-                return Err(conflict("run.start-key-mismatch"));
-            }
-            if let Some(run) = run_row(c, &q.key)? {
-                return if run.start_key == q.start_key
-                    && run.package_digest == q.package_digest
-                    && run.started_digest == q.started.digest
+        self.mutate(
+            "create_run",
+            Some("create-run"),
+            &q.key,
+            &q.mutation,
+            |c, now| {
+                if q.package_digest != digest::package(&q.package) {
+                    return Err(conflict("package.digest-mismatch"));
+                }
+                if q.artifact
+                    .as_ref()
+                    .is_some_and(|a| a.digest != digest::artifact(&a.bytes))
                 {
-                    Ok(Outcome::Same(created))
-                } else {
-                    Err(conflict("run.exists"))
+                    return Err(conflict("artifact.digest-mismatch"));
+                }
+                verify(&q.started)?;
+                let created = RunCreated {
+                    key: q.key.clone(),
+                    started_sequence: 1,
                 };
-            }
-            c.execute(
-                "INSERT OR IGNORE INTO packages (digest, body) VALUES (?1, ?2)",
-                params![q.package_digest, q.package],
-            )
-            .map_err(db)?;
-            c.execute(
-                "INSERT INTO runs VALUES (?1, ?2, ?3, ?4, ?5, 'created', 0, 0, 1, 0, NULL, NULL, 0, NULL, NULL, NULL, ?6, ?6, ?7)",
-                params![q.key.tenant, q.key.run, q.start_key, q.package_digest, q.started.digest, i(now), q.base_dir],
-            )
-            .map_err(db)?;
-            push_event(c, &q.key, ids::EVENT_STARTED, "run.started", &q.started.body, now)?;
-            Ok(Outcome::Applied(created))
-        })
+                let by_start: Option<String> = c
+                    .query_row(
+                        "SELECT run_id FROM runs WHERE tenant = ?1 AND start_key = ?2",
+                        params![q.key.tenant, q.start_key],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(db)?;
+                if by_start.is_some_and(|run| run != q.key.run) {
+                    return Err(conflict("run.start-key-mismatch"));
+                }
+                if let Some(run) = run_row(c, &q.key)? {
+                    return if run.start_key == q.start_key
+                        && run.package_digest == q.package_digest
+                        && run.started_digest == q.started.digest
+                    {
+                        Ok(Outcome::Same(created))
+                    } else {
+                        Err(conflict("run.exists"))
+                    };
+                }
+                c.execute(
+                    "INSERT OR IGNORE INTO packages (digest, body) VALUES (?1, ?2)",
+                    params![q.package_digest, q.package],
+                )
+                .map_err(db)?;
+                if let Some(artifact) = &q.artifact {
+                    c.execute(
+                        "INSERT OR IGNORE INTO artifacts (digest, body) VALUES (?1, ?2)",
+                        params![artifact.digest, artifact.bytes],
+                    )
+                    .map_err(db)?;
+                }
+                c.execute(
+                    "INSERT INTO runs (tenant, run_id, start_key, package_digest, started_digest,
+                     status, revision, applied_sequence, next_sequence, last_accepted_ms,
+                     snapshot, snapshot_digest, fence, quarantine_code, quarantine_details,
+                     quarantine_at_ms, created_at_ms, updated_at_ms, base_dir, artifact_digest)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'created', 0, 0, 1, 0, NULL, NULL, 0, NULL, NULL,
+                     NULL, ?6, ?6, ?7, ?8)",
+                    params![
+                        q.key.tenant,
+                        q.key.run,
+                        q.start_key,
+                        q.package_digest,
+                        q.started.digest,
+                        i(now),
+                        q.base_dir,
+                        q.artifact.as_ref().map(|a| &a.digest)
+                    ],
+                )
+                .map_err(db)?;
+                push_event(
+                    c,
+                    &q.key,
+                    ids::EVENT_STARTED,
+                    "run.started",
+                    &q.started.body,
+                    now,
+                )?;
+                Ok(Outcome::Applied(created))
+            },
+        )
     }
 
     async fn append_event(&self, q: AppendEvent) -> R<Receipt<EventAccepted>> {
@@ -858,6 +907,18 @@ impl Store for SqliteStore {
         self.read(|c| {
             c.query_row(
                 "SELECT body FROM packages WHERE digest = ?1",
+                params![digest],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db)
+        })
+    }
+
+    async fn get_artifact(&self, digest: &str) -> R<Option<Vec<u8>>> {
+        self.read(|c| {
+            c.query_row(
+                "SELECT body FROM artifacts WHERE digest = ?1",
                 params![digest],
                 |r| r.get(0),
             )

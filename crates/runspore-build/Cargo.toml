@@ -1,6 +1,6 @@
 [package]
 name = "runspore-build"
-description = "Runspore build: a workflow folder (workflow.dot and settings.json) to the package the kernel runs"
+description = "Runspore build: a workflow folder (workflow.dot and settings.json) to the package the kernel runs and its workflow artifact"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,9 @@ homepage.workspace = true
 runspore-types.workspace = true
 runspore-schema.workspace = true
 serde_json.workspace = true
+wasm-encoder = { version = "0.261.0", default-features = false }
+wit-component = { version = "0.261.0", default-features = false }
+wit-parser = { version = "0.261.0", default-features = false }
 
 [lints]
 workspace = true

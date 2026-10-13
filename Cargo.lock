@@ -1088,6 +1088,9 @@ dependencies = [
  "runspore-schema",
  "runspore-types",
  "serde_json",
+ "wasm-encoder 0.261.0",
+ "wit-component 0.261.0",
+ "wit-parser 0.261.0",
 ]
 
 [[package]]
@@ -1220,6 +1223,7 @@ dependencies = [
 name = "runspore-wasmtime"
 version = "0.1.0"
 dependencies = [
+ "runspore-build",
  "runspore-kernel",
  "runspore-trace",
  "runspore-types",

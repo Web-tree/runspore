@@ -14,17 +14,19 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
   of the eight operations named in spec section 3.
 
-## Schema (version 3, in `PRAGMA user_version`)
+## Schema (version 4, in `PRAGMA user_version`)
 
 An empty file is initialized from `src/schema.sql`. An older file is upgraded in
 place, in one transaction: version 1 to 2 adds `attempts.process` and `audit.kind`,
-version 2 to 3 adds `runs.base_dir`. A file with a newer version is refused with
-`incompatible` / `schema.too-new`.
+version 2 to 3 adds `runs.base_dir`, version 3 to 4 adds the `artifacts` table and
+`runs.artifact_digest`. A file with a newer version is refused with `incompatible` /
+`schema.too-new`.
 
 | Table | Key | Invariant the constraints enforce |
 | --- | --- | --- |
 | `packages` | `digest` | packages are content-addressed |
-| `runs` | `(tenant, run_id)`; unique `(tenant, start_key)` | one run per start key; holds revision, applied and next sequence, last accepted time, fence counter, quarantine, base folder |
+| `artifacts` | `digest` | workflow artifacts are content-addressed |
+| `runs` | `(tenant, run_id)`; unique `(tenant, start_key)` | one run per start key; holds revision, applied and next sequence, last accepted time, fence counter, quarantine, base folder, and the digest of the artifact it was started from or null |
 | `events` | `(tenant, run_id, sequence)`; unique `(tenant, run_id, event_id)` | one event per ID per run (I2); one event per sequence; one `activity.result` per attempt, since its ID derives from the attempt ID |
 | `transitions` | `(tenant, run_id, revision)`; unique `(tenant, run_id, consumed_sequence)` | one commit per revision and per consumed event |
 | `commands` | `(tenant, run_id, command_id)` | a command ID exists once per run (I3) |

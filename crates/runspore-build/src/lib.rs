@@ -1,18 +1,25 @@
 //! The build of `spec/dot.md`: a workflow folder (`workflow.dot`, `settings.json` and
-//! the files the settings name) to the package the kernel runs.
+//! the files the settings name) to the package the kernel runs and the workflow
+//! artifact that seals it with those files (`spec/artifact.md`).
 //!
 //! Shared by the CLI and the host. It reads nothing outside the folder and needs no
 //! Graphviz installation.
 
+mod component;
 mod dot;
 mod json_lines;
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use runspore_types::artifact::{self, EntryKind, Manifest, Owner};
+use runspore_types::{canonical, digest};
 use runspore_types::model::{OUTCOME_EXHAUSTED, OUTCOME_FAILED};
 use serde_json::{Map, Value};
 
+pub use component::encode as encode_artifact;
 pub use dot::KINDS;
 
 /// The one dialect this build reads.
@@ -105,8 +112,11 @@ fn read_file(path: &Path) -> Result<String, BuildError> {
 }
 
 fn read_graph(dot_path: &Path) -> Result<dot::Graph, BuildError> {
-    dot::read(&read_file(dot_path)?)
-        .map_err(|(code, line, message)| error(code, dot_path, line, message))
+    parse_graph(&read_file(dot_path)?, dot_path)
+}
+
+fn parse_graph(text: &str, dot_path: &Path) -> Result<dot::Graph, BuildError> {
+    dot::read(text).map_err(|(code, line, message)| error(code, dot_path, line, message))
 }
 
 /// The workflow's name: the graph id of the folder's `workflow.dot`.
@@ -114,19 +124,127 @@ pub fn name(folder: &Path) -> Result<String, BuildError> {
     Ok(read_graph(&folder.join(DOT_FILE))?.name)
 }
 
-/// Builds the folder into its package, a JSON value ready for the kernel's validation.
-pub fn build(folder: &Path) -> Result<Value, BuildError> {
+/// One file of the folder that goes into the artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct File {
+    /// Folder-relative, with `.` and `..` resolved by name.
+    pub path: String,
+    pub kind: EntryKind,
+    pub owner: Option<Owner>,
+    pub executable: bool,
+    pub bytes: Vec<u8>,
+}
+
+/// What a build produces: the package and the files sealed beside it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Built {
+    /// The package, a JSON value ready for the kernel's validation.
+    pub package: Value,
+    /// `workflow.dot`, `settings.json` and every file the settings name, by path.
+    pub files: Vec<File>,
+    folder: PathBuf,
+}
+
+/// A sealed workflow artifact (spec/artifact.md).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sealed {
+    /// The component file.
+    pub bytes: Vec<u8>,
+    pub manifest: Manifest,
+    /// Canonical package bytes; their digest is `manifest.main`.
+    pub package: Vec<u8>,
+}
+
+impl Built {
+    /// Seals the package and the files into a workflow artifact. The same folder
+    /// always gives the same bytes.
+    pub fn seal(&self) -> Result<Sealed, BuildError> {
+        let package = canonical::to_vec(&self.package).map_err(|e| BuildError {
+            code: e.code(),
+            file: self.folder.clone(),
+            line: None,
+            message: e.to_string(),
+        })?;
+        let manifest = Manifest {
+            format: artifact::FORMAT.to_string(),
+            dialect: DIALECT.to_string(),
+            name: self.package["name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            main: digest::package(&package),
+            entries: self
+                .files
+                .iter()
+                .map(|f| artifact::Entry {
+                    path: f.path.clone(),
+                    digest: digest::blob(&f.bytes),
+                    kind: f.kind,
+                    owner: f.owner.clone(),
+                    executable: f.executable,
+                })
+                .collect(),
+        };
+        let mut blobs: Vec<(String, &[u8])> = vec![(manifest.main.clone(), &package)];
+        for (entry, file) in manifest.entries.iter().zip(&self.files) {
+            if !blobs.iter().any(|(d, _)| *d == entry.digest) {
+                blobs.push((entry.digest.clone(), &file.bytes));
+            }
+        }
+        let bytes = encode_artifact(&manifest.encode(), &blobs).map_err(|message| BuildError {
+            code: "artifact.encode",
+            file: self.folder.clone(),
+            line: None,
+            message,
+        })?;
+        Ok(Sealed {
+            bytes,
+            manifest,
+            package,
+        })
+    }
+}
+
+/// Whether the file has any execute bit, as git records it.
+fn executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+}
+
+/// Builds the folder into its package and the files it declares.
+pub fn build(folder: &Path) -> Result<Built, BuildError> {
     let dot_path = folder.join(DOT_FILE);
     let settings_path = folder.join(SETTINGS_FILE);
-    let graph = read_graph(&dot_path)?;
+    let dot_text = read_file(&dot_path)?;
+    let graph = parse_graph(&dot_text, &dot_path)?;
     let settings_text = read_file(&settings_path)?;
     let settings = Settings {
         path: &settings_path,
         dot_path: &dot_path,
         text: &settings_text,
         folder,
+        files: RefCell::new(BTreeMap::new()),
     };
-    settings.merge(&graph)
+    let package = settings.merge(&graph)?;
+    let mut files = settings.files.into_inner();
+    for (name, path, text) in [
+        (DOT_FILE, &dot_path, dot_text),
+        (SETTINGS_FILE, &settings_path, settings_text),
+    ] {
+        let file = File {
+            path: name.to_string(),
+            kind: EntryKind::Source,
+            owner: None,
+            executable: executable(path),
+            bytes: text.into_bytes(),
+        };
+        files.insert((name.to_string(), None), file);
+    }
+    Ok(Built {
+        package,
+        files: files.into_values().collect(),
+        folder: folder.to_path_buf(),
+    })
 }
 
 struct Settings<'a> {
@@ -134,6 +252,9 @@ struct Settings<'a> {
     dot_path: &'a Path,
     text: &'a str,
     folder: &'a Path,
+    /// The files the settings name, by manifest path and owner: a file two owners
+    /// name is an entry of each.
+    files: RefCell<BTreeMap<(String, Option<Owner>), File>>,
 }
 
 const TOP_LEVEL: [&str; 4] = ["format", "limits", "actions", "nodes"];
@@ -220,9 +341,15 @@ impl Settings<'_> {
                     ));
                 };
                 for asset in &list {
-                    self.reference(&["actions", id, "assets"], asset)?;
+                    self.reference(
+                        &["actions", id, "assets"],
+                        asset,
+                        EntryKind::Asset,
+                        Some(Owner::Action(id.clone())),
+                    )?;
                 }
             }
+            self.bundled_programs(id, action)?;
         }
 
         for id in nodes.keys() {
@@ -345,7 +472,12 @@ impl Settings<'_> {
             }
         }
         if let Some(instructions) = fields.remove("instructions") {
-            self.reference(&["nodes", id, "instructions"], &instructions)?;
+            self.reference(
+                &["nodes", id, "instructions"],
+                &instructions,
+                EntryKind::Instructions,
+                Some(Owner::Node(id.to_string())),
+            )?;
         }
         let schemas = match fields.remove("outputSchemas") {
             Some(schemas) => Some(self.output_schemas(id, &schemas)?),
@@ -376,7 +508,7 @@ impl Settings<'_> {
             let authored = match schema {
                 Value::Object(_) => schema.clone(),
                 Value::String(file) => {
-                    let target = self.reference(&path, schema)?;
+                    let target = self.reference(&path, schema, EntryKind::Source, None)?;
                     place = format!("{place} ({file})");
                     let bytes = std::fs::read(&target).map_err(|e| {
                         self.at(
@@ -472,6 +604,32 @@ impl Settings<'_> {
         Ok(())
     }
 
+    /// An async probe, watch or stop named `./<path>` is a file of the folder, bundled
+    /// as the action's asset (spec/dot.md §4). A bare name is looked up when it runs.
+    fn bundled_programs(&self, id: &str, action: &Map<String, Value>) -> Result<(), BuildError> {
+        let Some(Value::Object(spec)) = action.get("async") else {
+            return Ok(());
+        };
+        for program in ["probe", "watch", "stop"] {
+            let argv0 = spec
+                .get(program)
+                .and_then(|p| p.get("command"))
+                .and_then(|c| c.get("argv"))
+                .and_then(|a| a.get(0));
+            if let Some(Value::String(argv0)) = argv0 {
+                if let Some(path) = argv0.strip_prefix("./") {
+                    self.reference(
+                        &["actions", id, "async", program, "command", "argv"],
+                        &Value::String(path.to_string()),
+                        EntryKind::Asset,
+                        Some(Owner::Action(id.to_string())),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Step 4 of spec/dot.md §5 for one activity node: its action exists, each declared
     /// outcome has an edge, and each edge routes a declared outcome, `failed`, or
     /// `exhausted` when the node has `loopLimits`.
@@ -553,8 +711,15 @@ impl Settings<'_> {
     }
 
     /// A file reference: a relative path to a regular file that stays inside the folder
-    /// once `..` and symbolic links are resolved (spec/dot.md §4).
-    fn reference(&self, path: &[&str], value: &Value) -> Result<PathBuf, BuildError> {
+    /// once `..` and symbolic links are resolved (spec/dot.md §4). The file joins the
+    /// artifact as an entry of `kind` with `owner`.
+    fn reference(
+        &self,
+        path: &[&str],
+        value: &Value,
+        kind: EntryKind,
+        owner: Option<Owner>,
+    ) -> Result<PathBuf, BuildError> {
         let refuse = |why: String| self.at("settings.reference", path, why);
         let Some(reference) = value.as_str().filter(|s| !s.is_empty()) else {
             return Err(self.invalid(path, "a file reference is a non-empty relative path"));
@@ -562,6 +727,21 @@ impl Settings<'_> {
         if Path::new(reference).is_absolute() {
             return Err(refuse(format!(
                 "`{reference}` is an absolute path; name a file inside the workflow folder"
+            )));
+        }
+        if reference.contains('\\') {
+            return Err(refuse(format!(
+                "`{reference}` contains a backslash; separate folders with `/`"
+            )));
+        }
+        let Some(entry_path) = normalize(reference) else {
+            return Err(refuse(format!(
+                "`{reference}` resolves outside the workflow folder"
+            )));
+        };
+        if entry_path == DOT_FILE || entry_path == SETTINGS_FILE {
+            return Err(refuse(format!(
+                "`{reference}` names `{entry_path}`, which every build includes as a source"
             )));
         }
         let folder = std::fs::canonicalize(self.folder)
@@ -579,8 +759,39 @@ impl Settings<'_> {
         if !target.is_file() {
             return Err(refuse(format!("`{reference}` is not a regular file")));
         }
+        let key = (entry_path, owner);
+        let mut files = self.files.borrow_mut();
+        if files.contains_key(&key) {
+            return Ok(target);
+        }
+        let bytes = std::fs::read(&target).map_err(|e| refuse(format!("`{reference}`: {e}")))?;
+        let file = File {
+            path: key.0.clone(),
+            kind,
+            owner: key.1.clone(),
+            executable: executable(&target),
+            bytes,
+        };
+        files.insert(key, file);
         Ok(target)
     }
+}
+
+/// A folder-relative reference with empty and `.` segments dropped and `..` resolved
+/// by name; `None` when a `..` climbs above the folder.
+fn normalize(reference: &str) -> Option<String> {
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in reference.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop()?;
+            }
+            s => segments.push(s),
+        }
+    }
+    let path = segments.join("/");
+    artifact::check_path(&path).ok().map(|()| path)
 }
 
 /// `name`: W02 of spec/kernel.md.

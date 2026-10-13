@@ -12,10 +12,11 @@ use runspore_host::{
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
+use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::model::{ErrorInfo, Resolution, State};
 use runspore_types::reducer::Reducer;
 use runspore_types::store::{Disposition, RunKey, RunView, StoreFailureKind};
-use runspore_wasmtime::WasmtimeReducer;
+use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
@@ -60,6 +61,25 @@ pub enum Command {
     Init,
     /// Build a workflow and check it and its actions without touching the database.
     Validate { workflow: PathBuf },
+    /// Build a workflow folder into its workflow artifact.
+    Build {
+        /// A workflow folder or its workflow.dot.
+        folder: PathBuf,
+        /// The artifact file; by default `<folder>.wasm` beside the folder.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Print an artifact's manifest and package, or a file a run's artifact holds. For
+    /// debugging; not a stable interface.
+    #[command(group(ArgGroup::new("target").required(true).args(["artifact", "run"])))]
+    Inspect {
+        artifact: Option<PathBuf>,
+        #[arg(long, requires = "file")]
+        run: Option<String>,
+        /// A path in the run's artifact, such as `workflow.dot`.
+        #[arg(long, requires = "run")]
+        file: Option<String>,
+    },
     /// Create a run and return.
     Start(StartArgs),
     /// Start, then work until the run is terminal or parked.
@@ -112,8 +132,8 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct StartArgs {
-    /// A workflow folder, its workflow.dot, a JSON workflow document, or the name of a
-    /// workflow in the project folder.
+    /// A workflow folder, its workflow.dot, a workflow artifact, a JSON workflow
+    /// document, or the name of a workflow in the project folder.
     workflow: PathBuf,
     /// The run's base folder, where its commands run. Default: the folder holding the
     /// database's project folder, else the current folder.
@@ -156,6 +176,13 @@ impl Fail {
     }
 }
 
+/// An artifact that does not load is the caller's to fix: exit 2.
+impl From<ArtifactError> for Fail {
+    fn from(e: ArtifactError) -> Self {
+        Fail::usage(e.code, e.message)
+    }
+}
+
 /// Rejections of the caller's request exit 2; store and internal failures exit 10.
 impl From<HostError> for Fail {
     fn from(e: HostError) -> Self {
@@ -181,6 +208,8 @@ impl From<HostError> for Fail {
 pub struct Output {
     pub json: Value,
     pub text: String,
+    /// Bytes printed as they are instead of `text`.
+    pub raw: Option<Vec<u8>>,
     pub exit: u8,
 }
 
@@ -188,6 +217,7 @@ fn done(json: Value, text: String) -> Result<Output, Fail> {
     Ok(Output {
         json,
         text,
+        raw: None,
         exit: 0,
     })
 }
@@ -207,10 +237,23 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Validate { workflow } => {
             return validate(cli, &project::workflow(workflow, &cwd)?)
         }
-        Command::Status { .. } | Command::List | Command::Events { .. } if !db.exists() => {
+        Command::Build { folder, output } => return build(cli, folder, output.as_deref()),
+        Command::Inspect {
+            artifact: Some(path),
+            ..
+        } => return inspect_artifact(path),
+        Command::Status { .. }
+        | Command::List
+        | Command::Events { .. }
+        | Command::Inspect { .. }
+            if !db.exists() =>
+        {
             return missing_database(&cli.command, &db);
         }
-        Command::Status { .. } | Command::List | Command::Events { .. } => {}
+        Command::Status { .. }
+        | Command::List
+        | Command::Events { .. }
+        | Command::Inspect { .. } => {}
         _ => project::before_write(&db)?,
     }
     let base_dir = match &request {
@@ -236,8 +279,16 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         );
     }
     match &cli.command {
-        Command::Init | Command::Validate { .. } | Command::Start(_) | Command::Run(_) => {
-            unreachable!("handled above")
+        Command::Init
+        | Command::Validate { .. }
+        | Command::Build { .. }
+        | Command::Start(_)
+        | Command::Run(_) => unreachable!("handled above"),
+        Command::Inspect { run, file, .. } => {
+            let (Some(run), Some(file)) = (run, file) else {
+                unreachable!("clap requires an artifact, or --run with --file")
+            };
+            inspect_file(&engine, run, file).await
         }
         Command::Worker { run: Some(run), .. } => {
             let key = existing(&engine, run).await?.key;
@@ -249,6 +300,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             Ok(Output {
                 json: json!({"interrupted": true}),
                 text: "worker stopped".into(),
+                raw: None,
                 exit: EXIT_INTERRUPTED,
             })
         }
@@ -368,9 +420,7 @@ fn registry() -> ActivityRegistry {
 /// Validation opens no database: it runs the checks of `start` against no store.
 fn validate(cli: &Cli, workflow: &Path) -> Result<Output, Fail> {
     let source = Source::read(workflow)?;
-    let config = EngineConfig::default();
-    let package = validate_workflow(&*reducer(cli)?, &registry(), config.limits, &source.bytes)
-        .map_err(|e| source.fail(e))?;
+    let package = source.validate(cli)?;
     done(
         json!({"valid": true, "packageBytes": package.len().to_string()}),
         format!("{} is valid", workflow.display()),
@@ -382,7 +432,11 @@ fn validate(cli: &Cli, workflow: &Path) -> Result<Output, Fail> {
 fn missing_database(command: &Command, db: &Path) -> Result<Output, Fail> {
     match command {
         Command::List => done(json!({"db": db, "runs": []}), String::new()),
-        Command::Status { run_id } | Command::Events { run_id } => Err(Fail::usage(
+        Command::Status { run_id }
+        | Command::Events { run_id }
+        | Command::Inspect {
+            run: Some(run_id), ..
+        } => Err(Fail::usage(
             "run.not-found",
             format!(
                 "run {run_id} does not exist ({} does not exist)",
@@ -391,6 +445,108 @@ fn missing_database(command: &Command, db: &Path) -> Result<Output, Fail> {
         )),
         _ => unreachable!("only read-only commands"),
     }
+}
+
+/// Builds a folder, checks it as `validate` does, and writes its artifact.
+fn build(cli: &Cli, folder: &Path, output: Option<&Path>) -> Result<Output, Fail> {
+    let folder = match runspore_build::entry(folder).map_err(build_fail)? {
+        runspore_build::Entry::Folder(folder) => folder,
+        runspore_build::Entry::Document(path) => {
+            return Err(Fail::usage(
+                "workflow.folder",
+                format!(
+                    "{}: `build` takes a workflow folder or its `{}`",
+                    path.display(),
+                    runspore_build::DOT_FILE
+                ),
+            ))
+        }
+    };
+    let source = Source::folder(&folder)?;
+    source.validate(cli)?;
+    let Workflow::Artifact(artifact) = &source.workflow else {
+        unreachable!("a folder builds an artifact")
+    };
+    let target = match output {
+        Some(path) => path.to_path_buf(),
+        None => beside(&folder)?,
+    };
+    std::fs::write(&target, &artifact.bytes)
+        .map_err(|e| Fail::internal("file.unwritable", format!("{}: {e}", target.display())))?;
+    done(
+        json!({"artifact": target.display().to_string(), "artifactDigest": artifact.digest,
+               "packageDigest": artifact.manifest.main,
+               "bytes": artifact.bytes.len().to_string()}),
+        format!("built {} ({})", target.display(), artifact.digest),
+    )
+}
+
+/// `<folder>.wasm` next to the folder: a sibling, never inside it.
+fn beside(folder: &Path) -> Result<PathBuf, Fail> {
+    let named = match folder.file_name() {
+        Some(_) => folder.to_path_buf(),
+        None => std::fs::canonicalize(folder)
+            .map_err(|e| Fail::usage("workflow.folder", format!("{}: {e}", folder.display())))?,
+    };
+    let name = named.file_name().ok_or_else(|| {
+        Fail::usage(
+            "workflow.folder",
+            format!(
+                "{} has no name to give its artifact; use -o",
+                folder.display()
+            ),
+        )
+    })?;
+    Ok(named.with_file_name(format!("{}.wasm", name.to_string_lossy())))
+}
+
+/// The digest, manifest and package of an artifact file. Opens no database.
+fn inspect_artifact(path: &Path) -> Result<Output, Fail> {
+    let artifact = load(&read_file(path)?, path)?;
+    let package: Value = serde_json::from_slice(&artifact.package)
+        .map_err(|e| Fail::internal("json.decode", e.to_string()))?;
+    let json = json!({"artifactDigest": artifact.digest, "manifest": artifact.manifest,
+                      "package": package});
+    let text = serde_json::to_string_pretty(&json)
+        .map_err(|e| Fail::internal("json.encode", e.to_string()))?;
+    done(json, text)
+}
+
+/// A file of the run's stored artifact, as raw bytes; never the source folder.
+async fn inspect_file(engine: &Engine, run: &str, path: &str) -> Result<Output, Fail> {
+    let view = existing(engine, run).await?;
+    let digest = view.artifact_digest.ok_or_else(|| {
+        Fail::usage(
+            "artifact.none",
+            format!("run {run} was started without a workflow artifact"),
+        )
+    })?;
+    let unreadable =
+        |e: ArtifactError| Fail::internal("artifact.unreadable", format!("artifact {digest}: {e}"));
+    let bytes = engine
+        .get_artifact(&digest)
+        .await?
+        .ok_or_else(|| unreadable(ArtifactError::invalid("not in the store")))?;
+    let mut reader = ArtifactReader::open(&bytes).map_err(unreadable)?;
+    let manifest = Manifest::decode(&reader.manifest().map_err(unreadable)?).map_err(unreadable)?;
+    let Some(entry) = manifest.entry(path) else {
+        let held: Vec<&str> = manifest.entries.iter().map(|e| e.path.as_str()).collect();
+        return Err(Fail::usage(
+            "artifact.no-file",
+            format!(
+                "the artifact of run {run} holds no file {path}; it holds {}",
+                held.join(", ")
+            ),
+        ));
+    };
+    let content = reader.entry(&entry.digest).map_err(unreadable)?;
+    Ok(Output {
+        json: json!({"runId": run, "path": entry.path, "kind": entry.kind.as_str(),
+                     "digest": entry.digest, "text": String::from_utf8(content.clone()).ok()}),
+        text: String::new(),
+        raw: Some(content),
+        exit: 0,
+    })
 }
 
 fn engine(cli: &Cli, db: &Path, base_dir: PathBuf) -> Result<Engine, Fail> {
@@ -454,10 +610,12 @@ impl StartRequest {
     }
 
     async fn start(&self, engine: &Engine) -> Result<StartOutcome, Fail> {
-        engine
-            .start(&self.source.bytes, self.input.clone(), &self.start_key)
-            .await
-            .map_err(|e| self.source.fail(e))
+        let (input, start_key) = (self.input.clone(), &self.start_key);
+        let started = match &self.source.workflow {
+            Workflow::Package(bytes) => engine.start(bytes, input, start_key).await,
+            Workflow::Artifact(artifact) => engine.start_artifact(artifact, input, start_key).await,
+        };
+        started.map_err(|e| self.source.fail(e))
     }
 }
 
@@ -490,6 +648,7 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
     Ok(Output {
         text: view::status_text(&view, &arrival, package.as_ref(), &invocations),
         json,
+        raw: None,
         exit,
     })
 }
@@ -585,38 +744,86 @@ fn disposition(d: &Disposition) -> &'static str {
     }
 }
 
-/// The workflow a command was given, as package bytes: a folder built in memory
-/// (spec/dot.md), or a JSON document read as it is.
+fn build_fail(e: runspore_build::BuildError) -> Fail {
+    Fail::usage(e.code, e.to_string())
+}
+
+/// Loads an artifact (spec/artifact.md §5); a refusal names where it came from.
+fn load(bytes: &[u8], origin: &Path) -> Result<Artifact, Fail> {
+    load_artifact(bytes).map_err(|e| {
+        let mut fail = Fail::from(e);
+        fail.message = format!("{}: {}", origin.display(), fail.message);
+        fail
+    })
+}
+
+/// The WebAssembly magic bytes that start every artifact.
+const WASM_MAGIC: &[u8] = b"\0asm";
+
+/// What a command was given to run.
+enum Workflow {
+    /// A JSON workflow document, read as it is.
+    Package(Vec<u8>),
+    /// A workflow artifact: built from a folder in memory, or read from a file.
+    Artifact(Artifact),
+}
+
+/// The workflow a command was given, and the folder or artifact file it came from.
 struct Source {
-    bytes: Vec<u8>,
-    folder: Option<PathBuf>,
+    workflow: Workflow,
+    origin: Option<PathBuf>,
 }
 
 impl Source {
     fn read(path: &Path) -> Result<Self, Fail> {
-        let build_fail = |e: runspore_build::BuildError| Fail::usage(e.code, e.to_string());
         match runspore_build::entry(path).map_err(build_fail)? {
-            runspore_build::Entry::Folder(folder) => {
-                let package = runspore_build::build(&folder).map_err(build_fail)?;
-                let bytes = serde_json::to_vec(&package)
-                    .map_err(|e| Fail::internal("json.encode", e.to_string()))?;
+            runspore_build::Entry::Folder(folder) => Self::folder(&folder),
+            runspore_build::Entry::Document(path) => {
+                let bytes = read_file(&path)?;
+                if !bytes.starts_with(WASM_MAGIC) {
+                    return Ok(Self {
+                        workflow: Workflow::Package(bytes),
+                        origin: None,
+                    });
+                }
                 Ok(Self {
-                    bytes,
-                    folder: Some(folder),
+                    workflow: Workflow::Artifact(load(&bytes, &path)?),
+                    origin: Some(path),
                 })
             }
-            runspore_build::Entry::Document(path) => Ok(Self {
-                bytes: read_file(&path)?,
-                folder: None,
-            }),
         }
     }
 
-    /// A rejection of a built package names the folder it came from.
+    /// Builds the folder in memory and loads its artifact like a prebuilt one.
+    fn folder(folder: &Path) -> Result<Self, Fail> {
+        let sealed = runspore_build::build(folder)
+            .and_then(|built| built.seal())
+            .map_err(build_fail)?;
+        Ok(Self {
+            workflow: Workflow::Artifact(load(&sealed.bytes, folder)?),
+            origin: Some(folder.to_path_buf()),
+        })
+    }
+
+    fn package(&self) -> &[u8] {
+        match &self.workflow {
+            Workflow::Package(bytes) => bytes,
+            Workflow::Artifact(artifact) => &artifact.package,
+        }
+    }
+
+    /// The checks of `start`, against no store; returns the canonical package bytes.
+    fn validate(&self, cli: &Cli) -> Result<Vec<u8>, Fail> {
+        let limits = EngineConfig::default().limits;
+        validate_workflow(&*reducer(cli)?, &registry(), limits, self.package())
+            .map_err(|e| self.fail(e))
+    }
+
+    /// A rejection of a package names the folder or artifact file it came from.
     fn fail(&self, e: HostError) -> Fail {
         let mut fail = Fail::from(e);
-        if let (Some(folder), 2) = (&self.folder, fail.exit) {
-            fail.message = format!("{}: {}", folder.display(), fail.message);
+        if let (Some(origin), 2) = (&self.origin, fail.exit) {
+            fail.message = format!("{}: {}", origin.display(), fail.message);
         }
         fail
     }

@@ -18,6 +18,7 @@ wasmtime = { version = "49.0.2", default-features = false, features = ["std", "r
 wit-component = { version = "0.261.0", default-features = false }
 
 [dev-dependencies]
+runspore-build = { path = "../runspore-build" }
 runspore-kernel.workspace = true
 runspore-trace = { path = "../runspore-trace" }
 serde_json.workspace = true

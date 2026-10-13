@@ -48,6 +48,12 @@ fn main() -> ExitCode {
                     map.insert("format".into(), json!(FORMAT));
                 }
                 println!("{object}");
+            } else if let Some(raw) = &out.raw {
+                use std::io::Write;
+                let mut stdout = std::io::stdout().lock();
+                if let Err(e) = stdout.write_all(raw).and_then(|()| stdout.flush()) {
+                    return report_error(false, &Fail::internal("stdout", e.to_string()));
+                }
             } else if !out.text.is_empty() {
                 println!("{}", out.text.trim_end());
             }
