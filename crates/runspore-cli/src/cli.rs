@@ -192,15 +192,17 @@ impl From<ArtifactError> for Fail {
 /// Rejections of the caller's request exit 2; store and internal failures exit 10.
 impl From<HostError> for Fail {
     fn from(e: HostError) -> Self {
-        if let HostError::OutputInvalid(misfit) = &e {
-            // The summary, then one error per line (spec/cli.md, output schemas).
-            let mut fail = Fail::usage(e.code(), misfit.to_string());
-            fail.details = Some(misfit.details());
-            return fail;
-        }
+        // A misfit prints its summary, then one error per line, and carries the
+        // errors as details (spec/cli.md, output and input schemas).
+        let refused = |message: String, details: Value| {
+            let mut fail = Fail::usage(e.code(), message);
+            fail.details = Some(details);
+            fail
+        };
         let usage = match &e {
+            HostError::OutputInvalid(misfit) => return refused(misfit.to_string(), misfit.details()),
+            HostError::InputInvalid(misfit) => return refused(misfit.to_string(), misfit.details()),
             HostError::Invalid { .. } | HostError::Kernel(_) => true,
-            HostError::OutputInvalid(_) => unreachable!("handled above"),
             HostError::Store(f) => {
                 f.kind == StoreFailureKind::Conflict || f.code == "run.not-found"
             }
@@ -842,10 +844,13 @@ impl Source {
             .map_err(|e| self.fail(e))
     }
 
-    /// A rejection of a package names the folder or artifact file it came from.
+    /// A rejection of a package names the folder or artifact file it came from. A
+    /// rejection of the run's input (`input.invalid`) is about the input, not the
+    /// workflow, and names neither.
     fn fail(&self, e: HostError) -> Fail {
+        let about_input = matches!(e, HostError::InputInvalid(_));
         let mut fail = Fail::from(e);
-        if fail.exit == 2 {
+        if fail.exit == 2 && !about_input {
             fail.message = format!("{}: {}", self.origin.display(), fail.message);
         }
         fail

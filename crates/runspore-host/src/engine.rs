@@ -344,7 +344,15 @@ pub fn validate_workflow(
         run_id: "validate".to_string(),
         input: Value::Null,
     })?;
-    check_workflow(reducer, activities, limits, workflow_json, &started)
+    Ok(check_workflow(reducer, activities, limits, workflow_json, &started)?.package)
+}
+
+/// A workflow that passed the checks of `validate_workflow`.
+struct Checked {
+    /// The canonical package bytes.
+    package: Vec<u8>,
+    /// The package as JSON, for the checks `start` adds.
+    workflow: Value,
 }
 
 /// The checks of `validate_workflow`, with the dry transition fed `started`.
@@ -354,7 +362,7 @@ fn check_workflow(
     limits: Limits,
     workflow_json: &[u8],
     started: &Evidence,
-) -> Result<Vec<u8>, HostError> {
+) -> Result<Checked, HostError> {
     let workflow =
         canonical::parse(workflow_json).map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
     let package =
@@ -388,12 +396,18 @@ fn check_workflow(
         frozen_limits: limits,
     })?;
     check_schemas(&workflow)?;
-    Ok(package)
+    Ok(Checked { package, workflow })
 }
 
-/// Every schema in a node's `outputSchemas` against the subset (spec/schema.md §1).
-/// The kernel has already checked the field's shape (W13).
+/// Every schema in a node's `outputSchemas` against the subset (spec/schema.md §1),
+/// and the package's `inputSchema` against the subset and for its object root (§4).
+/// The kernel has already checked the fields' shapes (W13; an object).
 fn check_schemas(workflow: &Value) -> Result<(), HostError> {
+    if let Some(schema) = workflow.get("inputSchema") {
+        runspore_schema::check_input(schema).map_err(|e| {
+            HostError::invalid(runspore_schema::INVALID_SCHEMA, format!("inputSchema: {e}"))
+        })?;
+    }
     let nodes = workflow.get("nodes").and_then(Value::as_object);
     for (id, node) in nodes.into_iter().flatten() {
         let schemas = node.get("outputSchemas").and_then(Value::as_object);
@@ -511,13 +525,18 @@ impl Engine {
             run_id: key.run.clone(),
             input: input.clone(),
         })?;
-        let package = check_workflow(
+        let Checked { package, workflow } = check_workflow(
             &*inner.reducer,
             &inner.activities,
             inner.config.limits,
             workflow_json,
             &started,
         )?;
+        // The input against the workflow's inputSchema, before anything is created
+        // (spec/host.md §2, spec/schema.md §4).
+        if let Some(schema) = workflow.get("inputSchema") {
+            runspore_schema::fit_input(schema, input).map_err(HostError::InputInvalid)?;
+        }
         let package_digest = digest::package(&package);
         let request = CreateRun {
             mutation: mutation(
