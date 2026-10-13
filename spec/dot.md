@@ -3,9 +3,10 @@
 An author writes a workflow as a **workflow folder**: the graph in `workflow.dot`, the
 structured, non-topology part of the package in `settings.json`, and the files the
 settings name. A **build** turns the folder into the package of
-[kernel.md](kernel.md) §2. `spore validate`, `start` and `run` build a folder in
-memory ([cli.md](cli.md)); the folder is never read again by a run, which executes
-its stored package.
+[kernel.md](kernel.md) §2 and the files it declares, sealed together in one workflow
+artifact ([artifact.md](artifact.md)). `spore build` writes the artifact to disk;
+`spore validate`, `start` and `run` build a folder in memory ([cli.md](cli.md)). The
+folder is never read again by a run, which executes its stored package.
 
 The build is the library `runspore-build`, shared by the CLI and the host. It reads
 nothing outside the folder and needs no Graphviz installation.
@@ -16,7 +17,7 @@ nothing outside the folder and needs no Graphviz installation.
 | --- | --- | --- |
 | `workflow.dot` | yes | Topology, node kinds, routing, the workflow name and the start node (§2) |
 | `settings.json` | yes | Limits, actions, and the non-routing fields of each node (§4) |
-| Any other path | no | Instruction and asset files, read only when `settings.json` names them |
+| Any other path | no | Instruction, asset and schema files, read only when `settings.json` names them |
 
 The file names are fixed. The entry point is the folder or its `workflow.dot`; any
 other `.dot` file is refused. A file the settings do not name is ignored, so a stray
@@ -115,14 +116,15 @@ An `activity`, `await-signal` or `fail` node therefore needs an entry in `nodes`
 `complete` node may omit it.
 
 `instructions` (on a node) and `assets` (a list, on an action) are relative paths to
-files inside the folder. Both are build-only: the build checks them and leaves them
-out of the package.
+files inside the folder. Both are build-only: the build checks them, records the
+files they name in the artifact's manifest, and leaves them out of the package.
 
 `outputSchemas` is an object keyed by outcome ([schema.md](schema.md)). Each value is
 a schema written inline, or a string: a file reference to a JSON file holding one.
 Either may use the authoring form, `$defs` and `$ref` (schema.md §2). The build puts
 every schema into the package in its package form: read from its file, every `$ref`
-inlined, checked against the subset. The package never holds a path or a `$ref`.
+inlined, checked against the subset. The package never holds a path or a `$ref`;
+the manifest records each schema file as a `source` entry.
 
 An `activity` node's `input` may hold the marker `{"$outputSchemas": {}}` wherever a
 mapping is evaluated: as the input itself, or inside its plain objects and arrays,
@@ -138,9 +140,19 @@ step that judges a loop. The next `red` takes the node's `exhausted` edge, which
 node must draw (kernel.md §2, W12). The number is not drawn in the DOT; a renderer
 may show it on the edge from the settings.
 
+An action may also name a program in the folder for its async `probe`, `watch` or
+`stop` (`async.<name>.command.argv[0]`) as `./<path>`. That file is bundled as the
+action's asset, whether or not `assets` lists it. A bare name is not a file
+reference; it is looked up on the machine when the program runs.
+
 A file reference must be a relative path to a regular file that stays inside the
-folder once `..` and every symbolic link are resolved. An absolute path, an escape,
-or a missing file is an error naming the reference.
+folder once `..` and every symbolic link are resolved. An absolute path, a backslash,
+an escape, or a missing file is an error naming the reference. The manifest records
+the reference with its `.` and `..` segments resolved by name (`a/./b/../c.md` is
+`a/c.md`), and the bytes of the file it resolves to.
+
+A file may be named by several owners, for example as the instructions of two nodes:
+it becomes an entry of each. No reference may name `workflow.dot` or `settings.json`.
 
 ## 5. The build
 
@@ -154,7 +166,10 @@ or a missing file is an error naming the reference.
    settings for has them. Each `activity` node's action exists; every outcome the
    action declares has an edge, and every edge's `on` is a declared outcome,
    `failed`, or `exhausted` when the node has `loopLimits`.
-5. Check and strip the file references. Read each `outputSchemas` file, inline the
+5. Check and strip the file references, and collect the files they name: each
+   `instructions` file as an `instructions` entry owned by its node, each asset and
+   each `./` probe, watch and stop program as an `asset` entry owned by its action,
+   each schema file as a `source` entry. Read each `outputSchemas` file, inline the
    `$ref`s and check every schema against the subset at its place in the package
    (schema.md §1); then replace each `$outputSchemas` marker, checking that the copy
    still fits the package's depth limit where it lands.
@@ -164,6 +179,11 @@ or a missing file is an error naming the reference.
    `on` to its target. The package then passes the kernel's validation (kernel.md
    §2) like any other, including W12 (loop limits), W14 (every node is reachable
    from `start`) and W15 (an end is reachable from every node).
+7. Seal the artifact: the canonical package bytes as `main`, `workflow.dot` and
+   `settings.json` as `source` entries, and the entries of step 5, each with its
+   bytes, its blob digest and `executable` when the file had an execute bit
+   (artifact.md §2). The same folder always gives the same manifest and the same
+   package.
 
 ## 6. Errors
 
@@ -182,6 +202,6 @@ validation after the build names the folder.
 | `dot.graph` | A rule of §3 Names and limits or of §5 step 2; an outcome with no edge, or an edge for an outcome the action does not declare (§5 step 4) |
 | `settings.invalid` | `settings.json` is not JSON or not the shape of §4, or a node names an action `actions` does not define |
 | `settings.mismatch` | A node is in one file and missing from the other |
-| `settings.reference` | A file reference that is absolute, escapes the folder, or names no file |
+| `settings.reference` | A file reference that is absolute, escapes the folder, names no file, or names `workflow.dot` or `settings.json` |
 | `settings.invalid` | Also: a `$outputSchemas` marker on a node with no `outputSchemas`, or not written as `{"$outputSchemas": {}}` |
 | `workflow.invalid-schema` | A schema file that is not JSON in the canonical domain, or a schema outside the subset, too deep, too large or with a bad `$ref` ([schema.md](schema.md)). The message names `nodes.<id>.outputSchemas.<outcome>`, the schema file when there is one, and the JSON Pointer of the keyword |

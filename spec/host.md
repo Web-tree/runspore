@@ -37,6 +37,20 @@ world `machine` from `contracts/wit/machine/machine.wit`.
 - The component exports exactly `runspore:machine/reducer@0.1.0`.
 - `kernel_digest()` is `digest::hash("kernel", [component bytes])`.
 
+### Workflow artifacts (0.2)
+
+`runspore_wasmtime::load_artifact(bytes)` loads a workflow artifact by the sequence
+of [artifact.md](artifact.md) §5 and returns a `runspore_types::artifact::Artifact`:
+its digest and bytes, the parsed manifest, and the package bytes from `blob(main)`.
+`ArtifactReader` reads any other blob of a stored artifact.
+
+An artifact is untrusted code. It is instantiated with the kernel's engine settings
+(deterministic features only, no imports), in a fresh store with its own fuel
+watchdog and memory ceiling, and only its `manifest` and `blob` exports are called. A
+trap, a watchdog stop or a refused memory growth is `artifact.invalid`; it never
+panics the host. Every entry path is checked on load (`artifact.invalid-path`), and
+the package bytes are checked against `main` before anything else reads them.
+
 ## 2. Engine
 
 `crates/runspore-host`. Constructed from an `Arc<dyn Store>`, an `Arc<dyn Reducer>`,
@@ -81,6 +95,10 @@ process on its own.
   0.1 derived the run ID from the key, `ids::run_from_start_key(tenant, start_key)`, so
   the same key in two stores gave the same run ID and the same effect keys. Runs
   created that way keep their IDs; step 1 finds them by key like any other run.
+- **0.2.** `start_artifact(artifact, input, start_key)`: `start` with the package of
+  a loaded artifact. `create_run` carries the artifact's digest and bytes, so the
+  store keeps the artifact and the run records its digest (store.md §2). A run found
+  by its start key keeps the artifact it was first started from.
 - `signal(key, message_id, name, outcome, data)`: `append_event` with event ID
   `ids::event_for_signal(message_id)`. **0.2:** first, the data is checked against
   the run's package: against the schema each await-signal node waiting for `name`
@@ -104,8 +122,8 @@ process on its own.
   `workflow.invalid-schema`, naming the node, the outcome and the keyword's path.
 - `release(key)`: `release_run`, with a request ID derived from the quarantine it
   lifts, so repeating it is a duplicate.
-- Read-through views: `get_run`, `get_package`, `list_runs`, `list_events`,
-  `list_invocations`.
+- Read-through views: `get_run`, `get_package`, `get_artifact` (0.2), `list_runs`,
+  `list_events`, `list_invocations`.
 
 Request IDs for these are derived from their idempotency key (start key, message ID,
 request ID), so a client retry is a duplicate, not a second event.

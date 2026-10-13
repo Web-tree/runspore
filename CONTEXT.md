@@ -10,6 +10,18 @@ A durable workflow runtime: a workflow is a graph of steps, and a run of it surv
 A versioned definition of a graph of nodes and the actions bound to them. One workflow has many runs.
 _Avoid_: pipeline, flow, "current workflow" (that is a run)
 
+**Workflow folder**:
+The folder an author writes one workflow in: `workflow.dot`, `settings.json`, and the instruction, asset and schema files the settings name.
+_Avoid_: project, bundle, source tree
+
+**Package**:
+The canonical document of one workflow that the kernel runs. Its digest is a run's identity.
+_Avoid_: compiled workflow, "the JSON"
+
+**Workflow artifact**:
+The immutable WebAssembly file a build makes from a workflow folder: the package and every file the workflow declares, listed in its manifest. A run records the artifact it was started from and never reads the folder again.
+_Avoid_: bundle, binary, "the wasm" (the kernel is a different component)
+
 **Run**:
 One execution of a workflow, with its own identity and state.
 _Avoid_: workflow instance, job, session

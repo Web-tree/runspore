@@ -28,7 +28,8 @@ a scan cursor the store did not issue.
 Failure codes are part of the contract. `kind` is in parentheses.
 
 Protocol 0.2 adds `find_run`, an attempt's process record with `set_process`, the
-audit record of an expiry, the run's base folder, and scenarios S15 to S17; everything
+audit record of an expiry, the run's base folder, the artifact table with
+`get_artifact` and the run's artifact digest, and scenarios S15 to S18; everything
 else is as in 0.1.
 
 ## 2. Operations
@@ -50,6 +51,15 @@ body `started.body`, accepted at now. Returns `{key, startedSequence: 1}`.
 null. It is stored with the run and shown by `get_run` and `list_runs`. It is not part
 of the run's identity: a repeat with another `baseDir` is a `duplicate`, and the run
 keeps the folder it was created with.
+
+**0.2:** the request may carry the workflow artifact the run is started from
+(artifact.md), as its digest and bytes. Predicate: the digest equals
+`digest::hash("artifact", [bytes])` (`conflict` / `artifact.digest-mismatch`). Writes,
+beside the package: the artifact, content-addressed, if absent, and the artifact
+digest on the run. A run started without one has none. The artifact digest is
+provenance, not identity: it is not compared when the run already exists, so starting
+again with the same start key and package from a rebuilt artifact is a `duplicate`
+and keeps the run's first artifact.
 
 Run IDs are chosen by the caller and random (host §2), so `run.start-key-mismatch` is
 how a store answers the second of two starts that raced with one start key.
@@ -80,6 +90,11 @@ applied sequence, package digest, snapshot, and the event at `appliedSequence + 
 ### get_package
 
 The canonical workflow bytes for a digest, or `None`.
+
+### get_artifact (0.2)
+
+The bytes of the workflow artifact stored under a digest, or `None`. A read: no
+request ID and no receipt.
 
 ### commit_turn
 
@@ -201,7 +216,8 @@ and are idempotent on an already matching state.
 - `get_run`, `list_runs` (ascending by run ID within a tenant), `list_events`
   (ascending by sequence, with the consuming revision and that commit's diagnostics),
   `list_invocations` (ascending by invocation ID). **0.2:** an invocation shows the
-  process record of its latest attempt, or null.
+  process record of its latest attempt, or null. **0.2:** a run shows its artifact
+  digest, or null.
 
 ## 3. SQLite adapter
 
@@ -214,7 +230,7 @@ and are idempotent on an already matching state.
   `schema.too-new`. An empty file is initialized. An older version is upgraded in place
   in one transaction: version 1 to 2 adds the attempt's process record and the audit
   record's kind; version 2 to 3 adds the run's base folder, null for runs created
-  before.
+  before; version 3 to 4 adds the artifact table and the run's artifact digest.
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
@@ -252,6 +268,7 @@ Written once, generic over a store factory and a manual clock, in
 | S15 | Two `create_run` calls carry one start key and two run IDs, from two instances at once (0.2) | One is `applied`, the other `run.start-key-mismatch`; `find_run` returns the winner; `find_run` of an unknown key, or of the key in another tenant, is `None` |
 | S16 | `set_process` on a running attempt, then with another owner or fence, at and after the deadline, and after expiry (0.2) | The record shows in `list_invocations` and in the `Lease` item of `scan_due`; null clears it; the lease is not extended; a replay is `duplicate` with the historical record; every other call is `lease.lost` and changes nothing; an expiry with `processUnchecked` is applied |
 | S17 | `create_run` with a base folder, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first folder; the repeat is `duplicate`; a run created with null shows null |
+| S18 | `create_run` with an artifact; again with the same start key and another artifact; with an artifact whose digest does not match its bytes (0.2) | The artifact is returned by `get_artifact` and its digest by `get_run`; the second start is `duplicate` and the run keeps the first artifact digest; the third is `artifact.digest-mismatch` and writes nothing; a run started without one shows none |
 
 SQLite-specific, in the adapter crate:
 
@@ -262,5 +279,6 @@ SQLite-specific, in the adapter crate:
 | Q03 | A child process aborts at each store failpoint | After reopen the mutation is either wholly absent or wholly present; a retry of the same request converges to one applied mutation |
 | Q04 | Open a file with a newer schema version | `schema.too-new` |
 | Q05 | Expire one attempt plainly and one with `processUnchecked` (0.2) | Each writes one `attempt.expired` audit record with reason `lease`; only the second notes `process.unchecked` |
-| Q06 | Open a version 1 file (0.2) | Upgraded to version 3; its records are kept; process records and audit kinds work |
-| Q07 | Open a version 2 file (0.2) | Upgraded to version 3; its runs are kept with a null base folder; a new run records its folder |
+| Q06 | Open a version 1 file (0.2) | Upgraded to version 4; its records are kept; process records and audit kinds work |
+| Q07 | Open a version 2 file (0.2) | Upgraded to version 4; its runs are kept with a null base folder; a new run records its folder |
+| Q08 | Open a version 3 file (0.2) | Upgraded to version 4; its runs are kept and show no artifact; a new run stores its artifact |

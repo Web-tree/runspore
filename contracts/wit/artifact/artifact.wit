@@ -1,0 +1,15 @@
+package runspore:artifact@0.1.0;
+
+/// Reads a workflow artifact: an immutable component holding one workflow's package
+/// and the files it declares. Rules: spec/artifact.md.
+interface reader {
+  /// Canonical JSON manifest, format "runspore.artifact/0.1".
+  manifest: func() -> list<u8>;
+  /// Bytes of the blob with this digest: the package (the manifest's `main`) or the
+  /// file of a manifest entry. None when the artifact holds no such blob.
+  blob: func(digest: string) -> option<list<u8>>;
+}
+
+world artifact {
+  export reader;
+}
