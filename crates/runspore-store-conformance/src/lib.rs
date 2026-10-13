@@ -91,6 +91,7 @@ pub fn create_run(key: &RunKey, request_id: &str, variant: u32) -> CreateRun {
         package,
         started,
         base_dir: None,
+        artifact: None,
     }
 }
 
@@ -1252,6 +1253,56 @@ pub async fn s17_base_dir(factory: &dyn StoreFactory) {
     assert_eq!(run.base_dir, None);
 }
 
+/// S18: a run keeps the artifact it was first started from; a mismatched digest
+/// writes nothing.
+pub async fn s18_artifact(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s18").await;
+    assert_eq!(w.run().await.artifact_digest, None, "started without one");
+    let artifact = |bytes: &[u8]| StoredArtifact {
+        digest: digest::artifact(bytes),
+        bytes: bytes.to_vec(),
+    };
+    let (first, rebuilt) = (artifact(b"first build"), artifact(b"second build"));
+
+    let key = RunKey::new(DEFAULT_TENANT, "s18-artifact");
+    let mut request = create_run(&key, "create-artifact", 0);
+    request.artifact = Some(first.clone());
+    let created = w.store().create_run(request).await.unwrap();
+    assert_eq!(created.disposition, Disposition::Applied);
+    let view = || async { w.store().get_run(&key).await.unwrap().unwrap() };
+    assert_eq!(view().await.artifact_digest, Some(first.digest.clone()));
+    assert_eq!(
+        w.store().get_artifact(&first.digest).await.unwrap(),
+        Some(first.bytes.clone())
+    );
+
+    let mut again = create_run(&key, "create-artifact-again", 0);
+    again.artifact = Some(rebuilt.clone());
+    let again = w.store().create_run(again).await.unwrap();
+    assert_eq!(again.disposition, Disposition::Duplicate);
+    assert_eq!(view().await.artifact_digest, Some(first.digest.clone()));
+    assert_eq!(w.store().get_artifact(&rebuilt.digest).await.unwrap(), None);
+
+    let bad_key = RunKey::new(DEFAULT_TENANT, "s18-bad");
+    let mut bad = create_run(&bad_key, "create-bad", 0);
+    bad.artifact = Some(StoredArtifact {
+        digest: first.digest.clone(),
+        bytes: b"tampered".to_vec(),
+    });
+    assert_eq!(
+        failure(w.store().create_run(bad).await),
+        (
+            StoreFailureKind::Conflict,
+            "artifact.digest-mismatch".into()
+        )
+    );
+    assert_eq!(w.store().get_run(&bad_key).await.unwrap(), None);
+    assert_eq!(
+        w.store().get_receipt(&bad_key, "create-bad").await.unwrap(),
+        None
+    );
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1261,7 +1312,8 @@ macro_rules! store_conformance_tests {
             s04_result_after_expiry s05_heartbeat_deadline s06_event_id_conflict
             s07_concurrent_appends s08_atomic_commit s09_not_before s10_fences
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
-            s15_start_key_race s16_process_record s17_base_dir);
+            s15_start_key_race s16_process_record s17_base_dir
+            s18_artifact);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

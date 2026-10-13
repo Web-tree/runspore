@@ -65,6 +65,7 @@ package signing. Each is additive under a later semantics version.
 - [cli.md](cli.md): the `spore` command surface and exit codes.
 - [dot.md](dot.md): workflow folders, the DOT dialect, settings and the build.
 - [schema.md](schema.md): output schemas: the JSON Schema subset and how data is checked.
+- [artifact.md](artifact.md): the workflow artifact, its manifest, and how a host loads it.
 - [release.md](release.md): release assets, the release key and signature, `install.sh`.
 
 The wire types are code: `crates/runspore-types`. Where prose and that crate disagree,
@@ -79,7 +80,7 @@ crates/runspore-component     kernel as a WebAssembly component (guest)
 crates/runspore-wasmtime      Reducer implemented by running that component
 crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
-crates/runspore-build         Build: workflow folder (DOT and settings) to package
+crates/runspore-build         Build: workflow folder (DOT and settings) to package and workflow artifact
 crates/runspore-schema        Output schemas: the subset, its checks, data checks
 crates/runspore-cli           the spore binary and crash-recovery tests
 conformance/traces            golden kernel traces

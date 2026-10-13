@@ -34,6 +34,16 @@ pub fn package(canonical_workflow: &[u8]) -> Digest {
     hash("package", &[canonical_workflow])
 }
 
+/// Digest of a workflow artifact: the bytes of the component file.
+pub fn artifact(component: &[u8]) -> Digest {
+    hash("artifact", &[component])
+}
+
+/// Digest of one file inside a workflow artifact.
+pub fn blob(bytes: &[u8]) -> Digest {
+    hash("blob", &[bytes])
+}
+
 /// Digest of a run snapshot: its canonical state bytes.
 pub fn state(canonical_state: &[u8]) -> Digest {
     hash("state", &[canonical_state])

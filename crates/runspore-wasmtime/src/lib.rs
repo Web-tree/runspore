@@ -5,8 +5,13 @@
 //! refused memory growth becomes an `InvariantViolation` failure with code
 //! `host.trap`, `host.watchdog` or `host.memory`; it never panics the host and is never
 //! a business outcome. Rules: `spec/host.md` section 1.
+//!
+//! [`load_artifact`] loads workflow artifacts in the same sandbox.
 
+mod artifact;
 mod convert;
+
+pub use artifact::{load_artifact, ArtifactReader};
 
 use runspore_types::digest;
 use runspore_types::reducer::{

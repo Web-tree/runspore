@@ -9,7 +9,8 @@ use runspore_store_conformance::{
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
-    InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, Turn, DEFAULT_TENANT,
+    InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact, Turn,
+    DEFAULT_TENANT,
 };
 use serde_json::{json, Value};
 
@@ -260,6 +261,8 @@ async fn q06_a_version_1_file_is_upgraded() {
         "ALTER TABLE attempts DROP COLUMN process;
          ALTER TABLE audit DROP COLUMN kind;
          ALTER TABLE runs DROP COLUMN base_dir;
+         ALTER TABLE runs DROP COLUMN artifact_digest;
+         DROP TABLE artifacts;
          PRAGMA user_version = 1;",
     )
     .unwrap();
@@ -306,6 +309,8 @@ async fn q07_a_version_2_file_is_upgraded() {
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
         "ALTER TABLE runs DROP COLUMN base_dir;
+         ALTER TABLE runs DROP COLUMN artifact_digest;
+         DROP TABLE artifacts;
          PRAGMA user_version = 2;",
     )
     .unwrap();
@@ -324,4 +329,52 @@ async fn q07_a_version_2_file_is_upgraded() {
     store.create_run(request).await.unwrap();
     let run = store.get_run(&new).await.unwrap().expect("new run");
     assert_eq!(run.base_dir.as_deref(), Some("/repo"));
+}
+
+#[tokio::test]
+async fn q08_a_version_3_file_is_upgraded() {
+    let path = fresh_path();
+    let clock = ManualClock::new(1_000);
+    let store = SqliteStore::open_with_clock(&path, clock.clone()).unwrap();
+    let old = RunKey::new(DEFAULT_TENANT, "old");
+    store
+        .create_run(create_run(&old, "create", 0))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE runs DROP COLUMN artifact_digest;
+         DROP TABLE artifacts;
+         PRAGMA user_version = 3;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, clock).unwrap();
+    let version: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, runspore_store_sqlite::SCHEMA_VERSION);
+    let kept = store
+        .get_run(&old)
+        .await
+        .unwrap()
+        .expect("the old run is kept");
+    assert_eq!(kept.artifact_digest, None);
+
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    let mut request = create_run(&new, "create", 1);
+    let bytes = b"artifact".to_vec();
+    request.artifact = Some(StoredArtifact {
+        digest: runspore_types::digest::artifact(&bytes),
+        bytes: bytes.clone(),
+    });
+    store.create_run(request).await.unwrap();
+    let view = store.get_run(&new).await.unwrap().unwrap();
+    let digest = view
+        .artifact_digest
+        .expect("the new run records its artifact");
+    assert_eq!(store.get_artifact(&digest).await.unwrap(), Some(bytes));
 }

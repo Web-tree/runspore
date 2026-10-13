@@ -19,6 +19,9 @@ engine. It never listens on a network.
 | --- | --- |
 | `init` | **0.2.** Creates the project folder (§Project folder) |
 | `validate <workflow>` | Builds the workflow and checks it and its actions without touching the database |
+| `build <folder> [-o <file>]` | **0.2.** Builds a workflow folder (or its `workflow.dot`), checks it as `validate` does, and writes the workflow artifact to `<file>`, by default `<folder>.wasm` beside the folder |
+| `inspect <artifact>` | **0.2.** Loads an artifact and prints its digest, manifest and package as JSON |
+| `inspect --run <runId> --file <path>` | **0.2.** Prints the file the run's artifact holds at `<path>`, for example `workflow.dot` |
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder |
 | `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
@@ -30,11 +33,31 @@ engine. It never listens on a network.
 | `release <runId>` | Lifts a quarantine |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
-as [dot.md](dot.md) describes, or a JSON workflow document. JSON documents are still
+as [dot.md](dot.md) describes, a workflow artifact (a file starting with the
+WebAssembly magic bytes), or a JSON workflow document. JSON documents are still
 accepted until the cut-over to 0.2. A build error exits 2 and names the file and line
-(dot.md §6). The command and crash tests give `spore` workflow folders; exactly one
-test gives it a JSON document, to show it is still accepted, so the cut-over removes
-that test and no other.
+(dot.md §6); an artifact that does not load exits 2 with its code (artifact.md §6).
+The command and crash tests give `spore` workflow folders; exactly one test gives it
+a JSON document, to show it is still accepted, so the cut-over removes that test and
+no other.
+
+`start` and `run` from a folder build its artifact in memory, load it like a
+prebuilt one, and store it with the run; from an artifact they store that file. Either
+way the run never reads the folder or the file again: editing or deleting them
+changes nothing a started run sees. A run started from a JSON document has no
+artifact.
+
+`build` writes `<folder>.wasm` next to the folder, named after the folder (so
+`spore build deploy/` writes `deploy.wasm`), never inside it; `-o` names another file.
+It overwrites an existing file. The same folder built by the same `spore` gives the
+same bytes.
+
+`inspect` is for debugging; its output is not a stable interface. `inspect --run`
+reads the run's stored artifact, never the folder: it prints any entry's raw bytes to
+stdout, and with `--json` an object `{runId, path, kind, digest, text}`, where `text`
+is the file as a string, or null when it is not UTF-8. A path the artifact does not
+hold, or a run started without an artifact, exits 2 (`artifact.no-file`,
+`artifact.none`). `inspect` needs either an artifact or `--run` with `--file`.
 
 **0.2.** A `<workflow>` may also be a bare workflow name: an argument that is not an
 existing path and contains no `/`. It names the folder under `.spore/workflows/` of the
@@ -162,8 +185,9 @@ decimal strings. `status` output:
 
 ```json
 {"format": "runspore.cli/0.1", "runId": "run_…", "status": "needs-intervention",
- "revision": "4", "position": {"nodeId": "deploy", "activationId": "deploy/1", "visit": 1,
-                               "from": {"nodeId": "test", "outcome": "ok"}},
+ "revision": "4", "packageDigest": "sha256:…", "artifactDigest": "sha256:…",
+ "position": {"nodeId": "deploy", "activationId": "deploy/1", "visit": 1,
+              "from": {"nodeId": "test", "outcome": "ok"}},
  "invocation": {"invocationId": "inv_…", "attempt": 3, "maxAttempts": 3, "state": "stuck",
                 "error": {"code": "command.exit", "message": "exit code 1", "nodeId": "deploy",
                           "details": {…}}},
@@ -207,6 +231,10 @@ node returned (kernel.md §4).
 (store.md §2 `set_process`): `{"host", "boot", "pgid", "started"}`, or null when the
 attempt has none. A running command shows its record; a command that ended has had its
 record cleared; an attempt whose worker died keeps its record.
+
+**0.2:** `packageDigest` is the run's identity, the digest of the package it runs.
+`artifactDigest` is the digest of the workflow artifact it was started from
+(artifact.md §4), or null for a run started from a JSON document.
 
 Text output is for people and is not a stable interface.
 

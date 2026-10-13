@@ -183,6 +183,7 @@ pub fn init(cwd: &Path) -> Result<Output, Fail> {
     Ok(Output {
         json: json!({"root": root, "created": created}),
         text,
+        raw: None,
         exit: 0,
     })
 }

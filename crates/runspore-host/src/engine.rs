@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use runspore_types::artifact::Artifact;
 use runspore_types::canonical;
 use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
@@ -450,11 +451,42 @@ impl Engine {
         input: Value,
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
-        match self.try_start(workflow_json, &input, start_key).await {
+        self.start_from(workflow_json, None, input, start_key).await
+    }
+
+    /// `start` with the package of a loaded workflow artifact. The store keeps the
+    /// artifact and the run records its digest; a run found by its start key keeps
+    /// the artifact it was first started from.
+    pub async fn start_artifact(
+        &self,
+        artifact: &Artifact,
+        input: Value,
+        start_key: &str,
+    ) -> Result<StartOutcome, HostError> {
+        let stored = StoredArtifact {
+            digest: artifact.digest.clone(),
+            bytes: artifact.bytes.clone(),
+        };
+        self.start_from(&artifact.package, Some(stored), input, start_key)
+            .await
+    }
+
+    async fn start_from(
+        &self,
+        workflow_json: &[u8],
+        artifact: Option<StoredArtifact>,
+        input: Value,
+        start_key: &str,
+    ) -> Result<StartOutcome, HostError> {
+        match self
+            .try_start(workflow_json, artifact.clone(), &input, start_key)
+            .await
+        {
             // Another start with this key created its run after our lookup; the next
             // lookup finds it.
             Err(HostError::Store(f)) if f.code == "run.start-key-mismatch" => {
-                self.try_start(workflow_json, &input, start_key).await
+                self.try_start(workflow_json, artifact, &input, start_key)
+                    .await
             }
             other => other,
         }
@@ -463,6 +495,7 @@ impl Engine {
     async fn try_start(
         &self,
         workflow_json: &[u8],
+        artifact: Option<StoredArtifact>,
         input: &Value,
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
@@ -498,6 +531,7 @@ impl Engine {
             package,
             started,
             base_dir: Some(inner.config.base_dir.to_string_lossy().into_owned()),
+            artifact,
         };
         let receipt = retry(true, || inner.store.create_run(request.clone())).await?;
         Ok(StartOutcome {
@@ -649,6 +683,11 @@ impl Engine {
     /// The canonical package bytes stored under `digest`.
     pub async fn get_package(&self, digest: &str) -> Result<Option<Vec<u8>>, HostError> {
         Ok(self.inner.store.get_package(digest).await?)
+    }
+
+    /// The workflow artifact bytes stored under `digest`.
+    pub async fn get_artifact(&self, digest: &str) -> Result<Option<Vec<u8>>, HostError> {
+        Ok(self.inner.store.get_artifact(digest).await?)
     }
 
     pub async fn list_runs(

@@ -2,6 +2,10 @@ CREATE TABLE packages (
     digest TEXT PRIMARY KEY,
     body BLOB NOT NULL
 );
+CREATE TABLE artifacts (
+    digest TEXT PRIMARY KEY,
+    body BLOB NOT NULL
+);
 CREATE TABLE runs (
     tenant TEXT NOT NULL,
     run_id TEXT NOT NULL,
@@ -22,6 +26,7 @@ CREATE TABLE runs (
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL,
     base_dir TEXT,
+    artifact_digest TEXT,
     PRIMARY KEY (tenant, run_id),
     UNIQUE (tenant, start_key)
 );

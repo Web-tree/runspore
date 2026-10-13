@@ -211,6 +211,10 @@ const CASES: &[Case] = &[
     case("schemas not an object", None, Some(("\"outputSchemas\": {\"approved\": {\"type\": \"object\"}}", "\"outputSchemas\": []")), "settings.invalid", S, 11),
     case("marker without schemas", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}}}")), "settings.invalid", S, 9),
     case("marker not alone", None, Some(("\"prep\": {\"action\": \"step\"}", "\"prep\": {\"action\": \"step\", \"input\": {\"$outputSchemas\": {}, \"x\": 1}}")), "settings.invalid", S, 9),
+    case("dotted escape", None, Some(("steps/work.md", "steps/../../outside.md")), "settings.reference", S, 10),
+    case("backslash", None, Some(("steps/work.md", "steps\\\\work.md")), "settings.reference", S, 10),
+    case("names a fixed file", None, Some(("steps/work.md", "./settings.json")), "settings.reference", S, 10),
+    case("probe escapes", None, Some(("[\"assets/tool.sh\"]", "[\"assets/tool.sh\"], \"async\": {\"probe\": {\"command\": {\"argv\": [\"./../outside.md\"]}}}")), "settings.reference", S, 6),
 ];
 
 #[test]

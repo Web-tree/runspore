@@ -11,6 +11,7 @@ was implemented or executed in this architecture task.
 
 Files
   wit/machine/machine.wit     Import-free synchronous reducer boundary
+  wit/artifact/artifact.wit   Import-free workflow artifact reader (spec/artifact.md)
   wit/telemetry/telemetry.wit Activity/host telemetry extension boundary
   store.ts                   Semantic store operation and receipt contracts
   action-binding.example.json Example effectful Action binding
