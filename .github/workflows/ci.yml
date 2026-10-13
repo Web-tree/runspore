@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # release-please.yml starts it on the release PR, which GITHUB_TOKEN pushes.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,6 +23,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
       - run: shellcheck install.sh scripts/*.sh
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+      - run: ./actionlint -color
 
   # install.sh against signed archives on macOS too (spec/release.md section 9).
   install-macos:

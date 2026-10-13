@@ -124,10 +124,12 @@ echo "ok: R12's checks stayed red, so its fix loop took the exhausted arrow to t
 
 wait_for waiting checkpoint_a 1
 check "sum(1 for p in s['prs'].values() if p['state'] == 'MERGED') == 11"
+check "all(__import__('re').match(r'(feat|fix)\\([A-Z0-9-]+\\): [a-z]', p['title']) for p in s['prs'].values())"
+check "any(p['title'].startswith('fix(R9): ') for p in s['prs'].values())"
 check "s['issues']['Web-tree/runspore#59']['state'] == 'CLOSED'"
-test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R9: ')" = 1 || { echo "FAIL: R9 not merged once"; exit 1; }
-test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R10: ')" = 1 || { echo "FAIL: R10 not merged once"; exit 1; }
-test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^R12: ')" = 1 || { echo "FAIL: R12 not merged once"; exit 1; }
+test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^fix(R9): ')" = 1 || { echo "FAIL: R9 not merged once"; exit 1; }
+test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^feat(R10): ')" = 1 || { echo "FAIL: R10 not merged once"; exit 1; }
+test "$(git -C "$E/bare-runspore.git" log --format=%s main | grep -c '^feat(R12): ')" = 1 || { echo "FAIL: R12 not merged once"; exit 1; }
 echo "ok: waves 1-2 merged, checkpoint A asked"
 
 refused="$("$bin/answer" a changes 2>&1)" && { echo "FAIL: a changes answer with no change was accepted"; exit 1; }

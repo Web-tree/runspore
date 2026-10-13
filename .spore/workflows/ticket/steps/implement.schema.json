@@ -1,9 +1,10 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["outcome", "summary"],
+  "required": ["outcome", "type", "summary"],
   "properties": {
     "outcome": {"type": "string", "enum": ["ok"]},
+    "type": {"type": "string", "enum": ["feat", "fix"]},
     "summary": {"type": "string", "minLength": 1}
   }
 }

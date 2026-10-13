@@ -107,6 +107,18 @@ def run_checks(wt, d):
             red(f"$ {' '.join(cmd)}\nexited {p.returncode}\n\n{p.stdout}")
 
 
+def pr_title(inp):
+    """A conventional commit title, which release-please reads after the squash merge:
+    `feat(R4): workflow artifacts: ...` from the implement step's type, the ticket ID
+    and its title (spec/release.md section 8)."""
+    t = inp["ticket"]
+    title = t["title"]
+    # Lower the first letter, but not of an acronym such as `CLI`.
+    if title[:1].isupper() and not title[1:2].isupper():
+        title = title[0].lower() + title[1:]
+    return f"{inp.get('type') or 'feat'}({t['id']}): {title}"
+
+
 def pr_body(inp):
     repo, num = split_issue(inp["ticket"]["issue"])
     return (f"Closes #{num}\n\n{inp.get('summary', '').strip()}\n\n---\n"
@@ -165,9 +177,8 @@ def ship(inp):
     if open_:
         num, url = open_[0]["number"], open_[0]["url"]
     else:
-        t = inp["ticket"]
         url = sh("gh", "pr", "create", "--repo", REPO, "--head", branch, "--base", "main",
-                 "--title", f"{t['id']}: {t['title']}", "--body", pr_body(inp)).strip().splitlines()[-1]
+                 "--title", pr_title(inp), "--body", pr_body(inp)).strip().splitlines()[-1]
         num = int(url.rstrip("/").split("/")[-1])
         log(f"opened {url}")
     pushed = time.monotonic()

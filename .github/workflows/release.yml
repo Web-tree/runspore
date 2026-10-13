@@ -1,16 +1,32 @@
-# Builds, signs, attests and publishes a release on a tag v*. The contract is
-# spec/release.md; a failure at any step publishes nothing.
+# Builds the four archives of spec/release.md. With a release tag it also signs,
+# attests and publishes them: release-please.yml calls it with the tag of the release
+# it just made, and a tag v* pushed by hand starts it too. Called with no tag (every
+# other push to main), it builds and keeps the archives as workflow artifacts only.
+# The contract is spec/release.md; a failure at any step publishes nothing.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: The release to build and publish; empty builds the pushed commit and publishes nothing
+        type: string
+        default: ""
+    secrets:
+      RELEASE_SIGNING_KEY:
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
+
+env:
+  # The release tag, or empty for a build that publishes nothing.
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:
   build:
@@ -32,6 +48,8 @@ jobs:
       CC_x86_64_unknown_linux_musl: musl-gcc
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.sha }}
       - if: endsWith(matrix.target, '-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       # The first cargo call installs the toolchain rust-toolchain.toml pins.
@@ -48,9 +66,11 @@ jobs:
           name: spore-${{ matrix.target }}
           path: spore-${{ matrix.target }}.tar.gz
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: build
+    if: inputs.tag || github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -58,6 +78,17 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      # A second run on a published tag stops here, before anything changes.
+      - name: Refuse a release that already has assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if assets=$(gh release view "$TAG" --json assets --jq '.assets | length' 2>/dev/null) && [ "$assets" -ne 0 ]; then
+            echo "::error::release $TAG already has $assets assets; delete the release to make it again (spec/release.md section 8)"
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
         with:
           pattern: spore-*
@@ -66,7 +97,8 @@ jobs:
       - name: Write SHA256SUMS
         working-directory: dist
         run: |
-          test "$(ls spore-*.tar.gz | wc -l)" -eq 4
+          set -- spore-*.tar.gz
+          test $# -eq 4
           sha256sum spore-*.tar.gz >SHA256SUMS
           cat SHA256SUMS
       - name: Sign SHA256SUMS
@@ -89,8 +121,14 @@ jobs:
           out=$(SPORE_DOWNLOAD_URL="file://$PWD/dist" SPORE_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh)
           echo "$out"
           echo "$out" | grep -qx 'attestation checked'
-          test "$("$RUNNER_TEMP/bin/spore" --version)" = "spore ${GITHUB_REF_NAME#v}"
+          test "$("$RUNNER_TEMP/bin/spore" --version)" = "spore ${TAG#v}"
+      # release-please made the release already; a tag pushed by hand may have none yet.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "$TAG" --generate-notes
+          fi

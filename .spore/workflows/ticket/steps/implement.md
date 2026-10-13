@@ -30,3 +30,8 @@ Either way:
 Report `outcome: "ok"` with a `summary` of what you changed, in two or three
 sentences, written for the PR description. If you could not finish, still report
 `ok` and say what is missing in `summary`; the workflow runs the checks next.
+
+Report `type: "fix"` when the ticket repairs something that does not work as its
+spec says, and `type: "feat"` for anything else. It becomes the PR title's
+conventional commit type, which decides the next release's version
+(spec/release.md section 8).

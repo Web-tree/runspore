@@ -1,0 +1,52 @@
+# Every push to main: release-please opens or updates the release PR, and release.yml
+# builds the four archives. When the push is the merge of the release PR, release-please
+# tags v<version> and makes the GitHub release, and release.yml signs, attests and
+# uploads the assets to it in the same run. spec/release.md section 8.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    # Never cancelled: a later run finds a merged release PR this one skipped and releases it.
+    concurrency:
+      group: release-please
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # A push made with GITHUB_TOKEN starts no pull_request run, so the release PR would
+      # never get its required checks; a workflow_dispatch is the exception.
+      - name: Run CI on the release PR
+        if: steps.rp.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.rp.outputs.pr }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
+
+  release:
+    needs: release-please
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.release_created == 'true' && needs.release-please.outputs.tag_name || '' }}
+    secrets:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

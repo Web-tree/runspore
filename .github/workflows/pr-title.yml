@@ -1,0 +1,21 @@
+# A squash merge makes the PR title the commit title, and release-please reads it, so
+# the title must be a conventional commit (spec/release.md section 8). Until the
+# repository variable PR_TITLE_STRICT is true, a wrong title only warns.
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - env:
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE_STRICT: ${{ vars.PR_TITLE_STRICT }}
+        run: sh scripts/check-pr-title.sh "$TITLE"

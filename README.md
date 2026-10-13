@@ -30,6 +30,12 @@ When the line reads `PENDING`, no key has been made yet: there is no signed rele
 cargo install --git https://github.com/Web-tree/runspore --locked runspore-cli
 ```
 
+## Releases
+
+release-please keeps a release PR open that bumps the version and adds the merged changes to `CHANGELOG.md`. Merging it cuts the release: release-please tags `v<version>`, and the same workflow run builds, signs, attests and uploads the assets. Every push to `main` builds the four archives too, without publishing them. PR titles are conventional commits (`feat(R4): …`, `fix: …`), since release-please reads them after the squash merge.
+
+Before the first release, a repository admin runs `scripts/new-release-key.sh` once and merges the key it pins; the release PR cannot be merged before that. Once the 0.2 build runs a `spore` whose `ticket` workflow writes conventional PR titles, set the repository variable `PR_TITLE_STRICT` to `true` so a wrong title fails its check instead of only warning. Details: [spec/release.md §8](spec/release.md#8-the-release-cycle).
+
 ## Quickstart
 
 From the repository root, build the binary and work in a scratch directory with copies of the [examples](examples/README.md):
