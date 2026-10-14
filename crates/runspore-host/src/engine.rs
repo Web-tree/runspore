@@ -809,6 +809,12 @@ impl Engine {
         Ok(self.inner.store.get_run(key).await?)
     }
 
+    /// The run `start_key` names in this store, if any.
+    pub async fn find_run(&self, start_key: &str) -> Result<Option<RunKey>, HostError> {
+        let tenant = &self.inner.config.tenant;
+        Ok(self.inner.store.find_run(tenant, start_key).await?)
+    }
+
     /// The canonical package bytes stored under `digest`.
     pub async fn get_package(&self, digest: &str) -> Result<Option<Vec<u8>>, HostError> {
         Ok(self.inner.store.get_package(digest).await?)

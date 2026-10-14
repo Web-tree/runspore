@@ -90,6 +90,8 @@ is `workflow.not-found`; two folders with it are `workflow.ambiguous`. Both exit
 and `workflow.not-found` lists the names that exist.
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
+The same key with another input or workflow is refused with the ways on (§Keys used
+again).
 While they work, `run` and `worker` print the changes of the runs they work on stderr
 (§Progress).
 Run IDs are random (host §2): `start` and `run` print the run ID the engine returned,
@@ -474,6 +476,36 @@ Stdout is unchanged: `run` and `worker --until-parked` still print the run's sta
 there when they return, in JSON mode one object. A worker prints only what it commits
 itself; a run another worker moves shows on that worker's stderr. The planned `status --follow`
 is to print the same lines, found by replaying the run's events.
+
+## Keys used again (0.2)
+
+A start key names one run, and a `signal` or `resolve` ID names one request on a
+run. Using one again for the same thing repeats it; using it for something else is
+refused with exit 2, an error that says what the key already names, and the ways on.
+The store's `request.digest-mismatch` (store.md §1) is never what a person sees.
+
+`start` or `run` with the key of a run started with another input, or from another
+version of the workflow, is `run.key-reused`. The message names the run, what differs
+(for the input, the input it started with) and the commands that go on with it: the
+same `start` or `run` with that input, unless the workflow changed, and
+`spore worker --run <runId> --until-parked`, which runs the run on the workflow it
+started with. Another `--key` starts a new run instead:
+
+```text
+spore: run.key-reused: start key ticket-158 already names run run_3f…, started with another input: {"ticket":157}.
+To go on with it: spore run build --key ticket-158 --input '{"ticket":157}'
+              or: spore worker --run run_3f… --until-parked
+To start a new run instead, use another --key.
+```
+
+In JSON mode the error's `details` are `{runId, startKey, differs, input, commands}`:
+`differs` lists `input`, `workflow` or both, `input` is the run's input, and
+`commands` the commands above.
+
+`signal --id` with an ID the run already took for a signal with another name, outcome
+or data is `signal.id-reused`; `resolve --id` with an ID it took for another
+resolution is `resolve.id-reused`. The message names the run and the ID and says to
+send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
 ## Exit codes
 
