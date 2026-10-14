@@ -3,8 +3,9 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runspore_kernel::mapping;
 use runspore_types::canonical;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
@@ -18,6 +19,10 @@ pub const MAX_STDOUT: usize = 64 * 1024;
 const TEXT_STDERR: usize = 16 * 1024;
 /// How much of stderr is kept for a failure's details.
 const STDERR_TAIL: usize = 4 * 1024;
+/// How much of stdout is kept for the details of a `result` block's failure.
+const STDOUT_TAIL: usize = 4 * 1024;
+/// The first steps a `$get` path of a `result` block may take.
+const RESULT_ROOTS: [&str; 5] = ["stdout", "input", "params", "run", "step"];
 
 /// The `command` runner: executes `argv` directly in its own process group, under the
 /// guard `ctx.guard`. Unix only.
@@ -36,6 +41,8 @@ struct Spec {
     env: Vec<(String, String)>,
     timeout_ms: Option<u64>,
     output: String,
+    /// The `result` block's `outcome` and `output` mappings.
+    result: Option<(Value, Value)>,
     outcomes: Vec<String>,
     exit_outcomes: Vec<(i32, String)>,
 }
@@ -110,8 +117,25 @@ fn parse(action: &Value) -> Result<Spec, String> {
             .collect::<Result<_, String>>()?,
         Some(_) => return Err("`exitOutcomes` must be an object".into()),
     };
-    if output == "result" && exit_outcomes.iter().any(|(code, _)| *code == 0) {
-        return Err("in result mode exit 0 reads stdout, so `exitOutcomes` cannot map 0".into());
+    let result = match action.get("result") {
+        None => None,
+        Some(Value::Object(m))
+            if m.len() == 2 && m.contains_key("outcome") && m.contains_key("output") =>
+        {
+            if output != "json" {
+                return Err("`result` reads JSON stdout, so it needs `output` \"json\"".into());
+            }
+            for field in ["outcome", "output"] {
+                mapping::check(&m[field], &RESULT_ROOTS)
+                    .map_err(|e| format!("`result.{field}`: {e}"))?;
+            }
+            Some((m["outcome"].clone(), m["output"].clone()))
+        }
+        Some(_) => return Err("`result` must be {\"outcome\", \"output\"}, two mappings".into()),
+    };
+    let reads_result = output == "result" || result.is_some();
+    if reads_result && exit_outcomes.iter().any(|(code, _)| *code == 0) {
+        return Err("exit 0 reads the result from stdout, so `exitOutcomes` cannot map 0".into());
     }
     Ok(Spec {
         argv,
@@ -119,6 +143,7 @@ fn parse(action: &Value) -> Result<Spec, String> {
         env,
         timeout_ms,
         output,
+        result,
         outcomes: outcomes.into_iter().map(str::to_string).collect(),
         exit_outcomes,
     })
@@ -284,6 +309,67 @@ fn result_output(stdout: &[u8]) -> Result<ActivityOutput, String> {
     }
 }
 
+/// The result a `result` block maps from a json-mode stdout on exit 0: its `outcome`
+/// mapping must give a declared outcome, its `output` mapping any value. A failure's
+/// details carry the end of stdout.
+fn mapped_result(
+    (outcome, output): &(Value, Value),
+    (parsed, raw): (Value, &[u8]),
+    ctx: &ActivityContext,
+    input: &Value,
+    outcomes: &[String],
+) -> ActivityOutput {
+    let roots: Map<String, Value> = [
+        ("stdout", parsed),
+        ("input", input.clone()),
+        ("params", ctx.params.clone()),
+        ("run", json!({"id": ctx.key.run, "tenant": ctx.key.tenant})),
+        (
+            "step",
+            json!({"node": ctx.node_id, "visit": ctx.visit, "attempt": ctx.attempt}),
+        ),
+    ]
+    .into_iter()
+    .map(|(root, value)| (root.to_string(), value))
+    .collect();
+    let fail = |code: &str, message: String, mut details: Map<String, Value>| {
+        let end = String::from_utf8_lossy(tail(raw, STDOUT_TAIL)).into_owned();
+        details.insert("stdoutTail".into(), Value::String(end));
+        failure(code, message, Value::Object(details), false)
+    };
+    let invalid = |field: &str, message: String, details: Value| {
+        let mut all = Map::from_iter([("field".to_string(), json!(field))]);
+        if let Value::Object(details) = details {
+            all.extend(details);
+        }
+        fail("command.result-invalid", message, all)
+    };
+    let mut operations = 0;
+    let mut evaluate = |field: &str, mapping: &Value| {
+        mapping::evaluate(mapping, &roots, &mut operations).map_err(|e| {
+            let message = format!("`result.{field}` did not evaluate: {}", e.code());
+            invalid(field, message, e.details(&[]))
+        })
+    };
+    let outcome = match evaluate("outcome", outcome) {
+        Ok(Value::String(outcome)) => outcome,
+        Ok(value) => {
+            let message = "`result.outcome` is not a string".to_string();
+            return invalid("outcome", message, json!({ "value": value }));
+        }
+        Err(failed) => return failed,
+    };
+    if !outcomes.contains(&outcome) {
+        let message = format!("outcome `{outcome}` is not declared by the action");
+        let details = Map::from_iter([("outcome".to_string(), json!(outcome))]);
+        return fail("command.undeclared-outcome", message, details);
+    }
+    match evaluate("output", output) {
+        Ok(output) => ActivityOutput::Success { outcome, output },
+        Err(failed) => failed,
+    }
+}
+
 fn failure(code: &str, message: String, details: Value, retryable: bool) -> ActivityOutput {
     ActivityOutput::Failure {
         error: ActivityOutput::error(code, message, details),
@@ -443,7 +529,16 @@ impl ActivityRunner for CommandRunner {
                 output: Value::Null,
             },
             "json" => match canonical::parse(&stdout) {
-                Ok(output) => ActivityOutput::Success { outcome, output },
+                Ok(parsed) => match &spec.result {
+                    Some(result) if mapped.is_none() => {
+                        let stdout = (parsed, stdout.as_slice());
+                        mapped_result(result, stdout, ctx, input, &spec.outcomes)
+                    }
+                    _ => ActivityOutput::Success {
+                        outcome,
+                        output: parsed,
+                    },
+                },
                 Err(e) => {
                     let message = format!("stdout is not canonical-domain JSON: {e}");
                     return failure("command.malformed-output", message, Value::Null, false);
