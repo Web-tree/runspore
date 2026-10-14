@@ -295,6 +295,62 @@
               "title": "Run the dogfood build with plain spore commands, no wrapper scripts"
             }
           ]
+        }
+      }
+    },
+    "wave_5c": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "5c"
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "C1",
+              "issue": "Web-tree/runspore#123",
+              "title": "Node params and mapping operators: $if, $uuid, $json, $join, $resultSchema"
+            }
+          ]
+        }
+      }
+    },
+    "wave_5d": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "5d"
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "C2",
+              "issue": "Web-tree/runspore#124",
+              "title": "Command argv from mappings, with step.resumed for first try versus resume"
+            },
+            {
+              "id": "C3",
+              "issue": "Web-tree/runspore#125",
+              "title": "Command result block: outcome and output mapped from JSON stdout"
+            }
+          ]
+        }
+      }
+    },
+    "wave_5e": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "5e"
+        },
+        "tickets": {
+          "$literal": [
+            {
+              "id": "C4",
+              "issue": "Web-tree/runspore#126",
+              "title": "coding-loop as two files: a claude -p action defined once, reused with params; guide page for checkpoint C"
+            }
+          ]
         },
         "ask": {
           "$literal": "steps/checkpoint-c.md"
