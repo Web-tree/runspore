@@ -14,6 +14,12 @@
       "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "!/^v?0\\./",
       "automerge": true
+    },
+    {
+      "description": "The wasm-tools crates share types across their APIs, so they move to a new version together.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["wasm-encoder", "wasmparser", "wit-component", "wit-parser", "wasmprinter", "wat", "wast", "wasm-metadata"],
+      "groupName": "wasm-tools crates"
     }
   ]
 }
