@@ -390,7 +390,13 @@ fn mapped_result(
         return fail("command.undeclared-outcome", message, details);
     }
     match evaluate("output", output) {
-        Ok(output) => ActivityOutput::Success { outcome, output },
+        Ok(output) => match canonical::to_vec(&output) {
+            Ok(_) => ActivityOutput::Success { outcome, output },
+            Err(e) => {
+                let message = format!("`result.output` is not canonical-domain JSON: {e}");
+                invalid("output", message, json!({ "reason": e.code() }))
+            }
+        },
         Err(failed) => failed,
     }
 }
@@ -556,21 +562,28 @@ impl ActivityRunner for CommandRunner {
                 outcome,
                 output: Value::Null,
             },
-            "json" => match canonical::parse(&stdout) {
-                Ok(parsed) => match &spec.result {
-                    Some(result) if mapped.is_none() => {
+            // A result block reads plain JSON: only what it maps must be in the domain.
+            "json" => match &spec.result {
+                Some(result) if mapped.is_none() => match serde_json::from_slice(&stdout) {
+                    Ok(parsed) => {
                         let stdout = (parsed, stdout.as_slice());
                         mapped_result(result, stdout, ctx, input, &spec.outcomes)
                     }
-                    _ => ActivityOutput::Success {
+                    Err(e) => {
+                        let message = format!("stdout is not JSON: {e}");
+                        return failure("command.malformed-output", message, Value::Null, false);
+                    }
+                },
+                _ => match canonical::parse(&stdout) {
+                    Ok(parsed) => ActivityOutput::Success {
                         outcome,
                         output: parsed,
                     },
+                    Err(e) => {
+                        let message = format!("stdout is not canonical-domain JSON: {e}");
+                        return failure("command.malformed-output", message, Value::Null, false);
+                    }
                 },
-                Err(e) => {
-                    let message = format!("stdout is not canonical-domain JSON: {e}");
-                    return failure("command.malformed-output", message, Value::Null, false);
-                }
             },
             "result" if mapped.is_some() => ActivityOutput::Success {
                 outcome,

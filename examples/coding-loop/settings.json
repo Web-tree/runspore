@@ -1,0 +1,95 @@
+{
+  "format": "runspore.workflow/0.2",
+  "limits": { "maxVisitsPerNode": 16, "maxActivations": 256 },
+  "inputSchema": {
+    "type": "object",
+    "required": ["task"],
+    "additionalProperties": false,
+    "properties": {
+      "task": { "type": "string", "minLength": 1, "description": "What should this run build or fix?" }
+    }
+  },
+  "actions": {
+    "claude": {
+      "kind": "command",
+      "argv": [
+        "claude", "-p",
+        { "$if": [{ "$get": ["step", "resumed"] }, "--resume", "--session-id"] },
+        { "$uuid": [{ "$get": ["run", "id"] }, { "$get": ["step", "node"] }] },
+        "--output-format", "json",
+        "--json-schema", { "$json": { "$get": ["params", "schema"] } },
+        "--tools", { "$join": [{ "$get": ["params", "tools"] }, ","] },
+        "--allowedTools", { "$join": [{ "$get": ["params", "tools"] }, ","] },
+        "--append-system-prompt", { "$get": ["params", "instructions"] },
+        "--permission-mode", "default"
+      ],
+      "output": "json",
+      "result": {
+        "outcome": { "$get": ["stdout", "structured_output", "outcome"] },
+        "output": { "$get": ["stdout", "structured_output", "output"] }
+      },
+      "effect": "idempotent", "retry": { "maxAttempts": 3 }, "timeoutMs": "3600000"
+    },
+    "test": {
+      "kind": "command", "argv": ["npm", "test"],
+      "effect": "idempotent", "outcomes": ["ok", "red"], "exitOutcomes": { "1": "red" },
+      "retry": { "maxAttempts": 3 }, "timeoutMs": "1800000"
+    }
+  },
+  "nodes": {
+    "implement": {
+      "action": "claude",
+      "outputSchemas": {
+        "ok": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["summary"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "description": "What you changed and why, in a few sentences." }
+          }
+        }
+      },
+      "params": {
+        "tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash"],
+        "schema": { "$resultSchema": {} },
+        "instructions": "You are the implement step of a coding loop. Make the change the task asks for in this repository, then answer with a short summary. A command runs the tests after you, and a person approves the result.\n\nThe message you get is JSON with three parts:\n\n- `task`: what this run should build or fix.\n- `cameFrom`: why you are here. It is `null` on your first visit. Otherwise it names the step that sent the run back to you (`node`), its `outcome` and its `output`:\n  - `test` with outcome `red`: the tests failed. `output.stdout` and `output.stderr` hold the end of their output. Fix the code. Change a test only when it is plainly wrong, and say so in your summary.\n  - `approve` with outcome `rejected`: the person rejected your change. `output.reason` says why.\n  - `tests_stuck` with outcome `keep-going`: the tests failed several times in a row and the person asked you to carry on. `output.hint`, when present, is their advice. The failure that stopped the run is in `lastTest`.\n- `lastTest`: the newest test run, `null` before the first one. Its `outcome` is `ok` or `red`, and `output.stdout` and `output.stderr` hold the end of its output.\n\nThis conversation continues every time the run comes back to this step, so you can see what you tried before. Do not repeat a fix that already failed. If you were interrupted and get the same message again, check the working tree first: your earlier edits are still there.\n\nWhen you are done, answer with outcome `ok` and a `summary` of what you changed and why, in a few sentences. There is no other outcome. If you could not make progress, say so in the summary; the tests and the person decide what happens next."
+      },
+      "input": {
+        "task": { "$get": ["input", "task"] },
+        "cameFrom": { "$get": ["from"] },
+        "lastTest": { "$get": ["nodes", "test"], "default": null }
+      }
+    },
+    "test": { "action": "test", "loopLimits": { "red": 3 } },
+    "approve": {
+      "signal": "approval",
+      "outputSchemas": {
+        "rejected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": { "reason": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "tests_stuck": {
+      "signal": "tests-stuck",
+      "outputSchemas": {
+        "keep-going": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "hint": { "type": "string", "description": "Advice for Claude, if any." } }
+        }
+      }
+    },
+    "done": {
+      "output": {
+        "task": { "$get": ["input", "task"] },
+        "summary": { "$get": ["nodes", "implement", "output", "summary"] }
+      }
+    },
+    "stopped": {
+      "error": { "code": "tests.given-up", "message": "The tests kept failing and the run was stopped." }
+    }
+  }
+}

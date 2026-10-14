@@ -470,7 +470,7 @@ Result mapping, in order:
 | **0.2.** Exit 0, `output: "json"` with a `result` block | What the block maps from stdout (below) |
 | Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stderrTail}` (the last 4 KiB of stderr) |
 | Stdout over 64 KiB, `output` other than `text` | `Failure`, `command.output-too-large`, not retryable |
-| `output: "json"` and stdout is not JSON in the canonical domain | `Failure`, `command.malformed-output`, not retryable |
+| `output: "json"` and stdout is not JSON in the canonical domain (with a `result` block: not JSON) | `Failure`, `command.malformed-output`, not retryable |
 | `Success` whose outcome the action does not declare | `Failure`, `command.undeclared-outcome`, not retryable, details `{outcome}` |
 
 The last row holds for every `command` in every output mode, so an undeclared outcome
@@ -525,9 +525,14 @@ and the output out of it, so no wrapper script is needed (AWS Step Functions'
   `input`, the node's evaluated input; `params`, its params (`{}` without);
   `run`, `{"id", "tenant"}`; or `step`, `{"node", "visit", "attempt", "resumed"}`, as
   for `argv` mappings above.
-- On exit 0 the host parses stdout as `json` mode does (`command.output-too-large` and
-  `command.malformed-output` as above), then evaluates `outcome`, then `output`, with
-  the kernel's evaluator. The result is checked as in result mode: the outcome must be
+- On exit 0 the host parses stdout as JSON (`command.output-too-large` as above;
+  stdout that is not JSON is `command.malformed-output`), then evaluates `outcome`,
+  then `output`, with the kernel's evaluator. Unlike `json` mode without a block,
+  stdout itself need not be in the canonical domain: `claude -p --output-format json`
+  prints its cost as a fraction beside the answer. Only the mapped `output` must be;
+  one that is not (a fraction, a nesting too deep) is `command.result-invalid`,
+  details `{"field": "output", "reason": <the canonical code>}`, such as
+  `canonical.non-integer`. The result is checked as in result mode: the outcome must be
   a declared one, and the engine checks the output against the node's `outputSchemas`
   (`output.invalid`).
 - An `outcome` or `output` that does not evaluate (a `$get` that selects nothing and
