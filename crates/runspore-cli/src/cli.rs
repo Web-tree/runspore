@@ -9,7 +9,7 @@ use std::sync::Arc;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
-    validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner,
+    validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner, Observer,
     StartOutcome, StepClaim, StepReport,
 };
 use runspore_kernel::NativeReducer;
@@ -391,6 +391,9 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     };
     let parent = request.as_ref().and_then(|r| r.parent.clone());
     let engine = engine(cli, &db, base_dir, parent)?;
+    if let Command::Run(_) | Command::Worker { .. } = &cli.command {
+        engine.observe(progress(cli.json));
+    }
     if let Some(request) = &request {
         let outcome = request.start(&engine).await?;
         if let Command::Run(_) = &cli.command {
@@ -530,6 +533,20 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             )
         }
     }
+}
+
+/// Prints each change of a run the engine commits on stderr, one line each: text, or
+/// with `json` one object (spec/cli.md, Progress). Stdout keeps the command's output.
+fn progress(json: bool) -> Observer {
+    Arc::new(move |progress| {
+        if json {
+            let mut object = view::progress_json(progress);
+            object["format"] = json!(FORMAT);
+            eprintln!("{object}");
+        } else {
+            eprintln!("{}", view::progress_text(progress));
+        }
+    })
 }
 
 fn reducer(cli: &Cli) -> Result<Arc<dyn Reducer>, Fail> {

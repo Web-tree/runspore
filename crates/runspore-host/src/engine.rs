@@ -4,7 +4,7 @@ use std::fs::File;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nix::fcntl::Flock;
@@ -30,6 +30,7 @@ use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
 use crate::process::{self, Leftover};
+use crate::progress::{self, Change, Progress};
 
 mod intervention;
 mod steps;
@@ -303,7 +304,14 @@ struct Inner {
     closing: AtomicBool,
     /// Fires every in-flight attempt's stop signal.
     shutdown: watch::Sender<bool>,
+    /// Told every change of every run this engine commits; set by `Engine::observe`.
+    observer: OnceLock<Observer>,
+    /// The start key of each run the observer was told about.
+    start_keys: Mutex<HashMap<RunKey, String>>,
 }
+
+/// What `Engine::observe` calls with each change of a run, in commit order.
+pub type Observer = Arc<dyn Fn(&Progress) + Send + Sync>;
 
 /// The engine. Cheap to clone; clones share in-flight attempts.
 #[derive(Clone)]
@@ -352,6 +360,22 @@ where
             other => return other,
         }
     }
+}
+
+/// The changes the committed turn made, from the snapshot it started from to `after`.
+/// None when a snapshot or the package does not decode.
+fn turn_changes(package: &Package, turn: &Turn, after: &[u8]) -> Vec<Change> {
+    let workflow: Option<Workflow> = canonical::decode(&package.bytes).ok();
+    let before: Option<Option<State>> = match &turn.snapshot {
+        Some(bytes) => canonical::decode(bytes).ok().map(Some),
+        None => Some(None),
+    };
+    let after: Option<State> = canonical::decode(after).ok();
+    let (Some(workflow), Some(before), Some(after)) = (workflow, before, after) else {
+        return Vec::new();
+    };
+    let event = &turn.next_event;
+    progress::changes(&workflow, before.as_ref(), &after, &event.kind, &event.body)
 }
 
 /// Reads the `status` wire string of a canonical `model::State` snapshot.
@@ -536,12 +560,20 @@ impl Engine {
                 settled: Notify::new(),
                 closing: AtomicBool::new(false),
                 shutdown,
+                observer: OnceLock::new(),
+                start_keys: Mutex::new(HashMap::new()),
             }),
         }
     }
 
     pub fn config(&self) -> &EngineConfig {
         &self.inner.config
+    }
+
+    /// Calls `observer` with every change of every run this engine commits from now on
+    /// (spec/host.md §2, Progress). One observer per engine: a second call is ignored.
+    pub fn observe(&self, observer: Observer) {
+        let _ = self.inner.observer.set(observer);
     }
 
     fn key(&self, run: &str) -> RunKey {
@@ -1145,7 +1177,16 @@ impl Inner {
             details: details.to_string(),
         };
         match retry(true, || self.store.quarantine_run(request.clone())).await {
-            Ok(_) => Ok(()),
+            Ok(receipt) => {
+                if receipt.disposition == Disposition::Applied {
+                    let change = Change::Quarantined {
+                        code: code.to_string(),
+                        details: details.to_string(),
+                    };
+                    self.tell_observer(key, vec![change]).await;
+                }
+                Ok(())
+            }
             Err(f) if f.kind == StoreFailureKind::Stale => Ok(()),
             Err(f) => Err(f.into()),
         }
@@ -1220,6 +1261,10 @@ impl Inner {
                     report.turns += 1;
                     let before = turn.snapshot.as_deref().and_then(snapshot_status);
                     self.tell(&turn, &package, before, &request.snapshot);
+                    if self.observer.get().is_some() {
+                        let changes = turn_changes(&package, &turn, &request.snapshot);
+                        self.tell_observer(key, changes).await;
+                    }
                 }
                 Ok(_) => {}
                 Err(f) if f.kind == StoreFailureKind::Stale => return Ok(()),
@@ -1232,6 +1277,37 @@ impl Inner {
             failpoint::hit("host.turn.after-commit");
         }
         Ok(())
+    }
+
+    /// Tells the observer, when there is one, each of `changes` of the run.
+    async fn tell_observer(&self, key: &RunKey, changes: Vec<Change>) {
+        let Some(observer) = self.observer.get() else {
+            return;
+        };
+        if changes.is_empty() {
+            return;
+        }
+        let known = lock(&self.start_keys).get(key).cloned();
+        let start_key = match known {
+            Some(start_key) => start_key,
+            None => {
+                let view = retry(false, || self.store.get_run(key)).await;
+                let start_key = view.ok().flatten().map(|v| v.start_key).unwrap_or_default();
+                lock(&self.start_keys).insert(key.clone(), start_key.clone());
+                start_key
+            }
+        };
+        let at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        for change in changes {
+            observer(&Progress {
+                key: key.clone(),
+                start_key: start_key.clone(),
+                at_ms,
+                change,
+            });
+        }
     }
 
     async fn heartbeat(&self, attempt: &AttemptRef) -> StoreResult<Receipt<LeaseExtended>> {

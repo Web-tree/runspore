@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use runspore_host::progress::{Change, Progress};
 use runspore_host::{Arrival, Arrow, ExternalStep};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
@@ -739,6 +740,97 @@ pub fn event_text(record: &EventRecord) -> String {
         Some(tails) => format!("{line}\n{tails}"),
         None => line,
     }
+}
+
+/// A change of a run as one line for a person: the time in UTC, the run's start key and
+/// the change (spec/cli.md, Progress).
+pub fn progress_text(progress: &Progress) -> String {
+    let change = match &progress.change {
+        Change::StepStarted { node_id, attempt } => {
+            format!("step {node_id} started, attempt {attempt}")
+        }
+        Change::TryFailed {
+            node_id,
+            attempt,
+            code,
+            message,
+        } => format!("step {node_id} attempt {attempt} failed: {code}: {message}"),
+        Change::Outcome {
+            node_id,
+            outcome,
+            arrow,
+            to,
+        } if arrow != outcome => format!("{node_id} returned {outcome}, took {arrow} -> {to}"),
+        Change::Outcome {
+            node_id,
+            outcome,
+            to,
+            ..
+        } => format!("{node_id} returned {outcome} -> {to}"),
+        Change::Waiting { node_id, signal } => {
+            format!("waiting at {node_id} for signal {signal}")
+        }
+        Change::NeedsIntervention { node_id, reason } => {
+            format!("needs intervention at {node_id}: {reason}")
+        }
+        Change::Completed {
+            node_id: Some(node),
+        } => format!("completed at {node}"),
+        Change::Completed { node_id: None } => "completed".to_string(),
+        Change::Failed {
+            node_id,
+            code,
+            message,
+        } => {
+            let at = node_id
+                .as_deref()
+                .map_or_else(String::new, |n| format!(" at {n}"));
+            format!("failed{at}: {code}: {message}")
+        }
+        Change::Quarantined { code, details } => format!("quarantined: {code}: {details}"),
+    };
+    format!(
+        "{}  {}  {change}",
+        utc_text(progress.at_ms),
+        progress.start_key
+    )
+}
+
+/// A change of a run as one JSON object: `atMs`, `runId`, `startKey`, `change`, and the
+/// change's fields.
+pub fn progress_json(progress: &Progress) -> Value {
+    let mut json = match &progress.change {
+        Change::StepStarted { node_id, attempt } => json!({"nodeId": node_id, "attempt": attempt}),
+        Change::TryFailed {
+            node_id,
+            attempt,
+            code,
+            message,
+        } => json!({"nodeId": node_id, "attempt": attempt,
+                    "error": {"code": code, "message": message}}),
+        Change::Outcome {
+            node_id,
+            outcome,
+            arrow,
+            to,
+        } => json!({"nodeId": node_id, "outcome": outcome, "arrow": arrow, "to": to}),
+        Change::Waiting { node_id, signal } => json!({"nodeId": node_id, "signal": signal}),
+        Change::NeedsIntervention { node_id, reason } => {
+            json!({"nodeId": node_id, "reason": reason})
+        }
+        Change::Completed { node_id } => json!({"nodeId": node_id}),
+        Change::Failed {
+            node_id,
+            code,
+            message,
+        } => json!({"nodeId": node_id, "error": {"code": code, "message": message}}),
+        Change::Quarantined { code, details } => json!({"code": code, "details": details}),
+    };
+    json["atMs"] = json!(progress.at_ms.to_string());
+    json["runId"] = json!(progress.key.run);
+    json["startKey"] = json!(progress.start_key);
+    json["change"] = json!(progress.change.name());
+    json
 }
 
 #[cfg(test)]

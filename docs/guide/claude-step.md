@@ -73,8 +73,9 @@ spore run coding-loop --key add-sum --input "$task"
 
 The key names the run: the same command later continues the same run instead of
 starting a new one. Repeat it whole, input included, since `run` checks the input
-before it looks the key up. `run` works until the run needs you, then prints its status. Here it
-stops at `approve` and exits 3:
+before it looks the key up. While it works, `run` prints a line on stderr for each change:
+each step it starts, each try that fails, each arrow the run takes. It works until the
+run needs you, then prints its status. Here it stops at `approve` and exits 3:
 
 - `run` is the run ID, `run_…`, which the commands below take;
 - `status` is `waiting`;
