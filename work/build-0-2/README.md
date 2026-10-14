@@ -6,7 +6,7 @@ they are, and every checkpoint can move the build onto the newest spore.
 
 | Workflow | Folder | What one run is |
 | --- | --- | --- |
-| `build-0-2` | `.spore/workflows/build-0-2` | The whole build: a fast lane, 12 waves, 8 checkpoints |
+| `build-0-2` | `.spore/workflows/build-0-2` | The whole build: a fast lane, 15 waves, 8 checkpoints |
 | `ticket` | `.spore/workflows/ticket` | One ticket: set up a worktree, implement, test, ship (PR, CI, squash-merge) |
 
 A wave step starts one `ticket` run per ticket and finishes when every ticket's
