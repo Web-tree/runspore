@@ -1,0 +1,11 @@
+digraph "review" {
+  dialect = "runspore/0.2";
+  start   = "review";
+
+  review [label="Review the change"];
+  done   [kind="complete"];
+  redo   [kind="fail"];
+
+  review -> done [on="approved"];
+  review -> redo [on="changes"];
+}

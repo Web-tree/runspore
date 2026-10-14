@@ -103,6 +103,10 @@
           "$ref": "#/$defs/Output",
           "description": "`command`: how its output becomes the step's result. Default `text`."
         },
+        "result": {
+          "$ref": "#/$defs/CommandResult",
+          "description": "`command` with `\"output\": \"json\"`: the outcome and output, mapped from the\nparsed stdout on exit 0."
+        },
         "retry": {
           "$ref": "#/$defs/Retry"
         },
@@ -157,6 +161,23 @@
           "type": "object"
         }
       },
+      "type": "object"
+    },
+    "CommandResult": {
+      "additionalProperties": false,
+      "description": "Two mappings over the roots `stdout` (the parsed stdout), `input`, `params`, `run`\nand `step`.",
+      "properties": {
+        "outcome": {
+          "description": "The outcome: a declared one."
+        },
+        "output": {
+          "description": "The output, checked against the step's `outputSchemas`."
+        }
+      },
+      "required": [
+        "outcome",
+        "output"
+      ],
       "type": "object"
     },
     "Cwd": {

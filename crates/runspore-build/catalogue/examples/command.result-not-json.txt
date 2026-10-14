@@ -1,0 +1,10 @@
+── "result" without JSON output ── command.result-not-json/settings.json:10  command.result-not-json
+Action "review" maps its outcome and output from what it prints with "result", which reads that as JSON, but its "output" is not "json".
+
+  9 │       "output": "text",
+ 10 │       "result": {
+    │       ^^^^^^^^
+
+To fix: set "output" to "json", or remove "result".
+
+1 problem in review. Nothing was run.

@@ -26,6 +26,7 @@ Every problem and warning `spore validate` can report, with its help page. `spor
 | [`command.no-argv`](command.no-argv.md) | problem | Missing "argv" |
 | [`command.program-not-found`](command.program-not-found.md) | warning | Program not found |
 | [`command.result-exit-zero`](command.result-exit-zero.md) | problem | Outcome for exit code 0 in result mode |
+| [`command.result-not-json`](command.result-not-json.md) | problem | "result" without JSON output |
 | [`dot.after-graph`](dot.after-graph.md) | problem | Text after the graph |
 | [`dot.arrow-from-end`](dot.arrow-from-end.md) | problem | Arrow from an end |
 | [`dot.attribute-typo`](dot.attribute-typo.md) | problem | Unknown attribute |

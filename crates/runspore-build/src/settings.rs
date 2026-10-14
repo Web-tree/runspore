@@ -123,6 +123,11 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "BTreeMap<String, String>")]
     pub exit_outcomes: Option<BTreeMap<String, String>>,
+    /// `command` with `"output": "json"`: the outcome and output, mapped from the
+    /// parsed stdout on exit 0.
+    #[serde(default)]
+    #[schemars(with = "CommandResult")]
+    pub result: Option<Value>,
     /// `command`, `external`: an asynchronous action's bounds and its probe, watch
     /// and stop programs.
     #[serde(default, rename = "async")]
@@ -169,6 +174,18 @@ pub struct Async {
     #[serde(default)]
     #[schemars(with = "Vec<String>")]
     pub channels: Option<Vec<String>>,
+}
+
+/// Two mappings over the roots `stdout` (the parsed stdout), `input`, `params`, `run`
+/// and `step`.
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct CommandResult {
+    /// The outcome: a declared one.
+    outcome: Value,
+    /// The output, checked against the step's `outputSchemas`.
+    output: Value,
 }
 
 /// `[a-z0-9][a-z0-9.-]{0,63}`: an actor label.

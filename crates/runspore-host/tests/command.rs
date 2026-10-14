@@ -470,3 +470,183 @@ fn validate_accepts_only_a_string_or_a_from_input_pointer_as_cwd() {
         assert!(CommandRunner.validate("act", &action).is_err(), "{cwd}");
     }
 }
+
+/// A json-mode action whose `result` block reads the stdout `script` prints.
+fn mapped(script: &str, outcome: Value, output: Value) -> Value {
+    let mut action = sh(script);
+    action["output"] = json!("json");
+    action["result"] = json!({"outcome": outcome, "output": output});
+    action
+}
+
+/// `{"$get": ["stdout", ...path]}`.
+fn from_stdout(path: &[&str]) -> Value {
+    let mut steps = vec!["stdout"];
+    steps.extend_from_slice(path);
+    json!({ "$get": steps })
+}
+
+#[tokio::test]
+async fn a_result_block_maps_outcome_and_output_from_json_stdout() {
+    let stdout = json!({"is_error": false, "session_id": "s",
+                        "structured_output": {"outcome": "red", "output": {"n": 1}}});
+    let action = mapped(
+        &format!("printf '%s' '{stdout}'"),
+        from_stdout(&["structured_output", "outcome"]),
+        from_stdout(&["structured_output", "output"]),
+    );
+    let out = run(action, json!({})).await;
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "red".into(),
+            output: json!({"n": 1})
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_result_block_reads_input_params_run_and_step() {
+    let output = json!({
+        "input": {"$get": ["input", "task"]},
+        "params": {"$get": ["params", "tools"]},
+        "run": {"$get": ["run"]},
+        "step": {"$get": ["step"]},
+        "joined": {"$join": [{"$get": ["stdout", "words"]}, " "]},
+    });
+    let stdout = json!({"words": ["a", "b"]});
+    let action = mapped(&format!("printf '%s' '{stdout}'"), json!("ok"), output);
+    CommandRunner
+        .validate("act", &action)
+        .expect("valid action");
+    let (_stop, rx) = watch::channel(false);
+    let mut context = ctx(rx);
+    context.params = json!({"tools": ["Read"]});
+    let out = CommandRunner
+        .run(&context, &action, &json!({"task": "t"}))
+        .await;
+    let expected = json!({
+        "input": "t",
+        "params": ["Read"],
+        "run": {"id": "run-1", "tenant": "default"},
+        "step": {"node": "node-a", "visit": 3, "attempt": 2},
+        "joined": "a b",
+    });
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: expected
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_result_block_that_does_not_resolve_fails_with_the_end_of_stdout() {
+    let stdout = json!({"structured_output": {"outcome": 7, "output": null}}).to_string();
+    let script = format!("printf '%s' '{stdout}'");
+    let cases = [
+        (
+            from_stdout(&["structured_output", "verdict"]),
+            json!(null),
+            "command.result-invalid",
+            json!({"field": "outcome", "path": ["stdout", "structured_output", "verdict"]}),
+        ),
+        (
+            from_stdout(&["structured_output", "outcome"]),
+            json!(null),
+            "command.result-invalid",
+            json!({"field": "outcome", "value": 7}),
+        ),
+        (
+            json!("purple"),
+            json!(null),
+            "command.undeclared-outcome",
+            json!({"outcome": "purple"}),
+        ),
+        (
+            json!("ok"),
+            from_stdout(&["nothing"]),
+            "command.result-invalid",
+            json!({"field": "output", "path": ["stdout", "nothing"]}),
+        ),
+    ];
+    for (outcome, output, code, mut details) in cases {
+        let out = run(mapped(&script, outcome, output), json!({})).await;
+        details["stdoutTail"] = json!(stdout);
+        assert_eq!(failure(&out), (code, false, &details), "{details}");
+    }
+}
+
+#[tokio::test]
+async fn a_result_block_failure_keeps_only_the_end_of_a_long_stdout() {
+    let script = r#"printf '{"pad":"'; head -c 10000 /dev/zero | tr '\0' x; printf '"}'"#;
+    let out = run(
+        mapped(script, from_stdout(&["outcome"]), json!(null)),
+        json!({}),
+    )
+    .await;
+    let (code, _, details) = failure(&out);
+    assert_eq!(code, "command.result-invalid");
+    let kept = details["stdoutTail"].as_str().unwrap();
+    assert_eq!(kept.len(), 4 * 1024);
+    assert!(kept.ends_with("xx\"}"), "{kept}");
+}
+
+#[tokio::test]
+async fn a_mapped_exit_code_gives_its_outcome_and_the_parsed_stdout() {
+    let mut action = mapped(
+        r#"printf '{"a":1}'; exit 1"#,
+        from_stdout(&["missing"]),
+        from_stdout(&["missing"]),
+    );
+    action["exitOutcomes"] = json!({"1": "red"});
+    let out = run(action, json!({})).await;
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "red".into(),
+            output: json!({"a": 1})
+        }
+    );
+}
+
+#[test]
+fn validate_takes_a_result_block_only_in_json_mode_with_its_roots() {
+    let good = mapped("true", from_stdout(&["o"]), from_stdout(&["p"]));
+    assert!(CommandRunner.validate("act", &good).is_ok());
+    for mode in [None, Some("text"), Some("result"), Some("none")] {
+        let mut action = good.clone();
+        match mode {
+            Some(mode) => action["output"] = json!(mode),
+            None => drop(action.as_object_mut().unwrap().remove("output")),
+        }
+        assert!(CommandRunner.validate("act", &action).is_err(), "{mode:?}");
+    }
+    for (outcome, output) in [
+        (json!({"$get": ["nodes", "a"]}), json!(null)),
+        (json!("ok"), json!({"$get": ["from"]})),
+        (json!({"$nope": 1}), json!(null)),
+    ] {
+        let action = mapped("true", outcome.clone(), output.clone());
+        assert!(
+            CommandRunner.validate("act", &action).is_err(),
+            "{outcome} {output}"
+        );
+    }
+    for block in [
+        json!("x"),
+        json!({"outcome": "ok"}),
+        json!({"outcome": "ok", "output": 1, "extra": 2}),
+    ] {
+        let mut action = good.clone();
+        action["result"] = block.clone();
+        assert!(CommandRunner.validate("act", &action).is_err(), "{block}");
+    }
+    let mut action = good;
+    action["exitOutcomes"] = json!({"0": "red"});
+    assert!(
+        CommandRunner.validate("act", &action).is_err(),
+        "exit 0 reads stdout"
+    );
+}

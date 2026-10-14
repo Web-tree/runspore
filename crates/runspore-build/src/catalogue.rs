@@ -15,7 +15,8 @@ use crate::diagnostic::Severity;
 const TEXT: &str = include_str!("../catalogue/catalogue.toml");
 
 /// Names spore fills from where a diagnostic points; a check never passes them.
-pub const HOST_NAMES: [&str; 4] = ["action", "step", "file", "workflow"];
+/// `{owner}` is the step or the action the place is in, with its kind: `step "build"`.
+pub const HOST_NAMES: [&str; 5] = ["action", "step", "owner", "file", "workflow"];
 
 /// Where the help page of each code is published.
 pub const DOCS: &str = "https://github.com/Web-tree/runspore/blob/main/docs/codes";

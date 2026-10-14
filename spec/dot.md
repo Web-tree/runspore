@@ -277,7 +277,8 @@ The words come from the catalogue, `crates/runspore-build/catalogue/catalogue.to
 one entry per code with its severity (`problem` or `warning`), a title with no
 placeholders, a message, a fix, an optional why and explanation, and templates with
 `{name}` placeholders and no logic. `{action}`, `{step}`, `{file}` and `{workflow}` are
-filled from the place. Wording a template cannot express is another code. Every code
+filled from the place, and `{owner}` with the step or action it is in, such as
+`step "build"` or `action "claude"`. Wording a template cannot express is another code. Every code
 has an example folder under `catalogue/examples/`, its expected text output, and the
 folder after its first fix under `catalogue/fixed/<code>/`; `spore explain <code>`
 shows them, and `docs/codes/<code>.md` is generated from them. The catalogue's tests

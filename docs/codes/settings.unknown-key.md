@@ -16,7 +16,7 @@ There is no key "priority" in "actions" → "build".
   8 │       "priority": 3
     │       ^^^^^^^^^^
 
-To fix: remove it; the keys allowed here are "actor" | "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "kind" | "outcomes" | "output" | "retry" | "timeoutMs".
+To fix: remove it; the keys allowed here are "actor" | "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "kind" | "outcomes" | "output" | "result" | "retry" | "timeoutMs".
 ```
 
 The fix changes:

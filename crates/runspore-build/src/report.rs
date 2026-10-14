@@ -347,6 +347,12 @@ impl Report {
                 At::Text { step, .. } => step.as_ref().map(|s| quote(s)),
                 At::Settings { .. } => under("nodes").map(|s| quote(&s)),
             },
+            "owner" => match &d.at {
+                At::Text { step, .. } => step.as_ref().map(|s| format!("step {}", quote(s))),
+                At::Settings { .. } => under("nodes")
+                    .map(|s| format!("step {}", quote(&s)))
+                    .or_else(|| under("actions").map(|a| format!("action {}", quote(&a)))),
+            },
             "file" => Some(file_name(file).to_string()),
             "workflow" => Some(quote(&self.workflow)),
             _ => None,
