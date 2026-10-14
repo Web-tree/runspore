@@ -98,10 +98,11 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "Vec<FileRef>")]
     pub assets: Option<Vec<String>>,
-    /// `command`: the program and its arguments. No shell: each item is one word.
+    /// `command`: the program and its arguments. No shell: each item is one word, or
+    /// a mapping that gives one before each try.
     #[serde(default)]
-    #[schemars(with = "Vec<String>", length(min = 1))]
-    pub argv: Option<Vec<String>>,
+    #[schemars(with = "Vec<Word>", length(min = 1))]
+    pub argv: Option<Vec<Value>>,
     /// `command`: the folder to run in, relative to the run's base folder, or the
     /// one the step's input holds.
     #[serde(default)]
@@ -305,6 +306,20 @@ fn cwd(schema: &mut schemars::Schema) {
         "properties": {"fromInput": {"type": "string", "pattern": POINTER}},
         "required": ["fromInput"],
         "additionalProperties": false
+    });
+}
+
+/// One word of a command line: a string, or a mapping over `input`, `params`, `run`
+/// and `step` that gives a string before each try.
+#[derive(JsonSchema)]
+#[schemars(transform = word)]
+#[allow(dead_code)]
+struct Word(String);
+
+fn word(schema: &mut schemars::Schema) {
+    *schema = schemars::json_schema!({
+        "description": "One word of a command line: a string, or a mapping over input, params, run and step that gives a string before each try.",
+        "type": ["string", "object"]
     });
 }
 

@@ -41,6 +41,9 @@ const OPERATORS: [Operator; 4] = [
 const ROOTS: [&str; 4] = ["input", "nodes", "run", "from"];
 /// What a command's `result` block reads (spec/host.md §3, `command`).
 const RESULT_ROOTS: [&str; 5] = ["stdout", "input", "params", "run", "step"];
+/// What an action's own mappings read: its `argv`, and its probe's, watch's and
+/// stop's (spec/host.md §3).
+const ACTION_ROOTS: [&str; 4] = ["input", "params", "run", "step"];
 /// An external action's `async.timeoutMs` when it gives none (spec/host.md §2).
 const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
 /// Characters a shell would treat specially: a command line holding one is not
@@ -517,10 +520,15 @@ impl<'a> Checks<'a> {
         if let (true, false, Some(Value::Array(argv))) =
             (command, self.broken.touches(&argv_at), raw.get("argv"))
         {
-            let argv: Option<Vec<String>> =
-                argv.iter().map(|a| a.as_str().map(String::from)).collect();
-            if let Some(argv) = argv {
-                self.program(id, &argv);
+            self.program(id, argv);
+            self.argv_mappings(&argv_at, argv, id);
+        }
+        for program in ["probe", "watch", "stop"] {
+            let at = format!("{here}/async/{program}/command/argv");
+            if let (false, Some(Value::Array(argv))) =
+                (self.broken.touches(&at), self.value.pointer(&at))
+            {
+                self.argv_mappings(&at, &argv.clone(), id);
             }
         }
         // The rest reads the action as the build's own type, once it has that shape.
@@ -627,13 +635,26 @@ impl<'a> Checks<'a> {
         );
     }
 
-    /// `argv[0]` holding a whole command line, or a program this machine lacks.
-    fn program(&mut self, id: &str, argv: &[String]) {
-        let Some(program) = argv.first() else { return };
+    /// The mappings among the items of an `argv` at `at`, an action's own: their paths
+    /// start with one of `ACTION_ROOTS`. A string item is a word as it is.
+    fn argv_mappings(&mut self, at: &str, argv: &[Value], id: &str) {
+        for (i, item) in argv.iter().enumerate() {
+            if item.is_object() {
+                self.mapping(&pointer(at, &i.to_string()), item, None, id, &ACTION_ROOTS);
+            }
+        }
+    }
+
+    /// `argv[0]` holding a whole command line, or a program this machine lacks. A
+    /// mapping in `argv[0]` names its program only at dispatch.
+    fn program(&mut self, id: &str, argv: &[Value]) {
+        let Some(Value::String(program)) = argv.first() else {
+            return;
+        };
         let at = pointer(&pointer(&pointer("/actions", id), "argv"), "0");
         let exists = |p: &str| Path::new(p).exists() || self.folder.join(p).exists();
         if program.trim().contains(char::is_whitespace) && !exists(program) {
-            let mut words: Vec<String> = program.split_whitespace().map(String::from).collect();
+            let mut words: Vec<Value> = program.split_whitespace().map(|w| json!(w)).collect();
             words.extend(argv[1..].iter().cloned());
             let applicability = if program.contains(SHELL) {
                 Applicability::NeedsReview
@@ -1322,8 +1343,9 @@ impl<'a> Checks<'a> {
         }
     }
 
-    /// Mappings (kernel.md §4, W10), and in a step's input or params (`field`) the
-    /// `$outputSchemas` and `$resultSchema` markers.
+    /// Mappings (kernel.md §4, W10) whose paths start with one of `roots`, and in a
+    /// step's input or params (`field`) the `$outputSchemas` and `$resultSchema`
+    /// markers.
     fn mapping(&mut self, at: &str, value: &Value, field: Option<&str>, id: &str, roots: &[&str]) {
         let marker = match value {
             Value::Object(map) => MARKERS.into_iter().find(|m| map.contains_key(*m)),

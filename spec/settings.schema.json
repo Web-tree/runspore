@@ -45,9 +45,9 @@
           "description": "`external`: which kind of actor does the step. A claim takes the step only\nwhen it names this label."
         },
         "argv": {
-          "description": "`command`: the program and its arguments. No shell: each item is one word.",
+          "description": "`command`: the program and its arguments. No shell: each item is one word, or\na mapping that gives one before each try.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Word"
           },
           "minItems": 1,
           "type": "array"
@@ -384,6 +384,13 @@
         }
       },
       "type": "object"
+    },
+    "Word": {
+      "description": "One word of a command line: a string, or a mapping over input, params, run and step that gives a string before each try.",
+      "type": [
+        "string",
+        "object"
+      ]
     }
   },
   "$id": "https://raw.githubusercontent.com/Web-tree/runspore/main/spec/settings.schema.json",

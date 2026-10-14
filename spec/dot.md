@@ -204,6 +204,12 @@ step that judges a loop. The next `red` takes the node's `exhausted` edge, which
 node must draw (kernel.md §2, W12). The number is not drawn in the DOT; a renderer
 may show it on the edge from the settings.
 
+An item of a command's `argv`, and of an async `probe`'s, `watch`'s or `stop`'s
+`command.argv`, is a string or a mapping that gives one before each try (host.md §3).
+Its mappings are checked as a step's are (W10), except that a `$get` path starts with
+`input`, `params`, `run` or `step` (`mapping.path-root` otherwise), and the markers
+are not allowed. An `argv[0]` that is a mapping is not looked up on the machine.
+
 An action may also name a program in the folder for its async `probe`, `watch` or
 `stop` (`async.<name>.command.argv[0]`) as `./<path>`. That file is bundled as the
 action's asset, whether or not `assets` lists it. A bare name is not a file
