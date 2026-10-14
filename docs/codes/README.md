@@ -90,6 +90,8 @@ Every problem and warning `spore validate` can report, with its help page. `spor
 | [`node.schema-unknown-outcome`](node.schema-unknown-outcome.md) | problem | Schema for an outcome the step does not have |
 | [`node.signal-schemas-differ`](node.signal-schemas-differ.md) | problem | One signal, two schemas |
 | [`node.unknown-action`](node.unknown-action.md) | problem | Unknown action |
+| [`on-intervention.external-action`](on-intervention.external-action.md) | problem | onIntervention runs an external action |
+| [`on-intervention.unknown-action`](on-intervention.unknown-action.md) | problem | Unknown onIntervention action |
 | [`schema.file-not-json`](schema.file-not-json.md) | problem | Schema file that is not JSON |
 | [`schema.input-file-not-json`](schema.input-file-not-json.md) | problem | Input schema file that is not JSON |
 | [`schema.input-not-object`](schema.input-not-object.md) | problem | Input schema that is not an object |

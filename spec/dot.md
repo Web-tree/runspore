@@ -101,6 +101,7 @@ required. Node IDs match `[A-Za-z0-9_-]{1,64}`. A graph has at most 256 nodes.
 | `actions` | no | The package's `actions`, each optionally with `assets` |
 | `nodes` | no | Per node ID, the node's non-routing fields |
 | `inputSchema` | no | The package's `inputSchema`: the shape a run's input must have ([schema.md](schema.md) §4) |
+| `onIntervention` | no | The package's `onIntervention`: the action spore runs each time a run needs intervention or ends failed ([host.md](host.md) §2, Telling a person) |
 
 `name`, `start`, a node's `kind` and its `outcomes` come from `workflow.dot` and are
 not allowed here. Any other top-level field is an error.
@@ -225,6 +226,22 @@ the reference with its `.` and `..` segments resolved by name (`a/./b/../c.md` i
 A file may be named by several owners, for example as the instructions of two nodes:
 it becomes an entry of each. No reference may name `workflow.dot` or `settings.json`.
 
+`onIntervention` is `{"action": "<id>", "params": <mapping>}`, `params` optional,
+and goes into the package as written. `action` names an action of `actions`
+(`on-intervention.unknown-action`, with the closest name as a `needs-review` fix) that
+the worker runs itself: an `external` action, which waits for an actor, is
+`on-intervention.external-action`. `params` is a mapping checked as a step's are
+(W10), with `$get` paths starting with `input`, `nodes` or `run`, the run's context
+without `from` (`mapping.path-root` otherwise). The action itself is an ordinary
+action: steps may run it too, and its `argv` mappings read the params under `params`.
+
+```json
+"onIntervention": {
+  "action": "notify",
+  "params": {"issue": {"$get": ["input", "ticket", "issue"]}}
+}
+```
+
 ## 5. The build
 
 1. Read `workflow.dot`; check the dialect (§3), then the grammar (§2) and the
@@ -246,7 +263,7 @@ it becomes an entry of each. No reference may name `workflow.dot` or `settings.j
    root (schema.md §4); then replace each `$outputSchemas` and `$resultSchema` marker,
    checking that the copy still fits the package's depth limit where it lands.
 6. Produce the package: `format`, `name` and `start` from the files above, `limits`,
-   `actions` and `inputSchema` from the settings, and each node as its DOT `kind`, its settings
+   `actions`, `inputSchema` and `onIntervention` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
    `on` to its target. The build checks every rule of the kernel's validation
    (kernel.md §2, W01 to W15) and the host's checks of each action itself, and words
@@ -285,7 +302,7 @@ one entry per code with its severity (`problem` or `warning`), a title with no
 placeholders, a message, a fix, an optional why and explanation, and templates with
 `{name}` placeholders and no logic. `{action}`, `{step}`, `{file}` and `{workflow}` are
 filled from the place, and `{owner}` with the step or action it is in, such as
-`step "build"` or `action "claude"`. Wording a template cannot express is another code. Every code
+`step "build"` or `action "claude"`, or `"onIntervention"` for a place in it. Wording a template cannot express is another code. Every code
 has an example folder under `catalogue/examples/`, its expected text output, and the
 folder after its first fix under `catalogue/fixed/<code>/`; `spore explain <code>`
 shows them, and `docs/codes/<code>.md` is generated from them. The catalogue's tests
@@ -331,6 +348,7 @@ The codes, by family; [docs/codes](../docs/codes/README.md) lists each one:
 | `mapping.*`, `input.*` | Mappings (W10), their operators, and the `$outputSchemas` and `$resultSchema` markers |
 | `schema.*` | Schema files, schemas outside the subset, and an `inputSchema` whose root is not `"type": "object"` ([schema.md](schema.md)) |
 | `file.*` | File references (§4) |
+| `on-intervention.*` | `onIntervention`: the action it names (§4) |
 | `spore.*` | spore itself: a missed check, a broken message |
 
 `workflow.folder` is not a diagnostic: an entry that is neither a folder nor its

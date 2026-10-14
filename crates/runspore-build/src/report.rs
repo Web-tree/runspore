@@ -8,7 +8,7 @@ use crate::catalogue::{self, catalogue, ArgKind, Entry, HOST_NAMES};
 use crate::diagnostic::{steps, Applicability, Arg, At, Diagnostic, Edit, Part, Severity};
 use crate::edit::{self, File, Region, Replacement, Texts};
 use crate::spans::{Lines, Spans};
-use crate::{DOT_FILE, SETTINGS_FILE};
+use crate::{DOT_FILE, ON_INTERVENTION, SETTINGS_FILE};
 
 /// How many blocks the text output shows before it stops.
 pub const MAX_BLOCKS: usize = 20;
@@ -351,7 +351,11 @@ impl Report {
                 At::Text { step, .. } => step.as_ref().map(|s| format!("step {}", quote(s))),
                 At::Settings { .. } => under("nodes")
                     .map(|s| format!("step {}", quote(&s)))
-                    .or_else(|| under("actions").map(|a| format!("action {}", quote(&a)))),
+                    .or_else(|| under("actions").map(|a| format!("action {}", quote(&a))))
+                    .or_else(|| {
+                        let first = steps(d.pointer()?).into_iter().next()?;
+                        (first == ON_INTERVENTION).then(|| quote(&first))
+                    }),
             },
             "file" => Some(file_name(file).to_string()),
             "workflow" => Some(quote(&self.workflow)),

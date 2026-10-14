@@ -56,6 +56,24 @@ pub struct Settings {
     #[serde(default, rename = "inputSchema")]
     #[schemars(with = "SchemaOrFile")]
     pub input_schema: Option<Value>,
+    /// The action spore runs each time a run stops for a person: it needs
+    /// intervention, or it ended failed.
+    #[serde(default, rename = "onIntervention")]
+    #[schemars(with = "OnIntervention")]
+    pub on_intervention: Option<OnIntervention>,
+}
+
+/// The action spore runs each time a run needs intervention or ends failed, to tell
+/// someone. Its input is `{run, node, status, reason, error}`; what it returns never
+/// changes the run.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OnIntervention {
+    /// An action that `actions` defines and the worker runs itself.
+    pub action: String,
+    /// The action's params: a mapping over the run's `input`, `nodes` and `run`.
+    #[serde(default)]
+    pub params: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -478,6 +496,7 @@ fn def_of(at: &str) -> &'static str {
     match steps(at).iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [] => "",
         ["limits"] => "Limits",
+        ["onIntervention"] => "OnIntervention",
         ["actions", _] => "Action",
         ["actions", _, "retry"] => "Retry",
         ["nodes", _] => "Step",

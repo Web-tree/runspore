@@ -115,6 +115,24 @@ pub struct Workflow {
         skip_serializing_if = "Option::is_none"
     )]
     pub input_schema: Option<BTreeMap<String, Value>>,
+    /// 0.2: the action the host runs each time a run enters `needs-intervention` or
+    /// ends `failed` (`spec/host.md` §2, Telling a person). The kernel never reads it.
+    #[serde(
+        default,
+        rename = "onIntervention",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub on_intervention: Option<OnIntervention>,
+}
+
+/// A workflow's `onIntervention`: an action of the workflow, and the params it gets,
+/// a mapping over the run's `input`, `nodes` and `run`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OnIntervention {
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -457,6 +475,18 @@ pub mod event_kind {
     pub const ACTIVITY_RESULT: &str = "activity.result";
     pub const SIGNAL_RECEIVED: &str = "signal.received";
     pub const INVOCATION_RESOLVED: &str = "invocation.resolved";
+    /// 0.2: the workflow's `onIntervention` action failed. Consumed with no change.
+    pub const ON_INTERVENTION_FAILED: &str = "on-intervention.failed";
+}
+
+/// 0.2: the record of an `onIntervention` action that failed: the action, the run
+/// status it was telling about, and its error.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OnInterventionFailed {
+    pub action: String,
+    pub status: RunStatus,
+    pub error: ErrorInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -97,6 +97,7 @@ impl<'a> Machine<'a> {
             Event::Signal(signal) => self.on_signal(envelope, signal),
             Event::Result(result) => self.on_result(result),
             Event::Resolved(resolved) => self.on_resolved(resolved),
+            Event::Noted => Ok(()),
         }
     }
 

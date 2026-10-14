@@ -95,3 +95,50 @@ fn a_stuck_snapshot_that_contradicts_itself_is_invalid() {
     );
     assert_failure(transition(&request), InvalidInput, code::STATE_INVALID);
 }
+
+/// `on-intervention.failed` (`spec/kernel.md` §5, §7.3): the record of a host's
+/// `onIntervention` action that failed. It is consumed with no change but the
+/// bookkeeping, and its payload must decode like any other.
+#[test]
+fn an_on_intervention_failure_is_consumed_with_no_change() {
+    let mut run = stuck();
+    let before = run.state();
+    let payload = json!({"action": "tell", "status": "needs-intervention",
+                         "error": {"code": "tell.broken", "message": "no network"}});
+    let decision = run.step(event_kind::ON_INTERVENTION_FAILED, &payload, 3_000);
+    assert!(decision.commands.is_empty());
+    assert!(decision.diagnostics.is_empty());
+    let mut after = run.state();
+    for field in ["lastSequence", "lastAcceptedAtMs"] {
+        after[field] = before[field].clone();
+    }
+    assert_eq!(after, before);
+
+    let request = run.next(
+        event_kind::ON_INTERVENTION_FAILED,
+        &json!({"action": 1}),
+        4_000,
+    );
+    assert_failure(transition(&request), InvalidInput, code::EVENT_INVALID);
+}
+
+/// `onIntervention` belongs to a 0.2 document (W01).
+#[test]
+fn on_intervention_needs_a_0_2_document() {
+    let workflow = with(
+        single_activity("idempotent", json!({"maxAttempts": 1}), false),
+        "/onIntervention",
+        json!({"action": "work"}),
+    );
+    let mut old = workflow.clone();
+    old["format"] = json!("runspore.workflow/0.1");
+    let failure = transition(&start_request(&old, json!(null))).unwrap_err();
+    assert_eq!(failure.code, code::WORKFLOW_INVALID);
+    assert!(
+        failure.details.contains("onIntervention"),
+        "{}",
+        failure.details
+    );
+    let new = with(workflow, "/format", json!(WORKFLOW_FORMAT_0_2));
+    transition(&start_request(&new, json!(null))).unwrap();
+}

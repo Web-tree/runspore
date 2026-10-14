@@ -171,7 +171,9 @@ One bounded pass. It never blocks on an activity.
      decision for the same event (version skew or a nondeterministic reducer): drop
      the decision and count it in the tick report as `diverged`. `unavailable` or
      `unknown-commit`: retry the identical request. A turn counts only when the
-     receipt is `applied`.
+     receipt is `applied`. **0.2:** an `applied` turn that moved the run into
+     `needs-intervention` or `failed` starts the workflow's `onIntervention` action
+     (Telling a person, below).
    - on a failure: `quarantine_run` with its code and details.
    The decision's commands are **never** acted on directly. Only committed work,
    read back through `scan_due`, is dispatched.
@@ -321,6 +323,64 @@ A token that does not name an attempt of the run's external step is
 (abandoned, expired, or reported before) is refused with `stale` / `lease.lost`, and
 its result is kept with `record_late_evidence`: a stale report never moves the run, and
 nothing it says is lost.
+
+### Telling a person (0.2)
+
+A run that needs intervention or has failed waits for a person, and a person finds it
+only by asking. A workflow says who to tell with `onIntervention` (kernel.md §2): an
+action of the workflow and its `params`. n8n's Error Workflow, Argo's `onExit` and Step
+Functions' top-level `Catch` do the same in their engines.
+
+```json
+"onIntervention": {"action": "notify",
+                   "params": {"issue": {"$get": ["input", "ticket", "issue"]}}}
+```
+
+- **When.** Each time a run *enters* `needs-intervention` or ends `failed`: the
+  engine whose `commit_turn` was `applied` for a turn whose status differs from the
+  status before it runs the action once, in the background, beside the attempts it
+  dispatches (it counts against `max_concurrent_activities`). A run that stays in
+  `needs-intervention` while other events are consumed is not told again; one that is
+  resolved and gets stuck again is. Only one engine's commit is applied, so two
+  engines on one store tell once. A completed run, a waiting run and a quarantine tell
+  nobody.
+- **Input.** The action gets, on stdin for a command:
+
+  | Field | Value |
+  | --- | --- |
+  | `run` | `{"id", "tenant"}` |
+  | `node` | The node the run is at, or for `failed` the node its error names (`result.error.nodeId`); null when it names none |
+  | `status` | `needs-intervention` or `failed` |
+  | `reason` | `stuck` (a step gave up with no `failed` route), `unknown` (an `unsafe` step's outcome is unknown), or `failed` |
+  | `error` | A stuck step's kept error; for `unknown`, the error of the result that made it unknown, or null (an expired lease has none); the run's error for `failed` |
+
+- **Params.** `params` is a mapping (kernel.md §4) evaluated with the kernel's
+  evaluator over `input` (the run's input), `nodes` (the latest result of each node)
+  and `run` (`{"id", "tenant"}`). The action gets it as a node's params: under
+  `params` for its `argv` mappings, in `ActivityContext::params` for a native function.
+  Without `params` it gets `{}`.
+- **How it runs.** By the runner of its kind, like an attempt, but not as one: no
+  invocation, attempt or lease is stored and no heartbeat is sent. Its context names
+  the node above (`RUNSPORE_NODE_ID`), the action, attempt 1, visit 1, and its own
+  invocation ID, `ids::invocation(tenant, runId, "onIntervention/<revision>")` with
+  the revision of the turn that moved the run, which is also its effect key
+  (`RUNSPORE_EFFECT_KEY`), the same on every engine. It runs from the run's base
+  folder and gets `RUNSPORE_DB` like any command, and no step files or work folder.
+  Shutdown stops it like an attempt.
+- **Its result never changes the run.** A success records nothing. A `Failure` or
+  `Unknown` (a command's non-zero exit, timeout, missing runner, params that do not
+  evaluate) is appended as an event of kind `on-intervention.failed` with event and
+  request ID `on-intervention/<revision>`, body `{"action", "status", "error"}`, and
+  nothing more: it is not retried, and the kernel consumes the event with no change
+  (kernel.md §7.3), so it shows in the run's events and nowhere else.
+- **Checks.** `validate_workflow` and `start` refuse, with `workflow.invalid`, an
+  `onIntervention` whose action the workflow does not define, an `external` action
+  (the worker runs `onIntervention`; nobody would claim it), and `params` that are not
+  a mapping over those roots.
+- **Known limit.** Telling is at most once: an engine that stops before the action
+  ends (a crash, or a shutdown whose last tick commits the turn) does not run it
+  again, and the next engine does not either. The run's status still says it needs a
+  person; `onIntervention` only says so sooner.
 
 ### Failpoints
 
@@ -763,4 +823,5 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H25 | **0.2.** The stored artifact missing when a step is due, then restored | The run is quarantined `artifact.unreadable` with no attempt claimed; after `release` it completes. An artifact whose entry blob is absent quarantines the same way |
 | H26 | **0.2.** The sweep with one finished and one unfinished run of different artifacts, and with a finished run's lock held | The finished run's step files are removed and the unfinished run's kept; a held lock keeps them until the next sweep |
 | H27 | **0.2.** A run at an external step, worked by an engine, then claimed with and without the step's label, completed, failed and abandoned | The engine never claims it and `run_until_parked` returns there; only a claim naming the label takes it; a completion with an undeclared outcome, misfitting or oversize output records nothing; a completion routes the run; a retryable failure brings a new attempt; an abandoned `unsafe` step needs intervention and the old holder's report is `lease.lost` and kept as late evidence |
+| H29 | **0.2.** `onIntervention` on a run whose step gets stuck, is resolved with `retry` and gets stuck again; on a run that ends at a fail node; on a run that completes; with an action that fails; and `validate_workflow` with an unknown or `external` action and `params` rooted at `from` | Each entry into `needs-intervention` and the failure tell once, with `{run, node, status, reason, error}` and the evaluated params, and further ticks tell nobody again; a completed run tells nobody; the failing action's error is one `on-intervention.failed` event, consumed with no change; each bad `onIntervention` is `workflow.invalid` |
 | H28 | **0.2.** External attempts past their lease and past their deadline, with a repeatable and an `unsafe` effect | The sweep expires each; the repeatable step is ready again with the next attempt, the `unsafe` one needs intervention; renewals never pass the deadline |

@@ -18,7 +18,9 @@ use crate::dot::{arrow_text, Graph};
 use crate::near::closest;
 use crate::settings::{self, Action, Broken, Kind, Output};
 use crate::spans::{Odd, Spans};
-use crate::{is_outcome, File, Machine, Programs, DOT_FILE, FORMAT, SETTINGS_FILE};
+use crate::{
+    is_outcome, File, Machine, Programs, DOT_FILE, FORMAT, ON_INTERVENTION, SETTINGS_FILE,
+};
 
 /// The build-only marker a node's input or params uses for a copy of its schemas.
 const MARKER: &str = "$outputSchemas";
@@ -44,6 +46,9 @@ const RESULT_ROOTS: [&str; 5] = ["stdout", "input", "params", "run", "step"];
 /// What an action's own mappings read: its `argv`, and its probe's, watch's and
 /// stop's (spec/host.md §3).
 const ACTION_ROOTS: [&str; 4] = ["input", "params", "run", "step"];
+/// What `onIntervention.params` reads: the run's context, without `from` (spec/host.md
+/// §2, Telling a person).
+const ON_INTERVENTION_ROOTS: [&str; 3] = ["input", "nodes", "run"];
 /// An external action's `async.timeoutMs` when it gives none (spec/host.md §2).
 const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
 /// Characters a shell would treat specially: a command line holding one is not
@@ -131,6 +136,7 @@ impl<'a> Checks<'a> {
         for id in self.ids("actions") {
             self.action(&id);
         }
+        self.on_intervention();
         self.found.phase(Phase::Join);
         if let Some(graph) = self.graph {
             for id in &graph.order {
@@ -720,6 +726,79 @@ impl<'a> Checks<'a> {
         }
     }
 
+    /// The workflow's `onIntervention` (spec/host.md §2, Telling a person): an action
+    /// `actions` defines and the worker runs itself, and params that map the run.
+    fn on_intervention(&mut self) {
+        let here = pointer("", ON_INTERVENTION);
+        if self.broken.within(&here) {
+            return;
+        }
+        let Some(hook) = self.value.get(ON_INTERVENTION).cloned() else {
+            return;
+        };
+        let action_at = pointer(&here, "action");
+        let action = hook
+            .get("action")
+            .and_then(Value::as_str)
+            .filter(|_| !self.broken.touches(&action_at));
+        if let Some(action) = action {
+            match self.value.pointer(&pointer("/actions", action)) {
+                None => {
+                    let fixes = self.action_fixes(action, &action_at);
+                    self.push(
+                        Diagnostic::new("on-intervention.unknown-action", At::value(&action_at))
+                            .arg("name", Arg::Input(action_at.clone()))
+                            .fixes(fixes),
+                    );
+                }
+                Some(def) if def.get("kind").and_then(Value::as_str) == Some("external") => {
+                    self.push(
+                        Diagnostic::new("on-intervention.external-action", At::value(&action_at))
+                            .arg("name", Arg::Input(action_at.clone())),
+                    );
+                }
+                Some(_) => {}
+            }
+        }
+        let params_at = pointer(&here, "params");
+        if let Some(params) = hook.get("params") {
+            if !self.broken.touches(&params_at) {
+                self.mapping(&params_at, params, None, "", &ON_INTERVENTION_ROOTS);
+            }
+        }
+    }
+
+    /// Fixes naming another action at `at` for an action `actions` lacks: the closest
+    /// name first, to review, then every other one, to choose from.
+    fn action_fixes(&self, action: &str, at: &str) -> Vec<Fix> {
+        let actions = self.ids("actions");
+        let near = closest(action, actions.iter().map(String::as_str));
+        let mut order: Vec<&str> = near.into_iter().collect();
+        order.extend(
+            actions
+                .iter()
+                .map(String::as_str)
+                .filter(|a| Some(*a) != near),
+        );
+        order
+            .iter()
+            .map(|a| {
+                let applicability = if Some(*a) == near {
+                    Applicability::NeedsReview
+                } else {
+                    Applicability::NeedsChoice
+                };
+                Fix::new(
+                    applicability,
+                    vec![Edit::Set {
+                        at: at.to_string(),
+                        value: json!(a),
+                    }],
+                )
+            })
+            .collect()
+    }
+
     // ------------------------------------------------------------------
     // Steps
     // ------------------------------------------------------------------
@@ -894,29 +973,7 @@ impl<'a> Checks<'a> {
                     return;
                 };
                 if self.value.pointer(&pointer("/actions", action)).is_none() {
-                    let actions = self.ids("actions");
-                    let near = closest(action, actions.iter().map(String::as_str));
-                    let mut order: Vec<&str> = near.into_iter().collect();
-                    order.extend(
-                        actions
-                            .iter()
-                            .map(String::as_str)
-                            .filter(|a| Some(*a) != near),
-                    );
-                    let fixes = order.iter().map(|a| {
-                        let applicability = if Some(*a) == near {
-                            Applicability::NeedsReview
-                        } else {
-                            Applicability::NeedsChoice
-                        };
-                        Fix::new(
-                            applicability,
-                            vec![Edit::Set {
-                                at: action_at.clone(),
-                                value: json!(a),
-                            }],
-                        )
-                    });
+                    let fixes = self.action_fixes(action, &action_at);
                     self.push(
                         Diagnostic::new("node.unknown-action", At::value(&action_at))
                             .arg("name", Arg::Input(action_at.clone()))
@@ -1782,6 +1839,9 @@ impl<'a> Checks<'a> {
             .or_else(|| self.value.get("inputSchema"))
         {
             package.insert("inputSchema".into(), schema.clone());
+        }
+        if let Some(hook) = self.value.get(ON_INTERVENTION) {
+            package.insert(ON_INTERVENTION.into(), hook.clone());
         }
         Value::Object(package)
     }

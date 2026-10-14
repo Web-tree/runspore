@@ -107,9 +107,10 @@ stuck_run="$(ticket_run "$r10")" || fail "R10 has another ticket run"
 spore --json status "$stuck_run" | py 'i = d["invocation"]
 assert d["status"] == "needs-intervention" and i["state"] == "stuck" and i["attempt"] == i["maxAttempts"] == 3, d
 assert i["error"]["code"] == "command.exit", d' || fail "R10's ticket run is not stuck"
+check "any('$stuck_run' in c and 'step is stuck' in c for c in s['issues']['$r10']['comments'])"
 touch "$FAKE_CLAUDE_UNSTICK"
 spore --json resolve "$stuck_run" --retry | py 'assert d["disposition"] == "applied", d'
-echo "ok: R10's implement step could not recover, so its ticket run is stuck and the wave asked; resolve --retry"
+echo "ok: R10's implement step could not recover, so its ticket run is stuck and its onIntervention told the issue; resolve --retry"
 
 r12="Web-tree/runspore#62"
 wait_gh "any('loop limit' in c for c in s['issues'].get('$r12', {}).get('comments', []))"

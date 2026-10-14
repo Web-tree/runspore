@@ -12,8 +12,9 @@ runspore, or in the skills repo when it starts with `skills:`.
 
 Each open ticket gets one run of the `ticket` workflow, keyed `ticket:<issue>:1`,
 so starting again names the same run. A ticket step that can't recover is stuck:
-its run waits, and the step comments on the issue with the error and the
-`spore resolve` commands that answer it. A test or ship step that stays red past
+its run waits, and the `ticket` workflow's own `onIntervention` action comments on
+the issue with the error and the `spore resolve` commands that answer it. A test or
+ship step that stays red past
 its loop limit sends the run to the `stuck` step, which waits for a signal; the
 step comments with the last failure and the `spore signal` commands that answer it.
 The step ends when every ticket's issue is closed (close it when the ticket is done
@@ -127,8 +128,6 @@ def tick(tickets, all_runs, st):
             sh(SPORE, "--json", "start", workflow("ticket"), "--key", key,
                "--input", json.dumps({"ticket": t}))
             log(f"started {key}")
-        elif last["status"] == "needs-intervention":
-            stuck(t, last, st)
         elif last["status"] == "waiting":
             gave_up(t, last, st)
         left.append(t)
@@ -154,28 +153,6 @@ def gave_up(t, run, st):
        f"It waits for you. Fix the cause or not, then `{cmd} keep-going` to run the checks "
        f"again with a fresh count; or `{cmd} stop` to end this run. Or finish the ticket by "
        "hand and close this issue, and the wave goes on.")
-    st["asked"].append(mark)
-
-
-def stuck(t, run, st):
-    """Comment once per stuck try: which step, its error, and how to answer it."""
-    status = spore("status", run["runId"])
-    inv = status.get("invocation") or {}
-    mark = f"{t['issue']} {run['runId']} {inv.get('invocationId')} {inv.get('attempt')}"
-    if mark in st["asked"]:
-        return
-    error = inv.get("error") or {}
-    node = (status.get("position") or {}).get("nodeId", "?")
-    cmd = f"spore resolve {run['runId']}"
-    repo, num = split_issue(t["issue"])
-    sh("gh", "issue", "comment", str(num), "--repo", repo, "--body",
-       f"The ticket run's `{node}` step is stuck after try {inv.get('attempt')} of "
-       f"{inv.get('maxAttempts')} (run `{run['runId']}`):\n\n"
-       f"> {error.get('code', '?')}: {error.get('message', '')[-1500:]}\n\n"
-       f"It waits for you. Fix the cause, then `{cmd} --retry` for a new try; or "
-       f"`{cmd} --complete ok` if the step's work is done; or `{cmd} --fail \"<why>\"` to "
-       "end this run. Or finish the ticket by hand and close this issue, and the wave "
-       "goes on.")
     st["asked"].append(mark)
 
 

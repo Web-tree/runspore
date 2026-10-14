@@ -31,6 +31,7 @@ use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
 use crate::process::{self, Leftover};
 
+mod intervention;
 mod steps;
 
 pub use steps::{ExternalStep, StepClaim, StepRenewed, StepReport, StepState, RESULT_CHANNEL};
@@ -234,6 +235,8 @@ struct Package {
     nodes: Map<String, Value>,
     /// `limits.maxVisitsPerNode`: no activation has a higher visit.
     max_visits: u32,
+    /// The workflow's `onIntervention`, if it has one.
+    on_intervention: Option<Value>,
 }
 
 impl Package {
@@ -475,6 +478,7 @@ fn check_workflow(
         frozen_limits: limits,
     })?;
     check_schemas(&workflow)?;
+    intervention::check(&workflow)?;
     Ok(Checked { package, workflow })
 }
 
@@ -648,28 +652,6 @@ impl Engine {
         })
     }
 
-    async fn append(
-        &self,
-        key: &RunKey,
-        request_id: String,
-        event_id: String,
-        kind: &str,
-        body: Evidence,
-    ) -> Result<Receipt<EventAccepted>, HostError> {
-        let request = AppendEvent {
-            mutation: mutation(
-                "append_event",
-                request_id,
-                json!([key, event_id, kind, body.digest]),
-            )?,
-            key: key.clone(),
-            event_id,
-            kind: kind.to_string(),
-            body,
-        };
-        Ok(retry(true, || self.inner.store.append_event(request.clone())).await?)
-    }
-
     /// Delivers a signal. Retrying with the same `message_id` is a duplicate.
     pub async fn signal(
         &self,
@@ -692,7 +674,8 @@ impl Engine {
         })?;
         let event_id = ids::event_for_signal(message_id);
         let request_id = format!("signal/{message_id}");
-        self.append(key, request_id, event_id, event_kind::SIGNAL_RECEIVED, body)
+        self.inner
+            .append(key, request_id, event_id, event_kind::SIGNAL_RECEIVED, body)
             .await
     }
 
@@ -715,14 +698,15 @@ impl Engine {
         })?;
         let event_id = ids::event_for_resolution(request_id);
         let request_id = format!("resolve/{request_id}");
-        self.append(
-            key,
-            request_id,
-            event_id,
-            event_kind::INVOCATION_RESOLVED,
-            body,
-        )
-        .await
+        self.inner
+            .append(
+                key,
+                request_id,
+                event_id,
+                event_kind::INVOCATION_RESOLVED,
+                body,
+            )
+            .await
     }
 
     /// The package of a run, or `None` when there is no such run (the append that
@@ -995,6 +979,28 @@ impl Engine {
 }
 
 impl Inner {
+    async fn append(
+        &self,
+        key: &RunKey,
+        request_id: String,
+        event_id: String,
+        kind: &str,
+        body: Evidence,
+    ) -> Result<Receipt<EventAccepted>, HostError> {
+        let request = AppendEvent {
+            mutation: mutation(
+                "append_event",
+                request_id,
+                json!([key, event_id, kind, body.digest]),
+            )?,
+            key: key.clone(),
+            event_id,
+            kind: kind.to_string(),
+            body,
+        };
+        Ok(retry(true, || self.store.append_event(request.clone())).await?)
+    }
+
     fn unique(&self, prefix: &str) -> String {
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
         format!("{prefix}/{}/{n}", self.nonce)
@@ -1057,11 +1063,13 @@ impl Inner {
             .and_then(Value::as_u64)
             .and_then(|n| u32::try_from(n).ok())
             .unwrap_or(WorkflowLimits::default().max_visits_per_node);
+        let on_intervention = workflow.get("onIntervention").cloned();
         let package = Arc::new(Package {
             bytes,
             actions,
             nodes,
             max_visits,
+            on_intervention,
         });
         lock(&self.packages).insert(digest.to_string(), package.clone());
         Ok(package)
@@ -1139,7 +1147,11 @@ impl Inner {
     }
 
     /// Runs up to `turns_per_run` transitions of one run.
-    async fn coordinate(&self, key: &RunKey, report: &mut TickReport) -> Result<(), HostError> {
+    async fn coordinate(
+        self: &Arc<Self>,
+        key: &RunKey,
+        report: &mut TickReport,
+    ) -> Result<(), HostError> {
         for _ in 0..self.config.turns_per_run {
             let Some(turn) = retry(false, || self.store.load_turn(key)).await? else {
                 return Ok(());
@@ -1199,7 +1211,11 @@ impl Inner {
                 diagnostics: decision.diagnostics,
             };
             match retry(true, || self.store.commit_turn(request.clone())).await {
-                Ok(receipt) if receipt.disposition == Disposition::Applied => report.turns += 1,
+                Ok(receipt) if receipt.disposition == Disposition::Applied => {
+                    report.turns += 1;
+                    let before = turn.snapshot.as_deref().and_then(snapshot_status);
+                    self.tell(&turn, &package, before, &request.snapshot);
+                }
                 Ok(_) => {}
                 Err(f) if f.kind == StoreFailureKind::Stale => return Ok(()),
                 Err(f) if is(&f, StoreFailureKind::Conflict, "request.digest-mismatch") => {

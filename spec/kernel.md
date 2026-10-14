@@ -176,6 +176,15 @@ input before the run is created ([host.md](host.md) §2) and check the schema it
 (`workflow.invalid-schema`). A value that is not a JSON object does not decode as a
 workflow (`workflow.invalid`).
 
+**On intervention (0.2).** A `runspore.workflow/0.2` document may carry
+`onIntervention` at top level: `{"action": "<action ID>", "params": <mapping>}`, with
+`params` optional and no other key. It names the action a host runs each time a run
+enters `needs-intervention` or ends `failed` ([host.md](host.md) §2, Telling a
+person). Like `inputSchema` it is part of the document and the package digest covers
+it, and the kernel never reads it: decisions are the same with it and without it. A
+value of another shape does not decode (`workflow.invalid`); in a 0.1 document it
+violates W01. Hosts check that the action exists and that `params` is a mapping.
+
 ## 3. State
 
 Type: `model::State`. `status` is one of:
@@ -324,6 +333,7 @@ operands in index order, which fixes which error is reported when there are seve
 | `activity.result` | `ActivityResult` | `finish_attempt`, `expire_attempt` |
 | `signal.received` | `SignalReceived` | `append_event` |
 | `invocation.resolved` | `InvocationResolved` | `append_event` |
+| `on-intervention.failed` | `OnInterventionFailed` (0.2) | `append_event`, by a host whose `onIntervention` action failed |
 
 ## 6. Commands
 
@@ -426,6 +436,10 @@ no other change. Otherwise by `resolution.action`:
 The `reason` of `resolve.not-applicable` is `invocation-mismatch` (no invocation, or
 another ID), `invocation-not-unknown` (the ID matches but its phase is `scheduled`),
 or `outcome-undeclared`.
+
+**`on-intervention.failed`** (0.2) — no change: the event is the run's record that
+the host's `onIntervention` action failed (`{action, status, error}`), and nothing in
+the state reacts to it. No diagnostic is emitted.
 
 ### 7.4 Procedures
 

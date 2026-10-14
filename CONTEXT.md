@@ -211,6 +211,10 @@ _Avoid_: in-session step, controlled mode, agent-driven step
 A step that cannot recover (its tries ran out, or it failed with nothing left to try) and has no failure path; the run waits at it for a person's decision.
 _Avoid_: failed step, blocked step
 
+**On-intervention action**:
+The action a workflow names in `onIntervention`, which spore runs once each time a run stops for a person or ends failed, so someone is told without asking. What it returns never moves the run; its failure is only recorded.
+_Avoid_: error workflow, exit handler, alert, webhook
+
 **Repair**:
 Claude fixing its own answer in the same conversation after being told exactly why it does not fit the step's output schema. It happens before Runspore sees the answer, at most twice per try.
 _Avoid_: retry (a new try of the step), loop-back (a new visit)
