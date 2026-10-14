@@ -1110,6 +1110,29 @@ args = { path = "input" }
 example = "file.not-a-file"
 
 # ---------------------------------------------------------------------------
+# settings.json: onIntervention
+# ---------------------------------------------------------------------------
+
+[[code]]
+code = "on-intervention.unknown-action"
+severity = "problem"
+title = '''Unknown onIntervention action'''
+message = '''"onIntervention" runs action {name}, which "actions" does not define.'''
+fix = '''name an action that "actions" defines, or define action {name} there.'''
+args = { name = "input" }
+example = "on-intervention.unknown-action"
+
+[[code]]
+code = "on-intervention.external-action"
+severity = "problem"
+title = '''onIntervention runs an external action'''
+message = '''"onIntervention" runs action {name}, an external action, which waits for someone to claim it.'''
+fix = '''name an action the worker runs itself, such as a command.'''
+why = '''spore runs "onIntervention" itself when a run stops for a person, and nobody claims it there.'''
+args = { name = "input" }
+example = "on-intervention.external-action"
+
+# ---------------------------------------------------------------------------
 # spore itself
 # ---------------------------------------------------------------------------
 

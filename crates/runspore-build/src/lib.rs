@@ -42,6 +42,8 @@ pub const DIALECT: &str = "runspore/0.2";
 pub const FORMAT: &str = runspore_types::model::WORKFLOW_FORMAT_0_2;
 pub const DOT_FILE: &str = "workflow.dot";
 pub const SETTINGS_FILE: &str = "settings.json";
+/// The settings key naming the action spore runs when a run stops for a person.
+pub const ON_INTERVENTION: &str = "onIntervention";
 
 /// A folder the build cannot read at all, or an artifact it cannot seal.
 /// `Display` gives `<file>: <message>`.

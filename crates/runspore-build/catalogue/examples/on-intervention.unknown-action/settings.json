@@ -1,0 +1,19 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["make"],
+      "effect": "idempotent"
+    },
+    "notify": {
+      "kind": "command",
+      "argv": ["make", "notify"],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "build": { "action": "build" }
+  },
+  "onIntervention": { "action": "notfy" }
+}

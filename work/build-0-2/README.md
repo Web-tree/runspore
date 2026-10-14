@@ -88,8 +88,10 @@ spore status <run>
 ## When something goes wrong
 
 - A ticket step that can't recover (its tries ran out) is stuck: the ticket run
-  waits, and the wave comments on the issue with the error and the commands that
-  answer it. Fix the cause and run `spore resolve <run> --retry` for a new try,
+  waits, and its `onIntervention` action (`ticket-step notify`, in the `ticket`
+  folder's `settings.json`) comments on the issue with the run, the step, the error
+  and the commands that answer it. A ticket run that ends failed comments the same
+  way. Fix the cause and run `spore resolve <run> --retry` for a new try,
   `--complete ok` if the step's work is done, or `--fail "<why>"` to end that run.
   Or finish the ticket by hand and close the issue.
 - A ticket whose checks or CI stay red through three fixes in a row (the `test` and

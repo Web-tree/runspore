@@ -290,6 +290,23 @@
         "string"
       ]
     },
+    "OnIntervention": {
+      "additionalProperties": false,
+      "description": "The action spore runs each time a run needs intervention or ends failed, to tell\nsomeone. Its input is `{run, node, status, reason, error}`; what it returns never\nchanges the run.",
+      "properties": {
+        "action": {
+          "description": "An action that `actions` defines and the worker runs itself.",
+          "type": "string"
+        },
+        "params": {
+          "description": "The action's params: a mapping over the run's `input`, `nodes` and `run`."
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
     "Output": {
       "enum": [
         "text",
@@ -426,6 +443,10 @@
       },
       "description": "Steps by the ID `workflow.dot` gives them: their fields other than kind and\narrows.",
       "type": "object"
+    },
+    "onIntervention": {
+      "$ref": "#/$defs/OnIntervention",
+      "description": "The action spore runs each time a run stops for a person: it needs\nintervention, or it ended failed."
     }
   },
   "required": [

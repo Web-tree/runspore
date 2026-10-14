@@ -2,7 +2,8 @@
 
 use runspore_types::canonical;
 use runspore_types::model::{
-    code, event_kind, u64_str, ActivityResult, InvocationResolved, RunStarted, SignalReceived,
+    code, event_kind, u64_str, ActivityResult, InvocationResolved, OnInterventionFailed,
+    RunStarted, SignalReceived,
 };
 use runspore_types::reducer::{Envelope, Failure};
 use serde::de::DeserializeOwned;
@@ -15,6 +16,9 @@ pub(crate) enum Event {
     Result(ActivityResult),
     Signal(SignalReceived),
     Resolved(InvocationResolved),
+    /// A record the run keeps and the state does not react to:
+    /// `on-intervention.failed`.
+    Noted,
 }
 
 impl Event {
@@ -27,6 +31,10 @@ impl Event {
             event_kind::ACTIVITY_RESULT => Event::Result(payload(envelope)?),
             event_kind::SIGNAL_RECEIVED => Event::Signal(payload(envelope)?),
             event_kind::INVOCATION_RESOLVED => Event::Resolved(payload(envelope)?),
+            event_kind::ON_INTERVENTION_FAILED => {
+                payload::<OnInterventionFailed>(envelope)?;
+                Event::Noted
+            }
             other => {
                 return Err(failure::invalid(
                     code::EVENT_UNKNOWN_KIND,

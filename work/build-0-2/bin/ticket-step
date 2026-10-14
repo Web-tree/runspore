@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""The steps of the `ticket` workflow: setup, implement, test, ship.
+"""The steps of the `ticket` workflow: setup, implement, test, ship; and notify.
 
-    ticket-step <step>     (spore runs it with the step's input on stdin)
+    ticket-step <step>            (spore runs it with the step's input on stdin)
+    ticket-step notify <issue>    (spore runs it as the workflow's onIntervention)
 
 spore runs it from the orchestrator checkout, so every step runs this copy of the
 script, not the worktree's; the steps after setup change into the worktree first.
@@ -13,6 +14,9 @@ implement  runs the examples/headless-agent Claude wrapper in the worktree with
 test       runs the repo's checks; exit 1 (outcome `red`) prints what failed.
 ship       rebases onto origin/main, pushes, opens or reuses the PR, waits for CI
            and squash-merges; exit 1 (outcome `red`) prints why it could not.
+notify     comments on the ticket's issue when its run stops for a person or fails:
+           the run, the step, the error and the commands that answer it. Its input
+           is {run, node, status, reason, error} (spec/host.md, Telling a person).
 
 Every step is safe to run again: each part checks what is already done.
 """
@@ -222,9 +226,39 @@ def finish(inp, url):
     print(url)
 
 
+def notify(inp, issue):
+    """One comment each time the run stops for a person or fails. spore runs this once
+    per time, so it keeps no marks of its own."""
+    run = inp["run"]["id"]
+    node = inp.get("node") or "?"
+    error = inp.get("error") or {}
+    cause = f"> {error.get('code', '?')}: {error.get('message', '')[-1500:]}"
+    details = error.get("details") or {}
+    for name in ("stdout", "stderr"):
+        tail = (details.get(f"{name}Tail") or "").strip()
+        if tail:
+            cause += f"\n\n{name}:\n```\n{tail[-1500:]}\n```"
+    by_hand = "Or finish the ticket by hand and close this issue, and the wave goes on."
+    if inp["status"] == "failed":
+        body = f"The ticket run `{run}` ended failed at `{node}`:\n\n{cause}\n\n{by_hand}"
+    else:
+        what = "is stuck" if inp.get("reason") == "stuck" else "has an unknown outcome"
+        cmd = f"spore resolve {run}"
+        body = (f"The ticket run's `{node}` step {what} (run `{run}`):\n\n{cause}\n\n"
+                f"It waits for you. Fix the cause, then `{cmd} --retry` for a new try; or "
+                f"`{cmd} --complete ok` if the step's work is done; or `{cmd} --fail \"<why>\"` "
+                f"to end this run. {by_hand}")
+    repo, num = split_issue(issue)
+    sh("gh", "issue", "comment", str(num), "--repo", repo, "--body", body)
+    log(f"told {issue}: run {run} is {inp['status']} at {node}")
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "notify":
+        return notify(json.loads(sys.stdin.read()), sys.argv[2])
     if len(sys.argv) != 2 or sys.argv[1] not in ("setup", "implement", "test", "ship"):
-        sys.exit("usage: ticket-step setup|implement|test|ship  (input on stdin)")
+        sys.exit("usage: ticket-step setup|implement|test|ship  (input on stdin)\n"
+                 "       ticket-step notify <owner/repo#number>")
     raw = sys.stdin.read()
     inp = json.loads(raw)
     step = sys.argv[1]

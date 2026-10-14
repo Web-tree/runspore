@@ -102,6 +102,23 @@
       "exitOutcomes": {
         "1": "red"
       }
+    },
+    "notify": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/ticket-step",
+        "notify",
+        {"$get": ["params", "issue"]}
+      ],
+      "effect": "unsafe",
+      "timeoutMs": "120000"
+    }
+  },
+  "onIntervention": {
+    "action": "notify",
+    "params": {
+      "issue": {"$get": ["input", "ticket", "issue"]}
     }
   },
   "nodes": {
