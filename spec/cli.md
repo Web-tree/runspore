@@ -31,8 +31,8 @@ marked **0.2** below are new since 0.1.
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder. The input is checked against the workflow's `inputSchema` (0.2) |
 | `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
-| `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on |
-| `list` | All runs with status |
+| `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs) |
+| `list` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs) |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
@@ -188,6 +188,41 @@ action's effect then decides, as for any expiry. A run with no held external ste
 exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
 
 The `step` commands are writing commands (§Project folder).
+
+## Runs that start runs (0.2)
+
+A step may start other runs, as a build starts one run per ticket. A run started with
+`start` or `run` from inside a step records that step as its **parent**: the run and
+node in `RUNSPORE_RUN_ID` and `RUNSPORE_NODE_ID`, which the host gives every command
+(host.md §3). No flag is needed, and outside a step, where the two are not both set,
+a run has no parent. A `start` whose key names an existing run keeps the parent
+recorded first (store.md §2 `create_run`). Because a step's `spore` reaches the run's
+own database (§Project folder), parent and child share one.
+
+`list` prints the runs as a tree: each run, then the runs it started, indented below
+it, and theirs below them; siblings in the order they were created. A run whose parent
+is not in the database is at the top. Each line shows the run, its status, its node
+and how long it has been there, its start key, and for a child the node of the parent
+that started it:
+
+```text
+run_4f…  waiting             hold              2m10s  build
+  run_9a…  running           implement         1m58s  FC-146  from tickets
+  run_c2…  completed         -                     -  FC-147  from tickets
+```
+
+The node is where an unfinished run is, and the time is since the run came to stand
+there as it stands: the `sinceMs` that `status` reports in `waiting`, `intervention`
+or `running`, found by the same replay of the run's events (§JSON output). A finished run, and a run that has not
+taken its first turn, is at no node, shown `-`. `list` therefore costs one transition
+per event of each unfinished run.
+
+In JSON, each entry of `runs` is `{"runId", "startKey", "status", "revision",
+"quarantined", "parent", "depth", "nodeId", "sinceMs"}`, in the tree's order. `parent`
+is `{"runId", "nodeId"}` or null; `depth` is 0 at the top and one more per level;
+`nodeId` and `sinceMs` are null at no node. `status` carries the run's `parent` and,
+as `children`, the runs below it in the same form and order, its direct children at
+depth 0; its text lists them under `children`.
 
 ## Validation (0.2)
 
@@ -489,6 +524,8 @@ found by default needs `--db` added. Text mode shows the same under `waiting`, `
 and `running`, with the time in UTC and the duration in its two largest units, each
 outcome with its schema, and the commands one per line; an unknown step's error and
 its stream tails show there too.
+
+**0.2:** `status` carries `parent` and `children` (§Runs that start runs).
 
 **0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
 the absolute path of the database the command used (§Project folder). `list` prints

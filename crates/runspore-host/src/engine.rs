@@ -72,6 +72,9 @@ pub struct EngineConfig {
     /// Where step files and work folders go. Required for a workflow artifact that
     /// declares files; without it, steps get neither.
     pub files_dir: Option<PathBuf>,
+    /// Recorded as the parent of every run this engine starts: the run and node of
+    /// the step it is started from, if any.
+    pub parent: Option<RunParent>,
 }
 
 impl Default for EngineConfig {
@@ -92,6 +95,7 @@ impl Default for EngineConfig {
             stop_grace_ms: DEFAULT_STOP_GRACE_MS,
             guard: guard::own_executable(),
             files_dir: None,
+            parent: None,
         }
     }
 }
@@ -644,6 +648,7 @@ impl Engine {
             started,
             base_dir: Some(inner.config.base_dir.to_string_lossy().into_owned()),
             artifact,
+            parent: inner.config.parent.clone(),
         };
         let receipt = retry(true, || inner.store.create_run(request.clone())).await?;
         Ok(StartOutcome {

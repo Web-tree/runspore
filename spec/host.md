@@ -80,6 +80,7 @@ process on its own.
 | `stop_grace_ms` | 5000 | **0.2.** Time between SIGTERM and SIGKILL when a process group is stopped (§3) |
 | `guard` | the host's own executable | **0.2.** The executable whose guard mode runs in front of every process (§3) |
 | `files_dir` | none | **0.2.** Folder of step files and work folders (§3, Step files and work folders). Required for a workflow artifact with `instructions` or `asset` entries |
+| `parent` | none | **0.2.** The run and node of the step this engine is started from, `{run_id, node_id}`; `start` records it as the parent of every run it creates. `spore` sets it from `RUNSPORE_RUN_ID` and `RUNSPORE_NODE_ID` (cli.md, `list`) |
 
 ### Client operations
 
@@ -97,7 +98,7 @@ process on its own.
      the errors, and nothing is created. A package without `inputSchema` accepts any
      input.
   3. `create_run` with request ID `start/<start_key>` and, in 0.2, `base_dir` as the
-     run's base folder. `applied` is a new run;
+     run's base folder and `parent` as its parent. `applied` is a new run;
      `duplicate` is the run found, not new; `run.exists` (the key names a run with
      another workflow or input) is returned as the error. `run.start-key-mismatch`
      means another start with this key created its run after step 1: go back to

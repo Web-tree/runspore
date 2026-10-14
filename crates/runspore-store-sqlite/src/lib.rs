@@ -19,7 +19,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -41,6 +41,9 @@ const UPGRADE_5: &str = "ALTER TABLE attempts ADD COLUMN holder BLOB;
     ALTER TABLE attempts ADD COLUMN deadline_ms INTEGER;";
 /// Upgrades a version 6 database to version 7: an invocation's node params.
 const UPGRADE_6: &str = "ALTER TABLE invocations ADD COLUMN params BLOB;";
+/// Upgrades a version 7 database to version 8: the run's parent.
+const UPGRADE_7: &str = "ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
+    ALTER TABLE runs ADD COLUMN parent_node_id TEXT;";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -355,7 +358,7 @@ fn cursor_u64(value: &Value, index: usize) -> R<i64> {
 const RUN_VIEW: &str = "SELECT tenant, run_id, start_key, package_digest, status, revision,
     applied_sequence, next_sequence, snapshot, snapshot_digest, quarantine_code,
     quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms, base_dir,
-    artifact_digest FROM runs";
+    artifact_digest, parent_run_id, parent_node_id FROM runs";
 
 fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
     let code: Option<String> = r.get(10)?;
@@ -381,6 +384,10 @@ fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
         created_at_ms: r.get::<_, i64>(13)? as u64,
         updated_at_ms: r.get::<_, i64>(14)? as u64,
         base_dir: r.get(15)?,
+        parent: match (r.get(17)?, r.get(18)?) {
+            (Some(run_id), Some(node_id)) => Some(RunParent { run_id, node_id }),
+            _ => None,
+        },
     })
 }
 
@@ -429,6 +436,7 @@ impl SqliteStore {
                 (4, UPGRADE_4),
                 (5, UPGRADE_5),
                 (6, UPGRADE_6),
+                (7, UPGRADE_7),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -898,9 +906,10 @@ impl Store for SqliteStore {
                     "INSERT INTO runs (tenant, run_id, start_key, package_digest, started_digest,
                      status, revision, applied_sequence, next_sequence, last_accepted_ms,
                      snapshot, snapshot_digest, fence, quarantine_code, quarantine_details,
-                     quarantine_at_ms, created_at_ms, updated_at_ms, base_dir, artifact_digest)
+                     quarantine_at_ms, created_at_ms, updated_at_ms, base_dir, artifact_digest,
+                     parent_run_id, parent_node_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'created', 0, 0, 1, 0, NULL, NULL, 0, NULL, NULL,
-                     NULL, ?6, ?6, ?7, ?8)",
+                     NULL, ?6, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         q.key.tenant,
                         q.key.run,
@@ -909,7 +918,9 @@ impl Store for SqliteStore {
                         q.started.digest,
                         i(now),
                         q.base_dir,
-                        q.artifact.as_ref().map(|a| &a.digest)
+                        q.artifact.as_ref().map(|a| &a.digest),
+                        q.parent.as_ref().map(|p| &p.run_id),
+                        q.parent.as_ref().map(|p| &p.node_id)
                     ],
                 )
                 .map_err(db)?;

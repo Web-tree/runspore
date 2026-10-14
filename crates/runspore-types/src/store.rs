@@ -198,6 +198,17 @@ pub struct CreateRun {
     /// The workflow artifact the run is started from, if any; stored
     /// content-addressed. Provenance only: never compared for an existing run.
     pub artifact: Option<StoredArtifact>,
+    /// The run and node that started this run from inside a step, if any. Not part
+    /// of the run's identity: a repeat with another parent is a duplicate and keeps
+    /// the first.
+    pub parent: Option<RunParent>,
+}
+
+/// The step a run was started from: a run of the same tenant and the node it was at.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RunParent {
+    pub run_id: String,
+    pub node_id: String,
 }
 
 /// A workflow artifact as the store keeps it.
@@ -517,6 +528,8 @@ pub struct RunView {
     pub updated_at_ms: u64,
     /// The base folder recorded at `create_run`.
     pub base_dir: Option<String>,
+    /// The parent recorded at `create_run`.
+    pub parent: Option<RunParent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

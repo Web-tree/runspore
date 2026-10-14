@@ -31,6 +31,8 @@ CREATE TABLE runs (
     updated_at_ms INTEGER NOT NULL,
     base_dir TEXT,
     artifact_digest TEXT,
+    parent_run_id TEXT,
+    parent_node_id TEXT,
     PRIMARY KEY (tenant, run_id),
     UNIQUE (tenant, start_key)
 );

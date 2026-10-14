@@ -1,6 +1,7 @@
 //! Argument parsing and the commands of spec/cli.md.
 
 use std::collections::hash_map::RandomState;
+use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,12 +18,12 @@ use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::digest;
 use runspore_types::model::{event_kind, ErrorInfo, Resolution, RunStatus, State};
 use runspore_types::reducer::Reducer;
-use runspore_types::store::{Disposition, RunKey, RunView, StoreFailureKind};
+use runspore_types::store::{Disposition, RunKey, RunParent, RunView, StoreFailureKind};
 use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
-use crate::view::Shown;
+use crate::view::{Shown, Tree};
 use crate::{project, view};
 
 pub const FORMAT: &str = "runspore.cli/0.2";
@@ -388,7 +389,8 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Some(request) => request.base_dir.clone(),
         None => project::base_dir(None, &db, &cwd)?,
     };
-    let engine = engine(cli, &db, base_dir)?;
+    let parent = request.as_ref().and_then(|r| r.parent.clone());
+    let engine = engine(cli, &db, base_dir, parent)?;
     if let Some(request) = &request {
         let outcome = request.start(&engine).await?;
         if let Command::Run(_) = &cli.command {
@@ -838,13 +840,19 @@ async fn inspect_file(engine: &Engine, run: &str, path: &str) -> Result<Output, 
 
 /// Opens the database, or refuses one another `spore` wrote with exit 10 and the fix
 /// (spec/cli.md, databases from another version), and builds the engine on it.
-fn engine(cli: &Cli, db: &Path, base_dir: PathBuf) -> Result<Engine, Fail> {
+fn engine(
+    cli: &Cli,
+    db: &Path,
+    base_dir: PathBuf,
+    parent: Option<RunParent>,
+) -> Result<Engine, Fail> {
     let store = SqliteStore::open(db)
         .map_err(|f| Fail::internal(&f.code, format!("{}: {}", db.display(), f.message)))?;
     let mut config = EngineConfig {
         base_dir,
         db_path: Some(db.to_path_buf()),
         files_dir: Some(project::files_dir(db)),
+        parent,
         ..EngineConfig::default()
     };
     config.lease_ms = cli.lease_ms.unwrap_or(config.lease_ms);
@@ -878,6 +886,8 @@ struct StartRequest {
     input: Value,
     start_key: String,
     base_dir: PathBuf,
+    /// The step this start runs inside, from `RUNSPORE_RUN_ID` and `RUNSPORE_NODE_ID`.
+    parent: Option<RunParent>,
 }
 
 impl StartRequest {
@@ -904,6 +914,7 @@ impl StartRequest {
             input,
             start_key: args.key.clone().unwrap_or_else(|| generated("key")),
             base_dir: project::base_dir(args.base_dir.as_deref(), db, cwd)?,
+            parent: parent_step(),
         })
     }
 
@@ -914,6 +925,16 @@ impl StartRequest {
             .await
             .map_err(|e| self.source.fail(e))
     }
+}
+
+/// The step a `spore` call runs inside: the run and node the host gives every command
+/// it starts (spec/host.md §3), or `None` outside a step.
+fn parent_step() -> Option<RunParent> {
+    let var = |name| std::env::var(name).ok().filter(|v| !v.is_empty());
+    Some(RunParent {
+        run_id: var("RUNSPORE_RUN_ID")?,
+        node_id: var("RUNSPORE_NODE_ID")?,
+    })
 }
 
 /// `run_until_parked`, or on SIGINT/SIGTERM/SIGHUP `Engine::shutdown`, which applies the
@@ -953,16 +974,15 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
 
 impl Shown {
     async fn read(engine: &Engine, view: &RunView) -> Result<Self, Fail> {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        let runs = all_runs(engine).await?;
         Ok(Self {
             arrival: engine.arrival(view).await?,
             package: package(engine, view).await?,
             invocations: engine.list_invocations(&view.key).await?,
             step: engine.external_step(view).await?,
             last_result: last_result(engine, view).await?,
-            now_ms,
+            children: read_tree(engine, runs, Some(&view.key.run)).await?,
+            now_ms: now_ms(),
         })
     }
 }
@@ -998,6 +1018,53 @@ async fn last_result(engine: &Engine, view: &RunView) -> Result<Option<Value>, F
             }
         }
     }
+}
+
+/// Every run of `runs` as a tree, or with `root`, the runs below it, each unfinished
+/// one with its node and since when it has stood there (spec/cli.md, `list`).
+async fn read_tree(
+    engine: &Engine,
+    mut runs: Vec<RunView>,
+    root: Option<&str>,
+) -> Result<Tree, Fail> {
+    runs.sort_by(|a, b| (a.created_at_ms, &a.key.run).cmp(&(b.created_at_ms, &b.key.run)));
+    let index: HashMap<&str, usize> = runs
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.key.run.as_str(), i))
+        .collect();
+    let mut rows = Vec::new();
+    for (run, depth) in view::tree(&runs, root) {
+        let (node, since) = whereabouts(engine, run).await?;
+        rows.push((index[run.key.run.as_str()], depth, node, since));
+    }
+    Ok(Tree { runs, rows })
+}
+
+/// The node an unfinished run is at and since when it has stood there; `None`s for a
+/// run that has finished or not yet taken its first turn.
+async fn whereabouts(
+    engine: &Engine,
+    view: &RunView,
+) -> Result<(Option<String>, Option<u64>), Fail> {
+    let state: Option<State> = view
+        .snapshot
+        .as_deref()
+        .and_then(|bytes| serde_json::from_slice(bytes).ok());
+    let Some(position) = state
+        .filter(|s| !s.status.is_terminal())
+        .and_then(|s| s.position)
+    else {
+        return Ok((None, None));
+    };
+    let since = engine.arrival(view).await?.since_ms;
+    Ok((Some(position.node_id), since))
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// `spore step …` (spec/cli.md, Steps outside the worker).
@@ -1153,7 +1220,7 @@ async fn existing(engine: &Engine, run: &str) -> Result<RunView, Fail> {
         .ok_or_else(|| Fail::usage("run.not-found", format!("run {run} does not exist")))
 }
 
-async fn list(engine: &Engine, db: &Path) -> Result<Output, Fail> {
+async fn all_runs(engine: &Engine) -> Result<Vec<RunView>, Fail> {
     let mut runs = Vec::new();
     let mut cursor = None;
     loop {
@@ -1161,31 +1228,17 @@ async fn list(engine: &Engine, db: &Path) -> Result<Output, Fail> {
         runs.extend(page.items);
         match page.next {
             Some(next) => cursor = Some(next),
-            None => break,
+            None => return Ok(runs),
         }
     }
-    let text: Vec<String> = runs
-        .iter()
-        .map(|r| {
-            let quarantined = if r.quarantine.is_some() {
-                " quarantined"
-            } else {
-                ""
-            };
-            format!(
-                "{}  {:<18}{quarantined}  {}",
-                r.key.run, r.status, r.start_key
-            )
-        })
-        .collect();
-    let json: Vec<Value> = runs
-        .iter()
-        .map(|r| {
-            json!({"runId": r.key.run, "startKey": r.start_key, "status": r.status,
-                   "revision": r.revision.to_string(), "quarantined": r.quarantine.is_some()})
-        })
-        .collect();
-    done(json!({"db": db, "runs": json}), text.join("\n"))
+}
+
+async fn list(engine: &Engine, db: &Path) -> Result<Output, Fail> {
+    let tree = read_tree(engine, all_runs(engine).await?, None).await?;
+    done(
+        json!({"db": db, "runs": tree.json()}),
+        tree.text(0, now_ms()),
+    )
 }
 
 async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {
