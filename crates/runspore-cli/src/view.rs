@@ -190,6 +190,7 @@ pub fn status_text(
                 error["code"].as_str().unwrap_or_default(),
                 error["message"].as_str().unwrap_or_default()
             );
+            text += &tails_text(error, "");
         }
         if let Some(p) = i.get("process").and_then(Value::as_object) {
             text += &format!(
@@ -209,6 +210,7 @@ pub fn status_text(
     }
     if !s["result"].is_null() {
         text += &format!("result     {}\n", s["result"]);
+        text += &tails_text(&s["result"]["error"], "");
     }
     if let Some(q) = &view.quarantine {
         text += &format!("quarantine {}: {}\n", q.code, q.details);
@@ -238,18 +240,42 @@ pub fn event_json(record: &EventRecord) -> Value {
     })
 }
 
+/// The ends of a command's streams an error's details keep (spec/host.md §3,
+/// `command`), each line under the stream's name, `indent` before every line. Empty
+/// when there are none.
+fn tails_text(error: &Value, indent: &str) -> String {
+    let mut text = String::new();
+    for (key, stream) in [("stdoutTail", "stdout"), ("stderrTail", "stderr")] {
+        let Some(tail) = error["details"][key].as_str().filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        for (i, line) in tail.lines().enumerate() {
+            let label = if i == 0 { stream } else { "" };
+            text += &format!("{indent}{label:<10} {line}\n");
+        }
+    }
+    text
+}
+
+/// One line per event, then the ends of the streams of a command that failed.
 pub fn event_text(record: &EventRecord) -> String {
     let event = &record.event;
     let revision = record
         .consumed_revision
         .map_or_else(|| "pending".to_string(), |r| format!("rev {r}"));
     let codes: Vec<&str> = record.diagnostics.iter().map(|d| d.code.as_str()).collect();
-    format!(
+    let payload: Value = serde_json::from_slice(&event.body).unwrap_or(Value::Null);
+    let line = format!(
         "{:>4}  {:<22} {:<10} {}  {}",
         event.sequence,
         event.kind,
         revision,
         event.id,
         codes.join(",")
-    )
+    );
+    let tails = tails_text(&payload["error"], "      ");
+    match tails.strip_suffix('\n') {
+        Some(tails) => format!("{line}\n{tails}"),
+        None => line,
+    }
 }

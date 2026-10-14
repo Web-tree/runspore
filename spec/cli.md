@@ -470,6 +470,11 @@ started from a bare package (host.md §2); `spore` itself never starts one.
 
 Text output is for people and is not a stable interface.
 
+**0.2:** where an error carries the ends of a command's streams (`stdoutTail`,
+`stderrTail`, host.md §3), the text of `status` shows them under the error, and the
+text of `events` under the event that holds it, so a failed command's cause shows on
+whichever stream it went to. The JSON carries them in the error's `details`.
+
 ## Interrupts
 
 On SIGINT, SIGTERM or SIGHUP the worker stops claiming, gives in-flight activities a

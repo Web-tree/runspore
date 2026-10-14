@@ -41,8 +41,12 @@ fn failure(output: &ActivityOutput) -> (&str, bool, &Value) {
 }
 
 fn unknown(output: &ActivityOutput) -> &str {
+    unknown_error(output).0
+}
+
+fn unknown_error(output: &ActivityOutput) -> (&str, &Value) {
     match output {
-        ActivityOutput::Unknown { error } => &error.code,
+        ActivityOutput::Unknown { error } => (&error.code, &error.details),
         other => panic!("expected unknown, got {other:?}"),
     }
 }
@@ -83,12 +87,61 @@ async fn exit_zero_and_mapped_exit_codes_succeed() {
 }
 
 #[tokio::test]
-async fn other_exit_codes_fail_retryably_with_stderr_tail() {
-    let out = run(sh("echo boom >&2; exit 3"), json!({})).await;
+async fn other_exit_codes_fail_retryably_with_the_end_of_each_stream() {
+    let out = run(sh("echo said; echo boom >&2; exit 3"), json!({})).await;
     let (code, retryable, details) = failure(&out);
     assert_eq!((code, retryable), ("command.exit", true));
-    assert_eq!(details["exitCode"], json!(3));
-    assert_eq!(details["stderrTail"], json!("boom\n"));
+    assert_eq!(
+        details,
+        &json!({"exitCode": 3, "stdoutTail": "said\n", "stderrTail": "boom\n"})
+    );
+}
+
+#[tokio::test]
+async fn a_program_that_reports_its_error_on_stdout_shows_it_in_the_failure() {
+    // `claude -p --output-format json` prints its error as JSON on stdout, nothing on
+    // stderr.
+    let said = r#"{"is_error":true,"result":"no credit"}"#;
+    for mode in ["text", "json", "result", "none"] {
+        let mut action = sh(&format!("printf '{said}'; exit 1"));
+        action["output"] = json!(mode);
+        let out = run(action, json!({})).await;
+        let (code, _, details) = failure(&out);
+        assert_eq!(code, "command.exit", "{mode}");
+        assert_eq!(details["stdoutTail"], json!(said), "{mode}");
+        assert_eq!(details["stderrTail"], json!(""), "{mode}");
+    }
+}
+
+#[tokio::test]
+async fn a_tail_keeps_the_last_4_kib_on_a_character_boundary() {
+    // Two-byte characters; the markers' lengths put each cut in the middle of one.
+    let dir = std::env::temp_dir().join(format!("runspore-tail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out_file = dir.join("out");
+    let err_file = dir.join("err");
+    std::fs::write(&out_file, format!("{}END", "é".repeat(3000))).unwrap();
+    std::fs::write(&err_file, format!("{}ERROR", "é".repeat(3000))).unwrap();
+    let script = format!(
+        "cat {}; cat {} >&2; exit 1",
+        out_file.display(),
+        err_file.display()
+    );
+    for mode in ["text", "json"] {
+        let mut action = sh(&script);
+        action["output"] = json!(mode);
+        let out = run(action, json!({})).await;
+        let details = failure(&out).2;
+        for (stream, end) in [("stdoutTail", "END"), ("stderrTail", "ERROR")] {
+            let tail = details[stream].as_str().unwrap();
+            assert!(tail.ends_with(end), "{mode} {stream}");
+            assert!(
+                tail.len() < 4096 && tail.len() > 4096 - 4,
+                "{mode} {stream}"
+            );
+            assert!(tail.starts_with('é'), "{mode} {stream}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -144,12 +197,53 @@ async fn engine_stop_is_unknown_stopped() {
 #[tokio::test]
 async fn stdout_over_64_kib_is_a_permanent_failure_outside_text_mode() {
     for mode in ["json", "result", "none"] {
-        let mut action = sh("head -c 70000 /dev/zero");
+        let mut action = sh("head -c 70000 /dev/zero | tr '\\0' x; printf END");
         action["output"] = json!(mode);
         let out = run(action, json!({})).await;
-        assert_eq!(failure(&out).0, "command.output-too-large", "{mode}");
-        assert!(!failure(&out).1);
+        let (code, retryable, details) = failure(&out);
+        assert_eq!(code, "command.output-too-large", "{mode}");
+        assert!(!retryable);
+        let tail = details["stdoutTail"].as_str().unwrap();
+        assert!(
+            tail.ends_with("xEND") && tail.len() == 4096,
+            "{mode}: the real end"
+        );
     }
+}
+
+#[tokio::test]
+async fn malformed_output_and_an_undeclared_outcome_carry_the_end_of_each_stream() {
+    let undeclared = r#"printf '{"outcome":"maybe","output":null}'"#;
+    let cases = [
+        ("json", "printf 'not json'", "command.malformed-output"),
+        ("result", "printf '[1]'", "command.malformed-output"),
+        ("result", undeclared, "command.undeclared-outcome"),
+    ];
+    for (mode, script, expected) in cases {
+        let mut action = sh(&format!("{script}; echo warn >&2"));
+        action["output"] = json!(mode);
+        let out = run(action, json!({})).await;
+        let (code, _, details) = failure(&out);
+        assert_eq!(code, expected, "{script}");
+        assert!(
+            !details["stdoutTail"].as_str().unwrap().is_empty(),
+            "{script}"
+        );
+        assert_eq!(details["stderrTail"], json!("warn\n"), "{script}");
+    }
+}
+
+#[tokio::test]
+async fn a_timed_out_command_shows_what_it_printed() {
+    let mut action = sh("echo working; echo slow >&2; sleep 60");
+    action["timeoutMs"] = json!("500");
+    let out = run(action, json!({})).await;
+    let (code, details) = unknown_error(&out);
+    assert_eq!(code, "command.timeout");
+    assert_eq!(
+        details,
+        &json!({"stdoutTail": "working\n", "stderrTail": "slow\n"})
+    );
 }
 
 fn text(output: &ActivityOutput) -> (&str, &str, bool) {
@@ -285,7 +379,8 @@ async fn an_undeclared_outcome_fails_in_every_mode() {
         (
             "command.undeclared-outcome",
             false,
-            &json!({"outcome": "purple"})
+            &json!({"outcome": "purple", "stdoutTail": r#"{"outcome":"purple","output":null}"#,
+                    "stderrTail": ""})
         )
     );
     for mode in ["text", "json", "none"] {
@@ -297,7 +392,7 @@ async fn an_undeclared_outcome_fails_in_every_mode() {
             (
                 "command.undeclared-outcome",
                 false,
-                &json!({"outcome": "ok"})
+                &json!({"outcome": "ok", "stdoutTail": "1\n", "stderrTail": ""})
             ),
             "{mode}"
         );
@@ -532,8 +627,8 @@ async fn a_result_block_reads_past_numbers_outside_the_domain() {
         json!({}),
     )
     .await;
-    let details =
-        json!({"field": "output", "reason": "canonical.non-integer", "stdoutTail": stdout});
+    let details = json!({"field": "output", "reason": "canonical.non-integer",
+                         "stdoutTail": stdout, "stderrTail": ""});
     assert_eq!(failure(&out), ("command.result-invalid", false, &details));
     let out = run(mapped("printf '{'", json!("ok"), json!(null)), json!({})).await;
     assert_eq!(failure(&out).0, "command.malformed-output");
@@ -608,6 +703,7 @@ async fn a_result_block_that_does_not_resolve_fails_with_the_end_of_stdout() {
     for (outcome, output, code, mut details) in cases {
         let out = run(mapped(&script, outcome, output), json!({})).await;
         details["stdoutTail"] = json!(stdout);
+        details["stderrTail"] = json!("");
         assert_eq!(failure(&out), (code, false, &details), "{details}");
     }
 }

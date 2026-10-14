@@ -17,10 +17,8 @@ use crate::process;
 pub const MAX_STDOUT: usize = 64 * 1024;
 /// How much of stderr text mode keeps once the streams must be cut.
 const TEXT_STDERR: usize = 16 * 1024;
-/// How much of stderr is kept for a failure's details.
-const STDERR_TAIL: usize = 4 * 1024;
-/// How much of stdout is kept for the details of a `result` block's failure.
-const STDOUT_TAIL: usize = 4 * 1024;
+/// How much of each stream a failure's details keep.
+const TAIL: usize = 4 * 1024;
 /// The first steps a `$get` path of a `result` block may take.
 const RESULT_ROOTS: [&str; 5] = ["stdout", "input", "params", "run", "step"];
 
@@ -237,17 +235,38 @@ fn working_folder(
     }
 }
 
+/// A command's stdout and stderr as [`drain`] read them.
+type Streams<'a> = (&'a Drained, &'a Drained);
+
+/// What [`drain`] read of a stream.
+#[derive(Default)]
+struct Drained {
+    kept: Vec<u8>,
+    /// The stream's last `TAIL` bytes, and the three before them so [`tail`] can find a
+    /// character boundary.
+    end: Vec<u8>,
+    /// The stream's full length.
+    total: usize,
+}
+
+impl Drained {
+    /// The end of the stream for a failure's details.
+    fn tail(&self) -> String {
+        String::from_utf8_lossy(tail(&self.end, TAIL)).into_owned()
+    }
+}
+
 /// Reads `reader` to EOF, keeping at most `limit` bytes from the start (`head`) or the
-/// end. Returns them with the stream's full length.
-async fn drain(mut reader: impl AsyncRead + Unpin, limit: usize, head: bool) -> (Vec<u8>, usize) {
-    let mut kept = Vec::new();
-    let mut total = 0;
+/// end, and the stream's end apart.
+async fn drain(mut reader: impl AsyncRead + Unpin, limit: usize, head: bool) -> Drained {
+    let mut drained = Drained::default();
+    let Drained { kept, end, total } = &mut drained;
     let mut buf = [0u8; 8192];
     while let Ok(n) = reader.read(&mut buf).await {
         if n == 0 {
             break;
         }
-        total += n;
+        *total += n;
         kept.extend_from_slice(&buf[..n]);
         if kept.len() > limit {
             if head {
@@ -256,8 +275,19 @@ async fn drain(mut reader: impl AsyncRead + Unpin, limit: usize, head: bool) -> 
                 kept.drain(..kept.len() - limit);
             }
         }
+        end.extend_from_slice(&buf[..n]);
+        if end.len() > TAIL + 3 {
+            end.drain(..end.len() - TAIL - 3);
+        }
     }
-    (kept, total)
+    drained
+}
+
+/// A failure's `details` with the end of each stream added.
+fn with_tails(mut details: Map<String, Value>, (stdout, stderr): Streams) -> Value {
+    details.insert("stdoutTail".into(), Value::String(stdout.tail()));
+    details.insert("stderrTail".into(), Value::String(stderr.tail()));
+    Value::Object(details)
 }
 
 /// The last at most `limit` bytes of `bytes`, starting on a UTF-8 character boundary.
@@ -347,20 +377,19 @@ fn result_output(stdout: &[u8]) -> Result<ActivityOutput, String> {
 
 /// The result a `result` block maps from a json-mode stdout on exit 0: its `outcome`
 /// mapping must give a declared outcome, its `output` mapping any value. A failure's
-/// details carry the end of stdout.
+/// details carry the end of each stream.
 fn mapped_result(
     (outcome, output): &(Value, Value),
-    (parsed, raw): (Value, &[u8]),
+    parsed: Value,
+    streams: Streams,
     ctx: &ActivityContext,
     input: &Value,
     outcomes: &[String],
 ) -> ActivityOutput {
     let mut roots = ctx.scope(input);
     roots.insert("stdout".into(), parsed);
-    let fail = |code: &str, message: String, mut details: Map<String, Value>| {
-        let end = String::from_utf8_lossy(tail(raw, STDOUT_TAIL)).into_owned();
-        details.insert("stdoutTail".into(), Value::String(end));
-        failure(code, message, Value::Object(details), false)
+    let fail = |code: &str, message: String, details: Map<String, Value>| {
+        failure(code, message, with_tails(details, streams), false)
     };
     let invalid = |field: &str, message: String, details: Value| {
         let mut all = Map::from_iter([("field".to_string(), json!(field))]);
@@ -408,9 +437,9 @@ fn failure(code: &str, message: String, details: Value, retryable: bool) -> Acti
     }
 }
 
-fn unknown(code: &str, message: &str) -> ActivityOutput {
+fn unknown(code: &str, message: &str, streams: Streams) -> ActivityOutput {
     ActivityOutput::Unknown {
-        error: ActivityOutput::error(code, message, Value::Null),
+        error: ActivityOutput::error(code, message, with_tails(Map::new(), streams)),
     }
 }
 
@@ -506,7 +535,7 @@ impl ActivityRunner for CommandRunner {
         let stdout = tokio::spawn(drain(stdout.expect("piped"), MAX_STDOUT, !text));
         let stderr = tokio::spawn(drain(
             stderr.expect("piped"),
-            if text { MAX_STDOUT } else { STDERR_TAIL },
+            if text { MAX_STDOUT } else { TAIL },
             false,
         ));
         let timeout = async {
@@ -528,17 +557,29 @@ impl ActivityRunner for CommandRunner {
             let _ = ctx.record_process(None).await;
         }
         feed.abort();
-        let (stdout, stdout_total) = stdout.await.unwrap_or_default();
-        let (stderr, stderr_total) = stderr.await.unwrap_or_default();
+        let (stdout, stderr) = (
+            stdout.await.unwrap_or_default(),
+            stderr.await.unwrap_or_default(),
+        );
+        let streams = (&stdout, &stderr);
+        // Every failure of a program that ran shows how it ended on both streams; one the
+        // program names in result mode is its own.
+        let fail = |code: &str, message: String, details: Map<String, Value>, retryable| {
+            failure(code, message, with_tails(details, streams), retryable)
+        };
         let code = match ending {
-            Stop::TimedOut => return unknown("command.timeout", "the command timed out"),
-            Stop::Stopped => return unknown("command.stopped", "the engine stopped the command"),
+            Stop::TimedOut => return unknown("command.timeout", "the command timed out", streams),
+            Stop::Stopped => {
+                return unknown("command.stopped", "the engine stopped the command", streams);
+            }
             Stop::Ended(Ending::Exited(code)) => code,
             Stop::Ended(Ending::Signaled(signal)) => {
-                return unknown("command.signaled", &format!("killed by signal {signal}"));
+                let message = format!("killed by signal {signal}");
+                return unknown("command.signaled", &message, streams);
             }
             Stop::Ended(Ending::Lost) => {
-                return unknown("command.signaled", "the guard ended without reporting");
+                let message = "the guard ended without reporting";
+                return unknown("command.signaled", message, streams);
             }
         };
         let mapped = spec.exit_outcomes.iter().find(|(c, _)| *c == code);
@@ -546,17 +587,16 @@ impl ActivityRunner for CommandRunner {
             Some((_, name)) => name.clone(),
             None if code == 0 => "ok".to_string(),
             None => {
-                let details = json!({
-                    "exitCode": code,
-                    "stderrTail": String::from_utf8_lossy(tail(&stderr, STDERR_TAIL)),
-                });
-                return failure("command.exit", format!("exit code {code}"), details, true);
+                let details = Map::from_iter([("exitCode".to_string(), json!(code))]);
+                return fail("command.exit", format!("exit code {code}"), details, true);
             }
         };
-        if !text && stdout_total > MAX_STDOUT {
+        if !text && stdout.total > MAX_STDOUT {
             let message = format!("stdout exceeds {MAX_STDOUT} bytes");
-            return failure("command.output-too-large", message, Value::Null, false);
+            return fail("command.output-too-large", message, Map::new(), false);
         }
+        let malformed =
+            |message: String| fail("command.malformed-output", message, Map::new(), false);
         let result = match spec.output.as_str() {
             "none" => ActivityOutput::Success {
                 outcome,
@@ -564,24 +604,19 @@ impl ActivityRunner for CommandRunner {
             },
             // A result block reads plain JSON: only what it maps must be in the domain.
             "json" => match &spec.result {
-                Some(result) if mapped.is_none() => match serde_json::from_slice(&stdout) {
+                Some(result) if mapped.is_none() => match serde_json::from_slice(&stdout.kept) {
                     Ok(parsed) => {
-                        let stdout = (parsed, stdout.as_slice());
-                        mapped_result(result, stdout, ctx, input, &spec.outcomes)
+                        mapped_result(result, parsed, streams, ctx, input, &spec.outcomes)
                     }
-                    Err(e) => {
-                        let message = format!("stdout is not JSON: {e}");
-                        return failure("command.malformed-output", message, Value::Null, false);
-                    }
+                    Err(e) => return malformed(format!("stdout is not JSON: {e}")),
                 },
-                _ => match canonical::parse(&stdout) {
+                _ => match canonical::parse(&stdout.kept) {
                     Ok(parsed) => ActivityOutput::Success {
                         outcome,
                         output: parsed,
                     },
                     Err(e) => {
-                        let message = format!("stdout is not canonical-domain JSON: {e}");
-                        return failure("command.malformed-output", message, Value::Null, false);
+                        return malformed(format!("stdout is not canonical-domain JSON: {e}"))
                     }
                 },
             },
@@ -589,23 +624,24 @@ impl ActivityRunner for CommandRunner {
                 outcome,
                 output: Value::Null,
             },
-            "result" => match result_output(&stdout) {
+            "result" => match result_output(&stdout.kept) {
                 Ok(result) => result,
-                Err(e) => {
-                    let message = format!("stdout is not a result: {e}");
-                    return failure("command.malformed-output", message, Value::Null, false);
-                }
+                Err(e) => return malformed(format!("stdout is not a result: {e}")),
             },
             _ => ActivityOutput::Success {
                 outcome,
-                output: text_output(code, (&stdout, stdout_total), (&stderr, stderr_total)),
+                output: text_output(
+                    code,
+                    (&stdout.kept, stdout.total),
+                    (&stderr.kept, stderr.total),
+                ),
             },
         };
         match result {
             ActivityOutput::Success { outcome, .. } if !spec.outcomes.contains(&outcome) => {
                 let message = format!("outcome `{outcome}` is not declared by the action");
-                let details = json!({ "outcome": outcome });
-                failure("command.undeclared-outcome", message, details, false)
+                let details = Map::from_iter([("outcome".to_string(), json!(outcome))]);
+                fail("command.undeclared-outcome", message, details, false)
             }
             result => result,
         }
