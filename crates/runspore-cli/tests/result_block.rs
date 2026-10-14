@@ -104,6 +104,7 @@ fn a_result_that_does_not_resolve_is_stuck_with_the_end_of_stdout() {
         assert_eq!(invocation["attempt"], 1, "{name}: not retried");
         assert_eq!(invocation["error"]["code"], code, "{name}");
         details["stdoutTail"] = json!(serde_json::to_string_pretty(&stdout).unwrap());
+        details["stderrTail"] = json!("");
         assert_eq!(invocation["error"]["details"], details, "{name}");
     }
 }

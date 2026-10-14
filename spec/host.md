@@ -468,13 +468,23 @@ Result mapping, in order:
 | Exit 0, `output` other than `result`, no `result` block | `Success` with outcome `ok` |
 | Exit 0, `output: "result"` | What stdout says (below) |
 | **0.2.** Exit 0, `output: "json"` with a `result` block | What the block maps from stdout (below) |
-| Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stderrTail}` (the last 4 KiB of stderr) |
+| Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stdoutTail, stderrTail}` (below) |
 | Stdout over 64 KiB, `output` other than `text` | `Failure`, `command.output-too-large`, not retryable |
 | `output: "json"` and stdout is not JSON in the canonical domain (with a `result` block: not JSON) | `Failure`, `command.malformed-output`, not retryable |
 | `Success` whose outcome the action does not declare | `Failure`, `command.undeclared-outcome`, not retryable, details `{outcome}` |
 
 The last row holds for every `command` in every output mode, so an undeclared outcome
-never reaches the kernel. An action that declares no `outcomes` declares `["ok"]`
+never reaches the kernel.
+
+**0.2: the ends of the streams.** Every `Failure` and `Unknown` above of a program that
+ran (every row but `cwd-invalid`, `argv-invalid` and `spawn`) carries in its details
+`stdoutTail` and `stderrTail`, the last 4 KiB of each stream, decoded as UTF-8, lossy,
+and cut on a character boundary. Stdout's end is kept even when the stream passes
+64 KiB. Some programs write their errors to stdout (`claude -p --output-format json`
+prints `{"is_error": true, …}` and leaves stderr empty), so the cause shows whichever
+stream it went to. A failure a command names itself in result mode (below) is its own
+and gets neither. 0.1 kept only `stderrTail`, in `command.exit`, and gave the other
+rows no details. An action that declares no `outcomes` declares `["ok"]`
 (kernel §2).
 
 Success output by `output` mode:
@@ -541,8 +551,8 @@ and the output out of it, so no wrapper script is needed (AWS Step Functions'
   `{"field": "outcome" | "output"}` plus the mapping error's `path` (and `operator`
   and `value` for an operand), or `value` for a non-string outcome. An undeclared
   outcome is `command.undeclared-outcome`, details `{outcome}`. Each also carries
-  `stdoutTail`, the last 4 KiB of stdout, cut on a character boundary, so the program's
-  real answer shows in the error. Another try would read the same kind of answer, so
+  `stdoutTail` and `stderrTail` (above), so the program's real answer shows in the
+  error. Another try would read the same kind of answer, so
   the step is stuck or takes its `failed` route.
 - An exit code listed in `exitOutcomes` gives its outcome and the parsed stdout as
   output, as without the block; the block is not evaluated. A non-zero exit maps
