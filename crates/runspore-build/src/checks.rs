@@ -1793,25 +1793,30 @@ fn operator(key: &str) -> Option<Operator> {
 }
 
 /// The schema of a result-mode answer (host.md §2) for a step that ends with
-/// `outcomes`: `{"outcome", "output"}` with the outcome fixed and the output fitting
-/// that outcome's schema, or anything when it has none. The branches are `anyOf`, the
-/// subset's union (schema.md §1); each fixes another outcome, so exactly one fits.
+/// `outcomes`: an object `{"outcome", "output"}` whose outcome is one of `outcomes` and
+/// whose output fits that outcome's schema, or anything when it has none. With several
+/// outcomes the output is the `anyOf` of their schemas. The top level stays an object,
+/// since model APIs refuse a top-level `anyOf`; the host checks the output against its
+/// own outcome's schema after the answer.
 fn result_schema(outcomes: &[String], schemas: &Map<String, Value>) -> Value {
-    let branches = outcomes
+    let mut outputs: Vec<Value> = outcomes
         .iter()
-        .map(|outcome| {
-            json!({
-                "type": "object",
-                "properties": {
-                    "outcome": {"const": outcome},
-                    "output": schemas.get(outcome).cloned().unwrap_or_else(|| json!({})),
-                },
-                "required": ["outcome", "output"],
-                "additionalProperties": false,
-            })
-        })
+        .map(|outcome| schemas.get(outcome).cloned().unwrap_or_else(|| json!({})))
         .collect();
-    json!({ "anyOf": Value::Array(branches) })
+    let output = if outputs.len() == 1 {
+        outputs.remove(0)
+    } else {
+        json!({ "anyOf": outputs })
+    };
+    json!({
+        "type": "object",
+        "properties": {
+            "outcome": {"enum": outcomes},
+            "output": output,
+        },
+        "required": ["outcome", "output"],
+        "additionalProperties": false,
+    })
 }
 
 /// What the markers of one step are replaced with, when it has schemas.

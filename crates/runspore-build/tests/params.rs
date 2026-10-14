@@ -14,6 +14,11 @@ struct Folder(PathBuf);
 
 impl Folder {
     fn new(build: Value, wait: Value) -> Self {
+        Self::with(DOT, &["ok", "red"], build, wait)
+    }
+
+    /// A folder whose `build` action declares `outcomes`, routed by `dot`.
+    fn with(dot: &str, outcomes: &[&str], build: Value, wait: Value) -> Self {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
@@ -26,10 +31,10 @@ impl Folder {
         let settings = json!({
             "format": "runspore.workflow/0.2",
             "actions": {"build": {"kind": "command", "argv": ["make"], "effect": "idempotent",
-                                  "outcomes": ["ok", "red"]}},
+                                  "outcomes": outcomes}},
             "nodes": {"build": build, "wait": wait},
         });
-        std::fs::write(dir.join("workflow.dot"), DOT).unwrap();
+        std::fs::write(dir.join("workflow.dot"), dot).unwrap();
         std::fs::write(
             dir.join("settings.json"),
             serde_json::to_string_pretty(&settings).unwrap(),
@@ -124,14 +129,10 @@ fn result_schema_becomes_the_schema_of_a_result_mode_answer() {
     });
     let checked = Folder::new(build, wait()).check();
     let node = &package(&checked)["nodes"]["build"];
-    let schema = json!({"anyOf": [
-        {"type": "object",
-         "properties": {"outcome": {"const": "ok"}, "output": changes},
-         "required": ["outcome", "output"], "additionalProperties": false},
-        {"type": "object",
-         "properties": {"outcome": {"const": "red"}, "output": {}},
-         "required": ["outcome", "output"], "additionalProperties": false},
-    ]});
+    let schema = json!({"type": "object",
+         "properties": {"outcome": {"enum": ["ok", "red"]},
+                        "output": {"anyOf": [changes, {}]}},
+         "required": ["outcome", "output"], "additionalProperties": false});
     assert_eq!(node["params"]["schema"], json!({"$literal": schema}));
     assert_eq!(
         node["params"]["text"],
@@ -144,6 +145,42 @@ fn result_schema_becomes_the_schema_of_a_result_mode_answer() {
     assert_eq!(node["input"], json!({"$literal": schema}));
     // A schema runspore itself can check answers against.
     runspore_schema::check(&schema, 1).unwrap();
+}
+
+#[test]
+fn result_schema_of_a_single_outcome_takes_its_schema_as_the_output() {
+    let changes = json!({"type": "object", "properties": {"files": {"type": "array"}},
+                         "required": ["files"]});
+    let build = json!({
+        "action": "build",
+        "outputSchemas": {"ok": changes},
+        "params": {"schema": {"$resultSchema": {}}},
+    });
+    let dot = DOT.replace("  build -> done [on=\"red\"];\n", "");
+    let checked = Folder::with(&dot, &["ok"], build, wait()).check();
+    let schema = &package(&checked)["nodes"]["build"]["params"]["schema"]["$literal"];
+    assert_eq!(
+        *schema,
+        json!({"type": "object",
+               "properties": {"outcome": {"enum": ["ok"]}, "output": changes},
+               "required": ["outcome", "output"], "additionalProperties": false})
+    );
+}
+
+#[test]
+fn result_schema_is_an_object_at_the_top_level() {
+    // Model APIs refuse a schema whose top level is anyOf, oneOf or allOf.
+    let build = json!({
+        "action": "build",
+        "outputSchemas": {"ok": {"type": "object"}, "red": {"type": "object"}},
+        "params": {"schema": {"$resultSchema": {}}},
+    });
+    let checked = Folder::new(build, wait()).check();
+    let schema = &package(&checked)["nodes"]["build"]["params"]["schema"]["$literal"];
+    assert_eq!(schema["type"], "object");
+    for keyword in ["anyOf", "oneOf", "allOf"] {
+        assert!(schema.get(keyword).is_none(), "{schema}");
+    }
 }
 
 #[test]

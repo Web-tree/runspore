@@ -212,9 +212,15 @@ fn one_session_through_a_red_test_and_a_rejection() {
         .after("--append-system-prompt")
         .starts_with("You are the implement step"));
     let schema: Value = serde_json::from_str(first.after("--json-schema")).unwrap();
-    let branch = &schema["anyOf"][0]["properties"];
-    assert_eq!(branch["outcome"], json!({"const": "ok"}), "{schema}");
-    assert_eq!(branch["output"]["required"], json!(["summary"]), "{schema}");
+    // An object at the top level, which the Claude API requires.
+    assert_eq!(schema["type"], "object", "{schema}");
+    let properties = &schema["properties"];
+    assert_eq!(properties["outcome"], json!({"enum": ["ok"]}), "{schema}");
+    assert_eq!(
+        properties["output"]["required"],
+        json!(["summary"]),
+        "{schema}"
+    );
 
     // The message is the node's input: the task, and why the run came back.
     assert_eq!(

@@ -176,22 +176,23 @@ the step runs can read its own schemas without the workflow writing them twice.
 
 `{"$resultSchema": {}}` is a marker in the same places. The build replaces it with
 `{"$literal": <schema>}`, the schema of a result-mode answer for this node
-([host.md](host.md) §2): one branch per outcome the node's action declares, each
-`{"outcome": <that outcome>, "output": <its outputSchemas entry>}` with both required
-and no other key, and `{}` (anything) as the output of an outcome with no entry. The
-branches are an `anyOf`, the subset's union (schema.md §1): each fixes a different
-outcome with `const`, so exactly one branch fits, as a `oneOf` would. A program given
-this schema can only answer with a declared outcome and an output that fits it, and the
-schema is one runspore itself can check answers against. For an action with outcomes
-`ok` and `red` and a schema only for `ok`:
+([host.md](host.md) §2): an object `{"outcome", "output"}` with both required and no
+other key. `outcome` is an `enum` of the outcomes the node's action declares. `output`
+is the outcome's `outputSchemas` entry when the action declares one outcome, and
+otherwise the `anyOf` of every outcome's entry, with `{}` (anything) for an outcome
+with no entry. The top level is an object, never an `anyOf`: model APIs that take a
+schema for structured output (`claude -p --json-schema`, strict structured outputs)
+refuse `anyOf`, `oneOf` and `allOf` at the top level. The schema does not tie an
+output to its outcome; the host checks the output against its own outcome's schema
+after the answer (host.md §2). A program given this schema can only answer with a
+declared outcome, and the schema is one runspore itself can check answers against. For
+an action with outcomes `ok` and `red` and a schema only for `ok`:
 
 ```json
-{"anyOf": [
-  {"type": "object", "properties": {"outcome": {"const": "ok"}, "output": <ok's schema>},
-   "required": ["outcome", "output"], "additionalProperties": false},
-  {"type": "object", "properties": {"outcome": {"const": "red"}, "output": {}},
-   "required": ["outcome", "output"], "additionalProperties": false}
-]}
+{"type": "object",
+ "properties": {"outcome": {"enum": ["ok", "red"]},
+                "output": {"anyOf": [<ok's schema>, {}]}},
+ "required": ["outcome", "output"], "additionalProperties": false}
 ```
 
 Either marker on a node with no `outputSchemas` (`input.marker-no-schemas`), with
