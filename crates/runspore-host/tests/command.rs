@@ -506,6 +506,40 @@ async fn a_result_block_maps_outcome_and_output_from_json_stdout() {
 }
 
 #[tokio::test]
+async fn a_result_block_reads_past_numbers_outside_the_domain() {
+    // `claude -p --output-format json` prints its cost as a fraction beside the answer.
+    let stdout =
+        r#"{"total_cost_usd": 0.0421, "structured_output": {"outcome": "ok", "output": {"n": 2}}}"#;
+    let script = format!("printf '%s' '{stdout}'");
+    let out = run(
+        mapped(
+            &script,
+            from_stdout(&["structured_output", "outcome"]),
+            from_stdout(&["structured_output", "output"]),
+        ),
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "ok".into(),
+            output: json!({"n": 2})
+        }
+    );
+    let out = run(
+        mapped(&script, json!("ok"), from_stdout(&["total_cost_usd"])),
+        json!({}),
+    )
+    .await;
+    let details =
+        json!({"field": "output", "reason": "canonical.non-integer", "stdoutTail": stdout});
+    assert_eq!(failure(&out), ("command.result-invalid", false, &details));
+    let out = run(mapped("printf '{'", json!("ok"), json!(null)), json!({})).await;
+    assert_eq!(failure(&out).0, "command.malformed-output");
+}
+
+#[tokio::test]
 async fn a_result_block_reads_input_params_run_and_step() {
     let output = json!({
         "input": {"$get": ["input", "task"]},
