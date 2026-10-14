@@ -43,6 +43,7 @@ The rules marked 0.2 so far:
 | The document may carry `inputSchema`, which no transition reads | §2, W01 | documents in format `runspore.workflow/0.2`, under either semantics |
 | Loop limits: `loopLimits`, the reserved outcome `exhausted`, `streaks`, *Route* | §2 (W07–W09, W12), §3, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
 | Every node is reachable from `start`, and an end from every node | §2 (W14, W15) | documents in format `runspore.workflow/0.2`, under either semantics |
+| Activity nodes may carry `params`; the operators `$if`, `$uuid`, `$json`, `$join` | §2 (W01, W10), §4, §7.4 | documents in format `runspore.workflow/0.2`, under either semantics |
 
 ## 1. Canonical data
 
@@ -122,8 +123,26 @@ of their IDs; the first violation is reported.
 A violation is `invalid-input` / `workflow.invalid`; its details name the node. An
 action with effect `reconcilable` is `incompatible-version` /
 `workflow.unsupported-effect`, checked as part of W07. In a `runspore.workflow/0.1`
-document, a node that carries `outputSchemas`, or a document that carries
+document, a node that carries `outputSchemas` or `params`, or a document that carries
 `inputSchema`, violates W01.
+
+**Params (0.2).** An `activity` node of a `runspore.workflow/0.2` document may carry
+`params`: a mapping (§4) saying how the node sets up its action, kept apart from
+`input`, the data the action gets. One action can then serve many nodes, each with its
+own settings: a `claude -p` action run by an `implement` node and a `review` node, each
+with its own tools, schema and instructions. W10 checks `params` as it checks `input`.
+`params` is evaluated with `input`, in the same activation (§7.4), and travels with it
+on the `activity.schedule` command; the host hands it to the action on every attempt
+([host.md](host.md) §2). A node without `params` has `{}`, and its command carries no
+`params` field, so a document without them gives the same decisions, byte for byte, as
+before `params` existed. No other node kind carries it: it does not decode there.
+
+```json
+"implement": {"kind": "activity", "action": "claude",
+              "params": {"tools": ["Read", "Edit", "Bash"], "instructions": "Make the change."},
+              "input": {"task": {"$get": ["input", "task"]}},
+              "outcomes": {"ok": "review"}}
+```
 
 `loopLimits` is an object from outcome to integer: `"loopLimits": {"red": 3}` lets the
 node route `red` at most 3 times in a row; the next `red` takes the node's `exhausted`
@@ -205,10 +224,74 @@ A mapping is a JSON value evaluated against the run context:
   does not resolve, the object is replaced by the value of `default`, unevaluated (as
   `$literal`). When the path resolves, `default` is ignored.
 - An object whose only key is `$literal` is replaced by its value, unevaluated.
-- Any other object key starting with `$`, a `$literal` object with more keys, or a
-  `$get` object with a key other than `$get` and (0.2) `default`, is a validation
-  error (W10), as is a malformed path.
+- In a 0.2 document, an object whose only key is `$if`, `$uuid`, `$json` or `$join`
+  is an operator, below.
+- Any other object key starting with `$`, a `$literal` or operator object with more
+  keys, an operator with operands of the wrong shape, or a `$get` object with a key
+  other than `$get` and (0.2) `default`, is a validation error (W10), as is a
+  malformed path.
 - Other objects and arrays are evaluated member by member; scalars are themselves.
+
+Only an object whose single key starts with `$` is an operator: a plain string such as
+`"uuid"` always stays a string.
+
+**Operators (0.2).** Each operand is a mapping, evaluated before the operator uses it.
+
+- `{"$if": [cond, then, else]}`: `then` when `cond` evaluates to `true`, `else` when
+  it evaluates to `false`. Only the chosen branch is evaluated, so a path missing in
+  the other does not fail the run. Exactly three operands.
+
+  ```json
+  {"$if": [{"$get": ["input", "resume"]}, "--resume", "--session-id"]}
+  ```
+
+- `{"$uuid": [part, …]}`: the version 5 UUID (RFC 9562) whose name is the canonical
+  JSON of the evaluated parts as an array, in the runspore namespace
+  `40352b60-7ed8-5edd-aecc-2f02f11be6f5` (the version 5 UUID of the URL
+  `https://runspore.com/uuid`), lowercase and hyphenated. One or more parts, each
+  evaluating to a string or a number. The same parts always give the same UUID, on
+  every host, so a run can name something that survives retries and restarts; AWS
+  Step Functions' `States.UUID()` is random and cannot. `["run_1", "implement"]`
+  gives `5c03f59b-23f0-5d9e-90a9-5ba675f87c39`.
+
+  ```json
+  {"$uuid": [{"$get": ["run", "id"]}, "implement"]}
+  ```
+
+- `{"$json": value}`: the evaluated value as canonical JSON text (§1), a string.
+
+  ```json
+  {"$json": {"$get": ["nodes", "plan", "output"]}}
+  ```
+
+- `{"$join": [list, separator]}`: the list's items, each a string, joined by the
+  separator, a string. Exactly two operands.
+
+  ```json
+  {"$join": [{"$get": ["input", "tools"]}, ","]}
+  ```
+
+An operand of the wrong type fails the run like a missing path: terminal `failed` with
+error `mapping.invalid-operand`, `nodeId` set, `details` `{"operator", "path",
+"value"}`. `path` locates the operand from the node's field: the field (`input`,
+`params` or `output`), then the keys and indexes down to the operator, the operator's
+key, and the operand's index, and for a list item its index in the list. `value` is
+what the operand evaluated to. The wrong types are a `cond` that is not a boolean
+(`["params", "mode", "$if", 0]`), a `$uuid` part that is not a string or a number
+(`["input", "id", "$uuid", 1]`), a `$join` list that is not a list (`[…, "$join",
+0]`), an item of it that is not a string (`[…, "$join", 0, 3]`), and a separator that
+is not a string (`[…, "$join", 1]`). A `$json` or `$uuid` whose value cannot be
+written canonically, because it nests deeper than §1 allows, is `resource-limit` /
+`budget.value-depth`.
+
+Hosts evaluate mappings of their own outside the kernel, over roots of their own (a
+command's `argv`, the `result` of a command's output). They use the kernel's
+evaluator, `runspore_kernel::mapping` (`check` and `evaluate` over an object from
+root name to value), so the operators and the error codes are the same everywhere.
+
+`{"$resultSchema": {}}` and `{"$outputSchemas": {}}` are build-time markers
+([dot.md](dot.md) §4): the build replaces them before the package exists, so one left
+in a package is an unknown operator (W10).
 
 `from` (0.2) is the arrow the run took into the node whose mapping is being evaluated:
 the node whose result routed there, the outcome it routed on, and the output recorded
@@ -225,9 +308,11 @@ A path that does not resolve, on a `$get` without `default`, fails the run: term
 
 Each mapping value visited costs one expression operation; each path step costs one,
 for the whole path even when it does not resolve. A `$get` that falls back to its
-`default` costs one more. `$literal` costs one and an absent mapping costs one. Members
-of an object are evaluated in canonical key order, which fixes which missing path is
-reported when several are missing.
+`default` costs one more. `$literal` costs one and an absent mapping costs one. An
+operator costs one plus what its operands cost (the list that holds them costs
+nothing); `$uuid` and `$join` cost one more per part or item, and `$json` one more per
+JSON value it writes. Members of an object are evaluated in canonical key order, and
+operands in index order, which fixes which error is reported when there are several.
 
 ## 5. Events
 
@@ -354,10 +439,11 @@ or `outcome-undeclared`.
    incremented.
 3. Increment `visits[node]` and `activations`. The activation ID is `<node>/<visit>`.
 4. By node kind:
-   - `activity`: evaluate `input`. Set `position`, status `running`, and
-     `invocation = {invocationId, activationId, nodeId, actionId, attempt: 1, state:
-     scheduled, inputDigest: digest::body(canonical input)}`. Emit `activity.schedule`
-     with `notBeforeMs` = now and command ordinal 1. Stop.
+   - `activity`: evaluate `input`, then (0.2) `params` when the node has them. Set
+     `position`, status `running`, and `invocation = {invocationId, activationId,
+     nodeId, actionId, attempt: 1, state: scheduled, inputDigest: digest::body(canonical
+     input)}`. Emit `activity.schedule` with `notBeforeMs` = now and command ordinal 1;
+     its payload carries `params` only when the node has them. Stop.
    - `await-signal`: set `position`, status `waiting`, clear `invocation`. *Consume*;
      if it routed, continue this loop with the target node, else stop.
    - `complete`: evaluate `output`; status `completed`, `result = {output}`, clear
@@ -503,7 +589,8 @@ and `runspore.workflow/0.2`, and require the same expectations, so a 0.1 documen
 accepted. The exceptions are the traces of a rule that names a format, which must change:
 the three 0.1 traces above, where a 0.2 step is stuck, which the `14*` traces pin, and
 the 0.2 traces of `from`, `$get` `default`, the stuck step, `outputSchemas`, loop limits,
-W12, W14 and W15.
+W12, W14, W15, `params` and the operators, and the 0.1 trace that refuses `params`
+(W01).
 
 The loop-limit traces: the limit used up takes `exhausted` with the real result
 recorded; another outcome resets the streak; taking `exhausted` resets it; a signal
@@ -515,6 +602,13 @@ loop back sees the judging step's outcome and output; a `failed` arrow shows as
 `failed` with the error; a signal's arrow shows its outcome and data; a `default` is
 used, unevaluated, while its path is missing and ignored once it resolves; a `$get`
 object with a key besides `default` is `workflow.invalid`.
+
+`params` and the operators have their own (`17*`): one action serves two nodes, and
+the node with `params` gets them evaluated on its command, with `$if` taking its branch
+(and leaving a missing path in the other alone), `$uuid`, `$json` and `$join`; a
+non-boolean `cond`, a `$uuid` part that is not a string or number, and a `$join` item
+that is not a string each end the run with `mapping.invalid-operand`; a `$if` with two
+operands is `workflow.invalid` (W10), and so is `params` in a 0.1 document (W01).
 
 `outputSchemas` has two: a result and a signal whose data do not fit their
 schemas route as if no schema were declared, and two await-signal nodes that wait for

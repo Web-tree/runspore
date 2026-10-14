@@ -312,6 +312,10 @@ pub struct Step {
     /// `activity`: its input, a mapping over the run.
     #[serde(default)]
     pub input: Option<Value>,
+    /// `activity`: how it sets up its action (tools, schema, instructions), a mapping
+    /// over the run evaluated with `input`.
+    #[serde(default)]
+    pub params: Option<Value>,
     /// `activity`, `await-signal`: a file of instructions for whoever does the step.
     #[serde(default)]
     #[schemars(with = "FileRef")]

@@ -10,12 +10,12 @@ A problem: the workflow does not build, and nothing runs.
 
 ```text
 ── Unknown "$" key ────────────────── mapping.unknown-operator/settings.json:13  mapping.unknown-operator
-"$gte" in step "build" is not something spore can work out; a key starting with "$" is "$get" or "$literal".
+"$gte" in step "build" is not something spore can work out; a key starting with "$" is "$get", "$literal", "$if", "$uuid", "$json" or "$join".
 
  13 │       "input": { "repo": { "$gte": ["input", "repo"] } }
     │                            ^^^^^^
 
-To fix: use "$get" or "$literal", or put the value inside "$literal" to keep the key as it is.
+To fix: use one of those, or put the value inside "$literal" to keep the key as it is.
 ```
 
 The fix changes:

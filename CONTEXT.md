@@ -157,8 +157,12 @@ A writable folder Runspore gives each visit of a step, shared by all its tries a
 _Avoid_: runtime dir, temp dir, scratch
 
 **Node parameters**:
-The values a workflow sets on a node for the program its action runs, delivered with the node's input. Runspore passes them on without reading them.
+The values a workflow sets on a node, in its `params`, for how the program its action runs is set up (its tools, its schema, its instructions), kept apart from the node's input and delivered with it on every try. One action can then serve many nodes, each with its own parameters. Runspore evaluates them like the input and passes them on without reading them.
 _Avoid_: frontmatter, flags, options
+
+**Result schema**:
+The shape of a step's whole answer when its program names the outcome itself: one of the outcomes the step may end with, and output that fits that outcome's output schema. A workflow asks for it with `{"$resultSchema": {}}`, which the build replaces from the step's output schemas.
+_Avoid_: response format, answer type
 
 ### Releases
 

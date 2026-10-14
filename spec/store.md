@@ -32,7 +32,8 @@ audit record of an expiry, the run's base folder, the artifact table with
 `get_artifact` and the run's artifact digest, the schema guard that names the version
 that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
-attempt, and scenarios S15 to S21; everything else is as in 0.1.
+attempt, an invocation's node `params` in every claim, and scenarios S15 to S22;
+everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -116,8 +117,9 @@ Writes, atomically:
 - the event marked as consumed by that revision;
 - each command, in order, and its effect:
   - `activity.schedule`: insert the invocation as `pending` with attempt number 1,
-    `notBeforeMs`, input, input digest, effect key, node and action IDs. An existing
-    invocation ID is `conflict` / `invocation.exists`.
+    `notBeforeMs`, input, input digest, effect key, node and action IDs, and (0.2) the
+    node's `params` when the payload carries them, else null. An existing invocation
+    ID is `conflict` / `invocation.exists`.
   - `activity.retry`: the invocation must exist, be `settled`, and have attempt
     number `attempt − 1` (`conflict` / `invocation.retry-invalid`). Set it `pending`
     with the new attempt number and `notBeforeMs`.
@@ -141,7 +143,9 @@ not quarantined (`stale` / `run.quarantined`); the invocation is `pending` (`con
 Writes: the run's fence counter + 1; an attempt with ID `ids::attempt(invocationId,
 attemptNumber)`, the claiming worker as owner, that fence, `leaseUntilMs = now +
 leaseDurationMs`, status `running`; the invocation becomes `running`. Returns the
-`Claim`. A fence is never reused within a run.
+`Claim`. A fence is never reused within a run. **0.2:** the `Claim` carries the
+invocation's `params`, canonical JSON as scheduled, or null for a node without them;
+every attempt's claim returns the same.
 
 **0.2:** the request also carries `holder` and `deadlineDurationMs`, for an attempt
 held outside the worker (host §2, Steps outside the worker):
@@ -273,7 +277,8 @@ and are idempotent on an already matching state.
   and the writer is recorded again: version 2 to 3 adds the run's base folder, null
   for runs created before; version 3 to 4 adds the artifact table and the run's
   artifact digest; version 4 to 5 adds the writer; version 5 to 6 adds an attempt's
-  holder handle and deadline, null for attempts claimed before. The refusal happens before any
+  holder handle and deadline, null for attempts claimed before; version 6 to 7 adds an
+  invocation's `params`, null for invocations scheduled before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
 
   This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
@@ -328,6 +333,7 @@ Written once, generic over a store factory and a manual clock, in
 | S19 | `claim_attempt` with a holder handle, a lease and a deadline; `heartbeat` before and at the deadline; a holder over 4 KiB (0.2) | The claim returns the holder and `deadlineMs`, and `leaseUntilMs` is the nearer bound; `list_invocations` shows the holder, the deadline and the full reference; a renewal stops at the deadline; the large holder is `holder.too-large` and claims nothing |
 | S20 | `expire_attempt` with each reason, before the lease is due (0.2) | `abandoned`, `probe-dead` and `cancelled` are applied at once and append one `expired` result; `lease` is `lease.not-due`; the old holder's `heartbeat` and `finish_attempt` are then `lease.lost`, and its result can be kept as late evidence |
 | S21 | An attempt claimed with a deadline shorter than its lease; the clock passes the deadline (0.2) | The attempt is a `Lease` item of `scan_due` from its deadline on, and `expire_attempt` with reason `lease` is applied |
+| S22 | One commit schedules an invocation with `params` and one without; the first is retried (0.2) | Each claim of the first, the retry's included, returns its `params`; the claim of the second returns null |
 
 SQLite-specific, in the adapter crate:
 
@@ -344,3 +350,4 @@ SQLite-specific, in the adapter crate:
 | Q09 | Open a version 4 file (0.2) | Upgraded to the current version; its runs are kept; the file records this `spore` as its writer |
 | Q10 | Open a version 5 file (0.2) | Upgraded to the current version; its attempts are kept with no holder and no deadline; a new claim records both |
 | Q11 | A child process aborts at `store.upgrade.after-step` while opening a version 4 file (0.2) | The file keeps version 4 and none of the upgrade; its runs are kept; the next open upgrades it to the current version |
+| Q12 | Open a version 6 file (0.2) | Upgraded to the current version; its invocations are kept and claim with null `params`; a new schedule records its `params` |

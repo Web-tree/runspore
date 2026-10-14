@@ -140,12 +140,13 @@ canonical JSON of at most 4 KiB kept with the attempt and shown by `status` (exi
 ```json
 {"format": "runspore.cli/0.2", "claimed": true, "token": "…",
  "runId": "run_…", "nodeId": "review", "actionId": "review", "invocationId": "inv_…",
- "attempt": 1, "input": {…}, "outcomes": ["approved", "changes"],
+ "attempt": 1, "input": {…}, "params": {…}, "outcomes": ["approved", "changes"],
  "outputSchemas": {"changes": {…}}, "deadlineMs": "…", "leaseUntilMs": "…",
  "resultChannel": "store", "files": "/…/steps/…/review", "instructions": "/…/review.md",
  "workDir": "/…/work/run_…/inv_…"}
 ```
 
+`params` is the node's evaluated `params`, `{}` when it has none (kernel.md §2).
 `files`, `instructions` and `workDir` are the step's files, its instructions file and
 its work folder (host.md §3), each null when it has none. The token is the claim's
 credential; treat it as opaque. Text mode prints the step, its outcomes, its deadline,

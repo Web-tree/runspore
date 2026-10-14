@@ -639,7 +639,7 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
             "activity.schedule" => {
                 let s: ScheduleActivity = canonical::decode(&command.payload).map_err(invalid)?;
                 let input = encode(&s.input)?;
-                let node_params = s.params.as_ref().map(|p| encode(p)).transpose()?;
+                let node_params = s.params.as_ref().map(encode).transpose()?;
                 let inserted = c
                     .execute(
                         "INSERT OR IGNORE INTO invocations (tenant, run_id, invocation_id, node_id, action_id,

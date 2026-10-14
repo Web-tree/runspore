@@ -1,0 +1,9 @@
+── Operator with the wrong operands ── mapping.operator-shape/settings.json:13  mapping.operator-shape
+"$if" in step "build" is given [{"$get": ["input", "fresh"]}, "clean"], and it takes a list shaped [cond, then, else].
+
+ 13 │       "params": { "mode": { "$if": [{ "$get": ["input", "fresh"] }, "clean"] } }
+    │                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To fix: give "$if" a list shaped [cond, then, else], each item a value or a mapping.
+
+1 problem in release. Nothing was run.

@@ -10,7 +10,7 @@ A problem: the workflow does not build, and nothing runs.
 
 ```text
 ── Marker on a step with no schemas ── input.marker-no-schemas/settings.json:11  input.marker-no-schemas
-The input of step "build" copies its output schemas with "$outputSchemas", but the step has none.
+The "input" of step "build" copies its output schemas with "$outputSchemas", but the step has none.
 
  11 │     "build": { "action": "build", "input": { "schemas": { "$outputSchemas": {} } } }
     │                                                           ^^^^^^^^^^^^^^^^

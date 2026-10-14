@@ -10,12 +10,12 @@ A problem: the workflow does not build, and nothing runs.
 
 ```text
 ── Marker copy nested too deep ── input.marker-too-deep/settings.json:13  input.marker-too-deep
-The copy of the output schemas that "$outputSchemas" makes in the input of step "build" reaches level 33, past the 32 levels a package may hold.
+The copy that "$outputSchemas" makes in the "input" of step "build" reaches level 33, past the 32 levels a package may hold.
 
  13 │       "input": { "nested": { "$outputSchemas": {} } },
     │                              ^^^^^^^^^^^^^^^^
 
-To fix: move the marker closer to the top of the input, or make the schemas shallower.
+To fix: move the marker closer to the top, or make the schemas shallower.
 ```
 
 The fix changes:
