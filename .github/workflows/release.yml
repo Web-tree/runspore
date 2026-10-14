@@ -111,7 +111,7 @@ jobs:
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$RELEASE_SIGNING_KEY" >"$key"
           ssh-keygen -q -Y sign -f "$key" -n runspore-release dist/SHA256SUMS
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/spore-*.tar.gz
       - name: Check the assets with install.sh
