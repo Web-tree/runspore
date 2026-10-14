@@ -10,12 +10,12 @@ A problem: the workflow does not build, and nothing runs.
 
 ```text
 ── Marker written with something else ── input.marker-shape/settings.json:13  input.marker-shape
-The marker "$outputSchemas" in the input of step "build" is written with something else.
+The marker "$outputSchemas" in the "input" of step "build" is written with something else.
 
  13 │       "input": { "$outputSchemas": true },
     │                  ^^^^^^^^^^^^^^^^
 
-To fix: write it as {"$outputSchemas": {}}, on its own.
+To fix: write it with the value {} and no other key beside it.
 ```
 
 The fix changes:

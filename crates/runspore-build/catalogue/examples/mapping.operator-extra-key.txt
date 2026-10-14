@@ -1,0 +1,9 @@
+── Operator with another key ── mapping.operator-extra-key/settings.json:13  mapping.operator-extra-key
+The "$join" object in step "build" also has "trim", and it may have only "$join".
+
+ 13 │       "params": { "targets": { "$join": [{ "$get": ["input", "targets"] }, " "], "trim": true } }
+    │                                                                                  ^^^^^^
+
+To fix: remove "trim", or put the object inside "$literal".
+
+1 problem in release. Nothing was run.

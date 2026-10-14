@@ -85,6 +85,7 @@ CREATE TABLE invocations (
     status TEXT NOT NULL,
     attempt_number INTEGER NOT NULL,
     not_before_ms INTEGER NOT NULL,
+    params BLOB,
     PRIMARY KEY (tenant, run_id, invocation_id),
     FOREIGN KEY (tenant, run_id) REFERENCES runs (tenant, run_id)
 );

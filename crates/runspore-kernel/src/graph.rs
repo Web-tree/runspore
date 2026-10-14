@@ -113,6 +113,20 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
                 format!("node {id:?}: outputSchemas needs format {WORKFLOW_FORMAT_0_2:?}"),
             ));
         }
+        if let Some(id) = nodes.keys().find(|id| {
+            matches!(
+                &nodes[*id],
+                Node::Activity {
+                    params: Some(_),
+                    ..
+                }
+            )
+        }) {
+            return Err(violation(
+                "W01",
+                format!("node {id:?}: params needs format {WORKFLOW_FORMAT_0_2:?}"),
+            ));
+        }
     }
 
     if !pattern::is_name(&workflow.name) {
@@ -234,8 +248,13 @@ fn validate(workflow: &Workflow) -> Result<BTreeMap<String, ActionPolicy>, Failu
     let dialect = dialect(workflow);
     for (id, node) in nodes {
         let checked = match node {
-            Node::Activity { input, .. } => mapping::check(input, dialect),
-            Node::Complete { output } => mapping::check(output, dialect),
+            Node::Activity { input, params, .. } => mapping::check_dialect(input, dialect)
+                .and_then(|()| match params {
+                    Some(params) => mapping::check_dialect(params, dialect)
+                        .map_err(|reason| format!("params: {reason}")),
+                    None => Ok(()),
+                }),
+            Node::Complete { output } => mapping::check_dialect(output, dialect),
             Node::AwaitSignal { .. } | Node::Fail { .. } => Ok(()),
         };
         if let Err(reason) = checked {

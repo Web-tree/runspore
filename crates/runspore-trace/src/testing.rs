@@ -222,6 +222,7 @@ impl Turn<'_> {
                     attempt: 1,
                     not_before_ms: state.last_accepted_at_ms,
                     input: Value::Null,
+                    params: None,
                 };
                 self.commands.push(Command {
                     command_id: ids::command(&state.tenant, &state.run_id, &activation_id, 1),

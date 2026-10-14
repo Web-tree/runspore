@@ -8,7 +8,7 @@ mod event;
 mod failure;
 mod graph;
 mod machine;
-mod mapping;
+pub mod mapping;
 mod pattern;
 mod snapshot;
 

@@ -100,6 +100,8 @@ export interface Claim extends AttemptRef {
   bindingDigest: Digest;
   inputDigest: Digest;
   input: CanonicalJson;
+  /** The node's evaluated `params`; null when it has none (they are `{}`). */
+  params: CanonicalJson | null;
 }
 export interface Evidence {
   digest: Digest;

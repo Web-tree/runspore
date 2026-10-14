@@ -148,6 +148,37 @@ pub mod ids {
     pub fn commit_request(resulting_revision: u64, event_id: &str) -> String {
         format!("commit/{resulting_revision}/{event_id}")
     }
+
+    /// The namespace of every `$uuid`: the version 5 UUID of the URL
+    /// `https://runspore.com/uuid` in the RFC 9562 URL namespace,
+    /// `40352b60-7ed8-5edd-aecc-2f02f11be6f5`.
+    pub const UUID_NAMESPACE: [u8; 16] = [
+        0x40, 0x35, 0x2b, 0x60, 0x7e, 0xd8, 0x5e, 0xdd, 0xae, 0xcc, 0x2f, 0x02, 0xf1, 0x1b, 0xe6,
+        0xf5,
+    ];
+
+    /// The version 5 UUID (RFC 9562 §5.5) of `name` in [`UUID_NAMESPACE`], in
+    /// lowercase hyphenated form. The same name always gives the same UUID.
+    pub fn uuid(name: &[u8]) -> String {
+        use sha1::{Digest as _, Sha1};
+        let mut hasher = Sha1::new();
+        hasher.update(UUID_NAMESPACE);
+        hasher.update(name);
+        let digest = hasher.finalize();
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest[..16]);
+        bytes[6] = (bytes[6] & 0x0f) | 0x50;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex = hex::encode(bytes);
+        format!(
+            "{}-{}-{}-{}-{}",
+            &hex[..8],
+            &hex[8..12],
+            &hex[12..16],
+            &hex[16..20],
+            &hex[20..]
+        )
+    }
 }
 
 #[cfg(test)]
@@ -183,5 +214,22 @@ mod tests {
             ids::command("default", "run_1", "build/1", 2)
         );
         assert_eq!(ids::attempt(&a, 2), format!("{a}.2"));
+    }
+
+    #[test]
+    fn uuids_match_an_independent_implementation() {
+        // Python's uuid.uuid5(uuid.uuid5(uuid.NAMESPACE_URL, "https://runspore.com/uuid"), name).
+        assert_eq!(
+            ids::uuid(br#"["run_1","implement"]"#),
+            "5c03f59b-23f0-5d9e-90a9-5ba675f87c39"
+        );
+        assert_eq!(
+            ids::uuid(br#"["run_1","implement",2]"#),
+            "ce5f425f-bcf4-5168-844f-089797da8642"
+        );
+        assert_eq!(
+            ids::uuid(br#"[""]"#),
+            "1b507cab-3397-5c50-b79c-aa6a6192220e"
+        );
     }
 }

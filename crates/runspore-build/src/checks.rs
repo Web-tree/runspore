@@ -20,11 +20,24 @@ use crate::settings::{self, Action, Broken, Kind, Output};
 use crate::spans::{Odd, Spans};
 use crate::{is_outcome, File, Machine, Programs, DOT_FILE, FORMAT, SETTINGS_FILE};
 
-/// The build-only marker a node's input uses for a copy of its schemas.
+/// The build-only marker a node's input or params uses for a copy of its schemas.
 const MARKER: &str = "$outputSchemas";
+/// The build-only marker for the schema of a result-mode answer built from them.
+const RESULT_MARKER: &str = "$resultSchema";
+const MARKERS: [&str; 2] = [MARKER, RESULT_MARKER];
 const GET: &str = "$get";
 const LITERAL: &str = "$literal";
 const DEFAULT: &str = "default";
+/// An operator's name and the operands it takes: how many (`None` for any one value),
+/// exactly (`true`) or at least, and their shape.
+type Operator = (&'static str, Option<(usize, bool)>, &'static str);
+/// The operators of kernel.md §4 beyond `$get` and `$literal`.
+const OPERATORS: [Operator; 4] = [
+    ("$if", Some((3, true)), "[cond, then, else]"),
+    ("$uuid", Some((1, false)), "[part, ...]"),
+    ("$json", None, "value"),
+    ("$join", Some((2, true)), "[list, separator]"),
+];
 const ROOTS: [&str; 4] = ["input", "nodes", "run", "from"];
 /// An external action's `async.timeoutMs` when it gives none (spec/host.md §2).
 const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
@@ -678,6 +691,7 @@ impl<'a> Checks<'a> {
                 &[
                     "action",
                     "input",
+                    "params",
                     "instructions",
                     "outputSchemas",
                     "loopLimits",
@@ -758,16 +772,18 @@ impl<'a> Checks<'a> {
         if allowed.contains(&"outputSchemas") {
             self.output_schemas(graph, id, &entry);
         }
-        if let Some(input) = entry.get("input") {
-            let at = pointer(&here, "input");
-            if allowed.contains(&"input") && !self.broken.touches(&at) {
-                self.mapping(&at, input, true, id);
+        for field in ["input", "params"] {
+            if let Some(value) = entry.get(field) {
+                let at = pointer(&here, field);
+                if allowed.contains(&field) && !self.broken.touches(&at) {
+                    self.mapping(&at, value, Some(field), id);
+                }
             }
         }
         if let Some(output) = entry.get("output") {
             let at = pointer(&here, "output");
             if allowed.contains(&"output") && !self.broken.touches(&at) {
-                self.mapping(&at, output, false, id);
+                self.mapping(&at, output, None, id);
             }
         }
     }
@@ -1282,32 +1298,44 @@ impl<'a> Checks<'a> {
         }
     }
 
-    /// Mappings (kernel.md §4, W10), and in an input the `$outputSchemas` marker.
-    fn mapping(&mut self, at: &str, value: &Value, input: bool, id: &str) {
+    /// Mappings (kernel.md §4, W10), and in a step's input or params (`field`) the
+    /// `$outputSchemas` and `$resultSchema` markers.
+    fn mapping(&mut self, at: &str, value: &Value, field: Option<&str>, id: &str) {
+        let marker = match value {
+            Value::Object(map) => MARKERS.into_iter().find(|m| map.contains_key(*m)),
+            _ => None,
+        };
         match value {
-            Value::Object(map) if input && map.contains_key(MARKER) => {
-                if map.len() != 1 || map[MARKER] != json!({}) {
+            Value::Object(map) if field.is_some() && marker.is_some() => {
+                let (Some(field), Some(marker)) = (field, marker) else {
+                    return;
+                };
+                let key = pointer(at, marker);
+                let marker_args = |d: Diagnostic| {
+                    d.arg("marker", Arg::Key(key.clone()))
+                        .arg("field", Arg::computed(field.to_string()))
+                };
+                if map.len() != 1 || map[marker] != json!({}) {
                     self.push(
-                        Diagnostic::new("input.marker-shape", At::key(pointer(at, MARKER))).fix(
+                        marker_args(Diagnostic::new("input.marker-shape", At::key(&key))).fix(
                             Fix::safe(vec![Edit::Set {
                                 at: at.to_string(),
-                                value: json!({MARKER: {}}),
+                                value: json!({ marker: {} }),
                             }]),
                         ),
                     );
                 } else if !self.has_schemas(id) {
-                    self.push(Diagnostic::new(
+                    self.push(marker_args(Diagnostic::new(
                         "input.marker-no-schemas",
-                        At::key(pointer(at, MARKER)),
-                    ));
-                } else if let Some(schemas) = self.schemas.get(id) {
+                        At::key(&key),
+                    )));
+                } else if let Some(copy) = self.copy(marker, id) {
                     // The copy takes the marker's place: its level, plus the copy's own.
                     let level = crate::diagnostic::steps(at).len() + 1;
-                    let copy = Value::Object(schemas.clone());
                     let depth = level + runspore_schema::nesting(&copy);
                     if depth > runspore_types::canonical::MAX_DEPTH {
                         self.push(
-                            Diagnostic::new("input.marker-too-deep", At::key(pointer(at, MARKER)))
+                            marker_args(Diagnostic::new("input.marker-too-deep", At::key(&key)))
                                 .arg("depth", Arg::computed(depth)),
                         );
                     }
@@ -1373,11 +1401,51 @@ impl<'a> Checks<'a> {
                     );
                 }
             }
+            Value::Object(map) if map.keys().any(|k| operator(k).is_some()) => {
+                let Some((name, operand)) = map.iter().find(|(k, _)| operator(k).is_some()) else {
+                    return;
+                };
+                let op = pointer(at, name);
+                for key in map.keys().filter(|k| *k != name) {
+                    let k = pointer(at, key);
+                    self.push(
+                        Diagnostic::new("mapping.operator-extra-key", At::key(&k))
+                            .arg("key", Arg::Key(k.clone()))
+                            .arg("operator", Arg::Key(op.clone()))
+                            .fix(Fix::review(vec![Edit::Remove { at: k.clone() }])),
+                    );
+                }
+                let Some((_, count, shape)) = operator(name) else {
+                    return;
+                };
+                let Some((count, exact)) = count else {
+                    self.mapping(&op, operand, field, id);
+                    return;
+                };
+                match operand {
+                    Value::Array(items)
+                        if items.len() == count || (!exact && items.len() > count) =>
+                    {
+                        for (i, item) in items.iter().enumerate() {
+                            self.mapping(&pointer(&op, &i.to_string()), item, field, id);
+                        }
+                    }
+                    _ => self.push(
+                        Diagnostic::new("mapping.operator-shape", At::value(&op))
+                            .arg("operator", Arg::Key(op.clone()))
+                            .arg("operands", Arg::Input(op.clone()))
+                            .arg("shape", Arg::Code(shape.to_string())),
+                    ),
+                }
+            }
             Value::Object(map) => {
                 for (key, member) in map {
                     let k = pointer(at, key);
                     if key.starts_with('$') {
-                        let operators = [GET, LITERAL].into_iter().chain(input.then_some(MARKER));
+                        let operators = [GET, LITERAL]
+                            .into_iter()
+                            .chain(OPERATORS.iter().map(|(name, ..)| *name))
+                            .chain(MARKERS.into_iter().filter(|_| field.is_some()));
                         let mut d = Diagnostic::new("mapping.unknown-operator", At::key(&k))
                             .arg("key", Arg::Key(k.clone()));
                         if let Some(near) = closest(key, operators) {
@@ -1388,17 +1456,33 @@ impl<'a> Checks<'a> {
                         }
                         self.push(d);
                     } else {
-                        self.mapping(&k, member, input, id);
+                        self.mapping(&k, member, field, id);
                     }
                 }
             }
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
-                    self.mapping(&pointer(at, &i.to_string()), item, input, id);
+                    self.mapping(&pointer(at, &i.to_string()), item, field, id);
                 }
             }
             _ => {}
         }
+    }
+
+    /// What a marker on step `id` is replaced with: a copy of its schemas, or the
+    /// schema of a result-mode answer built from them.
+    fn copy(&self, marker: &str, id: &str) -> Option<Value> {
+        let schemas = self.schemas.get(id)?;
+        if marker == MARKER {
+            return Some(Value::Object(schemas.clone()));
+        }
+        let outcomes = self
+            .value
+            .pointer(&pointer(&pointer("/nodes", id), "action"))
+            .and_then(Value::as_str)
+            .and_then(|action| self.outcomes(action))
+            .unwrap_or_else(|| schemas.keys().cloned().collect());
+        Some(result_schema(&outcomes, schemas))
     }
 
     fn has_schemas(&self, id: &str) -> bool {
@@ -1600,8 +1684,14 @@ impl<'a> Checks<'a> {
             // As written when the build could not check them (a draft with problems).
             let authored = fields.remove("outputSchemas");
             let schemas = self.schemas.get(id);
-            if let Some(input) = fields.get_mut("input") {
-                markers(input, schemas);
+            let copies = Copies {
+                output: self.copy(MARKER, id),
+                result: self.copy(RESULT_MARKER, id),
+            };
+            for field in ["input", "params"] {
+                if let Some(value) = fields.get_mut(field) {
+                    markers(value, &copies);
+                }
             }
             match (schemas, authored) {
                 (Some(schemas), _) => {
@@ -1650,25 +1740,69 @@ impl<'a> Checks<'a> {
     }
 }
 
-/// Replaces each `{"$outputSchemas": {}}` in an evaluated position of a node's
-/// input with a `$literal` copy of the node's schemas.
-fn markers(value: &mut Value, schemas: Option<&Map<String, Value>>) {
+/// The operator named `key` among [`OPERATORS`].
+fn operator(key: &str) -> Option<Operator> {
+    OPERATORS.into_iter().find(|(name, ..)| *name == key)
+}
+
+/// The schema of a result-mode answer (host.md §2) for a step that ends with
+/// `outcomes`: `{"outcome", "output"}` with the outcome fixed and the output fitting
+/// that outcome's schema, or anything when it has none. The branches are `anyOf`, the
+/// subset's union (schema.md §1); each fixes another outcome, so exactly one fits.
+fn result_schema(outcomes: &[String], schemas: &Map<String, Value>) -> Value {
+    let branches = outcomes
+        .iter()
+        .map(|outcome| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "outcome": {"const": outcome},
+                    "output": schemas.get(outcome).cloned().unwrap_or_else(|| json!({})),
+                },
+                "required": ["outcome", "output"],
+                "additionalProperties": false,
+            })
+        })
+        .collect();
+    json!({ "anyOf": Value::Array(branches) })
+}
+
+/// What the markers of one step are replaced with, when it has schemas.
+struct Copies {
+    output: Option<Value>,
+    result: Option<Value>,
+}
+
+/// Replaces each `{"$outputSchemas": {}}` and `{"$resultSchema": {}}` in an evaluated
+/// position of a node's input or params with a `$literal` of its copy.
+fn markers(value: &mut Value, copies: &Copies) {
     match value {
-        Value::Object(map) if map.contains_key(MARKER) => {
-            if let Some(schemas) = schemas {
-                *value = json!({ "$literal": Value::Object(schemas.clone()) });
+        Value::Object(map) if MARKERS.iter().any(|m| map.contains_key(*m)) => {
+            let copy = if map.contains_key(MARKER) {
+                &copies.output
+            } else {
+                &copies.result
+            };
+            if let Some(copy) = copy {
+                *value = json!({ "$literal": copy.clone() });
+            }
+        }
+        // The operands of `$if`, `$uuid`, `$json` and `$join` are evaluated.
+        Value::Object(map) if map.len() == 1 && map.keys().any(|k| operator(k).is_some()) => {
+            for operand in map.values_mut() {
+                markers(operand, copies);
             }
         }
         // `$literal`, `$get` and any other operation: their contents are data.
         Value::Object(map) if map.keys().any(|k| k.starts_with('$')) => {}
         Value::Object(map) => {
             for item in map.values_mut() {
-                markers(item, schemas);
+                markers(item, copies);
             }
         }
         Value::Array(items) => {
             for item in items {
-                markers(item, schemas);
+                markers(item, copies);
             }
         }
         _ => {}

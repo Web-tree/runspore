@@ -1,0 +1,55 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "join-bad-item",
+  "description": "0.2: a $join list item that is not a string ends the run failed with mapping.invalid-operand, naming the operator, the item's place under the complete node's output and its value.",
+  "workflow": {
+    "format": "runspore.workflow/0.2",
+    "name": "join-bad-item",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$join": [{"$get": ["input", "tools"]}, ","]}}
+    },
+    "start": "done"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"tools": ["Read", 3]}, "runId": "run_join", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"tools": ["Read", 3]},
+          "invocation": null,
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.invalid-operand",
+              "details": {"operator": "$join", "path": ["output", "$join", 0, 1], "value": 3},
+              "message": "mapping operand has the wrong type",
+              "nodeId": "done"
+            }
+          },
+          "runId": "run_join",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"done": 1}
+        },
+        "snapshotDigest": "sha256:c6bc6c9ea7bfdaa57c65d78daef9282149db4bb1c5cdea60e3fc15c33643822f",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:857d556b024e16b9738837cabfdbf8a7062ba1422c2ff7b1223c3c2be23b9d17"
+      }
+    }
+  ]
+}

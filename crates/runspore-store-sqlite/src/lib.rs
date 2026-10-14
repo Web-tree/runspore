@@ -19,7 +19,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -39,6 +39,8 @@ const UPGRADE_4: &str = "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT
 /// Upgrades a version 5 database to version 6: an attempt's holder handle and deadline.
 const UPGRADE_5: &str = "ALTER TABLE attempts ADD COLUMN holder BLOB;
     ALTER TABLE attempts ADD COLUMN deadline_ms INTEGER;";
+/// Upgrades a version 6 database to version 7: an invocation's node params.
+const UPGRADE_6: &str = "ALTER TABLE invocations ADD COLUMN params BLOB;";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -426,6 +428,7 @@ impl SqliteStore {
                 (3, UPGRADE_3),
                 (4, UPGRADE_4),
                 (5, UPGRADE_5),
+                (6, UPGRADE_6),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -636,10 +639,13 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
             "activity.schedule" => {
                 let s: ScheduleActivity = canonical::decode(&command.payload).map_err(invalid)?;
                 let input = encode(&s.input)?;
+                let node_params = s.params.as_ref().map(encode).transpose()?;
                 let inserted = c
                     .execute(
-                        "INSERT OR IGNORE INTO invocations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 1, ?9)",
-                        params![q.key.tenant, q.key.run, s.invocation_id, s.node_id, s.action_id, s.effect_key, input, digest::body(&input), i(s.not_before_ms)],
+                        "INSERT OR IGNORE INTO invocations (tenant, run_id, invocation_id, node_id, action_id,
+                                effect_key, input, input_digest, status, attempt_number, not_before_ms, params)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 1, ?9, ?10)",
+                        params![q.key.tenant, q.key.run, s.invocation_id, s.node_id, s.action_id, s.effect_key, input, digest::body(&input), i(s.not_before_ms), node_params],
                     )
                     .map_err(db)?;
                 if inserted == 0 {
@@ -680,26 +686,37 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
 fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     let row = c
         .query_row(
-            "SELECT node_id, action_id, effect_key, input, input_digest, status, attempt_number, not_before_ms
+            "SELECT node_id, action_id, effect_key, input, input_digest, status, attempt_number, not_before_ms,
+                    params
              FROM invocations WHERE tenant = ?1 AND run_id = ?2 AND invocation_id = ?3",
             params![q.key.tenant, q.key.run, q.invocation_id],
             |r| {
                 Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
+                    (
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ),
                     r.get::<_, Vec<u8>>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, u32>(6)?,
                     r.get::<_, i64>(7)? as u64,
+                    r.get::<_, Option<Vec<u8>>>(8)?,
                 ))
             },
         )
         .optional()
         .map_err(db)?;
-    let Some((node_id, action_id, effect_key, input, input_digest, status, number, not_before)) =
-        row
+    let Some((
+        (node_id, action_id, effect_key),
+        input,
+        input_digest,
+        status,
+        number,
+        not_before,
+        node_params,
+    )) = row
     else {
         return Err(fail(
             StoreFailureKind::NotFound,
@@ -774,6 +791,7 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
         effect_key,
         input_digest,
         input,
+        params: node_params,
         holder: q.holder.clone(),
         deadline_ms,
     })

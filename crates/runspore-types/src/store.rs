@@ -333,6 +333,10 @@ pub struct Claim {
     pub input_digest: Digest,
     /// Canonical JSON.
     pub input: Vec<u8>,
+    /// Canonical JSON of the node's evaluated `params`; `None` when the node has
+    /// none, whose params are `{}`.
+    #[serde(default)]
+    pub params: Option<Vec<u8>>,
     /// Canonical JSON of the holder handle.
     #[serde(default)]
     pub holder: Option<Vec<u8>>,

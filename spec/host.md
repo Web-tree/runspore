@@ -294,7 +294,8 @@ bearer can renew, complete or fail the attempt.
   cannot. The claim goes to `claim_attempt` with a fresh owner, the holder, `leaseMs`
   (or `timeoutMs` when there is none) as the lease, and `timeoutMs` as the deadline. It
   returns the token, the run, node, action and invocation IDs, the attempt number, the
-  evaluated input, the declared outcomes, the node's `outputSchemas`, `deadlineMs`,
+  evaluated input, (0.2) the node's evaluated `params` (`{}` when it has none), the
+  declared outcomes, the node's `outputSchemas`, `deadlineMs`,
   `leaseUntilMs`, the result channel (`store`), and the paths of the step files, its
   instructions file and its work folder (null without `files_dir`).
 - `renew_step(token)`: `heartbeat` by `leaseMs` (or `timeoutMs`), capped at the
@@ -345,8 +346,15 @@ pub trait ActivityRunner: Send + Sync {
 number, visit number, effect key, and a stop signal that fires when the lease is lost or the engine
 shuts down. **0.2:** it also records the attempt's process record (§3,
 `record_process`), which the engine stores with `set_process`, and the step's files and
-work folder (below), when it has them. The registry maps an action's `kind` to a
-runner.
+work folder (below), when it has them. **0.2:** it carries the node's `params`
+(kernel.md §2, §4) as `params`: the value the kernel evaluated with the input, from
+the `activity.schedule` command, which the store keeps with the invocation and returns
+in every claim, so every attempt of the invocation gets the same params. A node without
+`params` gives `{}`. The registry maps an action's `kind` to a runner.
+
+A host that evaluates mappings of its own at dispatch (an action's `argv`, a command's
+`result`) uses the kernel's evaluator, `runspore_kernel::mapping`, over its own roots:
+the same operators and the same error codes as in the kernel (kernel.md §4).
 
 ### `command`
 

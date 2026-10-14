@@ -64,6 +64,8 @@ pub struct StepClaim {
     pub invocation_id: String,
     pub attempt: u32,
     pub input: Value,
+    /// The node's evaluated `params`, `{}` when it has none.
+    pub params: Value,
     pub outcomes: Vec<String>,
     /// The node's `outputSchemas`, or an empty object.
     pub output_schemas: Value,
@@ -353,6 +355,12 @@ impl Engine {
         };
         let input = canonical::parse(&claim.input)
             .map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
+        let params = match claim.params.as_deref() {
+            Some(bytes) => {
+                canonical::parse(bytes).map_err(|e| HostError::invalid(e.code(), e.to_string()))?
+            }
+            None => Value::Object(serde_json::Map::new()),
+        };
         let files = delivery.files.as_ref();
         Ok(Some(StepClaim {
             token: StepToken::of(&claim.attempt, claim.attempt_number),
@@ -362,6 +370,7 @@ impl Engine {
             invocation_id: invocation_id.to_string(),
             attempt: claim.attempt_number,
             input,
+            params,
             outcomes: wanted.outcomes,
             output_schemas: wanted.schemas,
             deadline_ms: claim.deadline_ms.unwrap_or(claim.lease_until_ms),

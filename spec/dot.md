@@ -123,7 +123,7 @@ The fields a node may carry depend on its kind in the DOT:
 
 | Kind | Fields |
 | --- | --- |
-| `activity` | `action` (required), `input`, `instructions`, `outputSchemas`, `loopLimits` |
+| `activity` | `action` (required), `input`, `params`, `instructions`, `outputSchemas`, `loopLimits` |
 | `await-signal` | `signal` (required), `instructions`, `outputSchemas`, `loopLimits` |
 | `complete` | `output` |
 | `fail` | `error` (required) |
@@ -148,13 +148,55 @@ package in its package form, checked against the subset at its place (the second
 level) and for an object root (schema.md §4). A run started from the artifact has its
 input checked against it; a folder without one accepts any input.
 
-An `activity` node's `input` may hold the marker `{"$outputSchemas": {}}` wherever a
-mapping is evaluated: as the input itself, or inside its plain objects and arrays,
-but not inside a `$literal` or a `$get`, whose contents are data. The build replaces
-each marker with `{"$literal": <the node's outputSchemas>}`, the schemas in package
-form, so a program the step runs can read its own schemas without the workflow
-writing them twice. A marker on a node with no `outputSchemas`, or one with another
-key or a value other than `{}`, is an error.
+An `activity` node's `params` is how it sets up its action, apart from `input`, the
+data the action gets: one action defined once in `settings.json` can serve many nodes,
+each with its own settings. It is a mapping like `input` (kernel.md §2, §4), checked
+the same way, with the same operators (`$get`, `$literal`, `$if`, `$uuid`, `$json`,
+`$join`), and goes into the package as written. On any other kind of node it is
+`node.field-not-allowed`, whose fix removes it.
+
+```json
+"implement": {
+  "action": "claude",
+  "params": {
+    "tools": ["Read", "Edit", "Bash"],
+    "schema": {"$resultSchema": {}},
+    "instructions": "Make the change `task` asks for, then answer with a short summary."
+  },
+  "input": {"task": {"$get": ["input", "task"]}}
+}
+```
+
+An `activity` node's `input` and `params` may hold the marker `{"$outputSchemas": {}}`
+wherever a mapping is evaluated: as the field itself, inside its plain objects and
+arrays, or as an operand of `$if`, `$uuid`, `$json` or `$join`, but not inside a
+`$literal` or a `$get`, whose contents are data. The build replaces each marker with
+`{"$literal": <the node's outputSchemas>}`, the schemas in package form, so a program
+the step runs can read its own schemas without the workflow writing them twice.
+
+`{"$resultSchema": {}}` is a marker in the same places. The build replaces it with
+`{"$literal": <schema>}`, the schema of a result-mode answer for this node
+([host.md](host.md) §2): one branch per outcome the node's action declares, each
+`{"outcome": <that outcome>, "output": <its outputSchemas entry>}` with both required
+and no other key, and `{}` (anything) as the output of an outcome with no entry. The
+branches are an `anyOf`, the subset's union (schema.md §1): each fixes a different
+outcome with `const`, so exactly one branch fits, as a `oneOf` would. A program given
+this schema can only answer with a declared outcome and an output that fits it, and the
+schema is one runspore itself can check answers against. For an action with outcomes
+`ok` and `red` and a schema only for `ok`:
+
+```json
+{"anyOf": [
+  {"type": "object", "properties": {"outcome": {"const": "ok"}, "output": <ok's schema>},
+   "required": ["outcome", "output"], "additionalProperties": false},
+  {"type": "object", "properties": {"outcome": {"const": "red"}, "output": {}},
+   "required": ["outcome", "output"], "additionalProperties": false}
+]}
+```
+
+Either marker on a node with no `outputSchemas` (`input.marker-no-schemas`), with
+another key or a value other than `{}` (`input.marker-shape`), or whose copy would nest
+deeper than the package allows (`input.marker-too-deep`) is an error.
 
 `loopLimits` goes into the package as it is: an object from an outcome the node
 routes to how many times in a row it may route it, for example `{"red": 3}` on the
@@ -194,8 +236,8 @@ it becomes an entry of each. No reference may name `workflow.dot` or `settings.j
    each schema file as a `source` entry. Read each `outputSchemas` file and the
    `inputSchema` file, inline the `$ref`s and check every schema against the subset
    at its place in the package (schema.md §1), the input schema also for its object
-   root (schema.md §4); then replace each `$outputSchemas` marker, checking that the
-   copy still fits the package's depth limit where it lands.
+   root (schema.md §4); then replace each `$outputSchemas` and `$resultSchema` marker,
+   checking that the copy still fits the package's depth limit where it lands.
 6. Produce the package: `format`, `name` and `start` from the files above, `limits`,
    `actions` and `inputSchema` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
@@ -278,7 +320,7 @@ The codes, by family; [docs/codes](../docs/codes/README.md) lists each one:
 | `settings.*` | `settings.json`: JSON, values the package cannot hold, its shape against the schema, keys that are not steps |
 | `action.*`, `command.*` | Actions (W04, W07) and command actions |
 | `node.*` | Steps: the fields their kind takes, their action, signal, error, loop limits and output schemas (W11, W12, W13) |
-| `mapping.*`, `input.*` | Mappings (W10) and the `$outputSchemas` marker |
+| `mapping.*`, `input.*` | Mappings (W10), their operators, and the `$outputSchemas` and `$resultSchema` markers |
 | `schema.*` | Schema files, schemas outside the subset, and an `inputSchema` whose root is not `"type": "object"` ([schema.md](schema.md)) |
 | `file.*` | File references (§4) |
 | `spore.*` | spore itself: a missed check, a broken message |

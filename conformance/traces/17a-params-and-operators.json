@@ -1,0 +1,212 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "params-and-operators",
+  "description": "0.2 node params and the operators $if, $uuid, $json and $join: one action serves two nodes; implement's params are evaluated with its input in the same activation and ride on its schedule command, $if takes the branch its boolean picks and never evaluates the other (a missing path there does not fail), $uuid gives the version 5 UUID of its parts, $json canonical text, $join the strings joined; a plain \"uuid\" string and a $literal stay as written. review has no params, so its command carries none.",
+  "workflow": {
+    "actions": {"claude": {"argv": ["claude", "-p"], "effect": "idempotent", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "params-and-operators",
+    "nodes": {
+      "done": {"kind": "complete", "output": {"$get": ["nodes", "review", "output"]}},
+      "implement": {
+        "action": "claude",
+        "input": {"kept": {"$literal": {"$uuid": ["x"]}}, "task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "review"},
+        "params": {
+          "lazy": {"$if": [true, "taken", {"$get": ["input", "absent"]}]},
+          "mode": {"$if": [{"$get": ["input", "resume"]}, "--resume", "--session-id"]},
+          "payload": {
+            "$json": {"n": {"$get": ["input", "n"]}, "task": {"$get": ["input", "task"]}}
+          },
+          "plain": "uuid",
+          "session": {"$uuid": [{"$get": ["run", "id"]}, "implement", {"$get": ["input", "n"]}]},
+          "tools": {"$join": [{"$get": ["input", "tools"]}, ","]}
+        }
+      },
+      "review": {
+        "action": "claude",
+        "input": {"change": {"$get": ["from", "output"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "implement"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": {"n": 2, "resume": false, "task": "fix it", "tools": ["Read", "Edit", "Bash"]},
+          "runId": "run_params",
+          "tenant": "default"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"n": 2, "resume": false, "task": "fix it", "tools": ["Read", "Edit", "Bash"]},
+          "invocation": {
+            "actionId": "claude",
+            "activationId": "implement/1",
+            "attempt": 1,
+            "inputDigest": "sha256:8c03f98661f13e77ee1cf0a136149a47b2754cf560197f40682545d1288f4283",
+            "invocationId": "inv_1ffd2a784288556dba79922b9e152ddc",
+            "nodeId": "implement",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": {"activationId": "implement/1", "nodeId": "implement", "visit": 1},
+          "result": null,
+          "runId": "run_params",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"implement": 1}
+        },
+        "snapshotDigest": "sha256:af5072c41a4e8affc650dc4a7aa1135a8ef202a36a8ceb598ecec608e40915ea",
+        "commands": [
+          {
+            "commandId": "cmd_4f38dddd47d572ff496424e5be133a18",
+            "activationId": "implement/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "claude",
+              "activationId": "implement/1",
+              "attempt": 1,
+              "effectKey": "inv_1ffd2a784288556dba79922b9e152ddc",
+              "input": {"kept": {"$uuid": ["x"]}, "task": "fix it"},
+              "invocationId": "inv_1ffd2a784288556dba79922b9e152ddc",
+              "nodeId": "implement",
+              "notBeforeMs": "1000",
+              "params": {
+                "lazy": "taken",
+                "mode": "--session-id",
+                "payload": "{\"n\":2,\"task\":\"fix it\"}",
+                "plain": "uuid",
+                "session": "28192c4b-cf17-5dd6-a46e-4ee427f72b60",
+                "tools": "Read,Edit,Bash"
+              }
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:022da3af8a873fe088fda07ffdc2b2ba1f15727cf70daf436cef366ec5fc4e53"
+      }
+    },
+    {
+      "event": {
+        "eventId": "r1",
+        "sequence": "2",
+        "acceptedAtMs": "1100",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_1ffd2a784288556dba79922b9e152ddc.1",
+          "invocationId": "inv_1ffd2a784288556dba79922b9e152ddc",
+          "output": {"summary": "fixed"},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 2,
+          "format": "runspore.state/0.1",
+          "input": {"n": 2, "resume": false, "task": "fix it", "tools": ["Read", "Edit", "Bash"]},
+          "invocation": {
+            "actionId": "claude",
+            "activationId": "review/1",
+            "attempt": 1,
+            "inputDigest": "sha256:9f7d2fb1a9fd71e02dea840d2473f989a636696b205382ffa49e8c51372973c7",
+            "invocationId": "inv_5899239862b1864b29ccc9a9af61942e",
+            "nodeId": "review",
+            "state": "scheduled"
+          },
+          "lastAcceptedAtMs": "1100",
+          "lastSequence": "2",
+          "nodes": {"implement": {"outcome": "ok", "output": {"summary": "fixed"}, "visit": 1}},
+          "position": {"activationId": "review/1", "nodeId": "review", "visit": 1},
+          "result": null,
+          "runId": "run_params",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "running",
+          "tenant": "default",
+          "visits": {"implement": 1, "review": 1}
+        },
+        "snapshotDigest": "sha256:5d2ca30ddfdee60fb30480dbb1dea2fef19b064d43cdf7f9055f0a53104053b9",
+        "commands": [
+          {
+            "commandId": "cmd_87a057baa830d095d7268b9c8eb86daa",
+            "activationId": "review/1",
+            "kind": "activity.schedule",
+            "payload": {
+              "actionId": "claude",
+              "activationId": "review/1",
+              "attempt": 1,
+              "effectKey": "inv_5899239862b1864b29ccc9a9af61942e",
+              "input": {"change": {"summary": "fixed"}},
+              "invocationId": "inv_5899239862b1864b29ccc9a9af61942e",
+              "nodeId": "review",
+              "notBeforeMs": "1100"
+            }
+          }
+        ],
+        "diagnostics": [],
+        "decisionDigest": "sha256:c09f0fa2d2142917911fd01c609ea0883c7bf326d11acd9b416a32c529290f01"
+      }
+    },
+    {
+      "event": {
+        "eventId": "r2",
+        "sequence": "3",
+        "acceptedAtMs": "1200",
+        "kind": "activity.result",
+        "payload": {
+          "attempt": 1,
+          "attemptId": "inv_5899239862b1864b29ccc9a9af61942e.1",
+          "invocationId": "inv_5899239862b1864b29ccc9a9af61942e",
+          "output": {"approved": true},
+          "status": "success"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 3,
+          "format": "runspore.state/0.1",
+          "input": {"n": 2, "resume": false, "task": "fix it", "tools": ["Read", "Edit", "Bash"]},
+          "invocation": null,
+          "lastAcceptedAtMs": "1200",
+          "lastSequence": "3",
+          "nodes": {
+            "implement": {"outcome": "ok", "output": {"summary": "fixed"}, "visit": 1},
+            "review": {"outcome": "ok", "output": {"approved": true}, "visit": 1}
+          },
+          "position": null,
+          "result": {"output": {"approved": true}},
+          "runId": "run_params",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "completed",
+          "tenant": "default",
+          "visits": {"done": 1, "implement": 1, "review": 1}
+        },
+        "snapshotDigest": "sha256:648ee5ab8e110a8312420c646fd939d41b6c3ed559e88e900c8daa6857db5e91",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:7221a286c5c3ab437540d2e9af5787f381f2fbd05346ee3d3dd720099d324cea"
+      }
+    }
+  ]
+}

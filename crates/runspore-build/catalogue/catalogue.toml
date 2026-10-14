@@ -737,35 +737,55 @@ example = "schema.input-not-object"
 code = "input.marker-shape"
 severity = "problem"
 title = '''Marker written with something else'''
-message = '''The marker "$outputSchemas" in the input of step {step} is written with something else.'''
-fix = '''write it as {{"$outputSchemas": {{}}}}, on its own.'''
+message = '''The marker {marker} in the {field} of step {step} is written with something else.'''
+fix = '''write it with the value {{}} and no other key beside it.'''
+args = { marker = "key", field = "computed" }
 example = "input.marker-shape"
 
 [[code]]
 code = "input.marker-no-schemas"
 severity = "problem"
 title = '''Marker on a step with no schemas'''
-message = '''The input of step {step} copies its output schemas with "$outputSchemas", but the step has none.'''
+message = '''The {field} of step {step} copies its output schemas with {marker}, but the step has none.'''
 fix = '''add "outputSchemas" to step {step}, or remove the marker.'''
+args = { marker = "key", field = "computed" }
 example = "input.marker-no-schemas"
 
 [[code]]
 code = "input.marker-too-deep"
 severity = "problem"
 title = '''Marker copy nested too deep'''
-message = '''The copy of the output schemas that "$outputSchemas" makes in the input of step {step} reaches level {depth}, past the 32 levels a package may hold.'''
-fix = '''move the marker closer to the top of the input, or make the schemas shallower.'''
-args = { depth = "computed" }
+message = '''The copy that {marker} makes in the {field} of step {step} reaches level {depth}, past the 32 levels a package may hold.'''
+fix = '''move the marker closer to the top, or make the schemas shallower.'''
+args = { marker = "key", field = "computed", depth = "computed" }
 example = "input.marker-too-deep"
 
 [[code]]
 code = "mapping.unknown-operator"
 severity = "problem"
 title = '''Unknown "$" key'''
-message = '''{key} in step {step} is not something spore can work out; a key starting with "$" is "$get" or "$literal".'''
-fix = '''use "$get" or "$literal", or put the value inside "$literal" to keep the key as it is.'''
+message = '''{key} in step {step} is not something spore can work out; a key starting with "$" is "$get", "$literal", "$if", "$uuid", "$json" or "$join".'''
+fix = '''use one of those, or put the value inside "$literal" to keep the key as it is.'''
 args = { key = "key" }
 example = "mapping.unknown-operator"
+
+[[code]]
+code = "mapping.operator-shape"
+severity = "problem"
+title = '''Operator with the wrong operands'''
+message = '''{operator} in step {step} is given {operands}, and it takes a list shaped {shape}.'''
+fix = '''give {operator} a list shaped {shape}, each item a value or a mapping.'''
+args = { operator = "key", operands = "input", shape = "code" }
+example = "mapping.operator-shape"
+
+[[code]]
+code = "mapping.operator-extra-key"
+severity = "problem"
+title = '''Operator with another key'''
+message = '''The {operator} object in step {step} also has {key}, and it may have only {operator}.'''
+fix = '''remove {key}, or put the object inside "$literal".'''
+args = { operator = "key", key = "key" }
+example = "mapping.operator-extra-key"
 
 [[code]]
 code = "mapping.get-extra-key"

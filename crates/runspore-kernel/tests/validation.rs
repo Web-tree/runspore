@@ -425,6 +425,51 @@ fn w10_a_0_2_document_admits_from_and_default() {
     }
 }
 
+/// W10 in 0.2: `$if` takes three operands, `$uuid` one or more, `$join` two, `$json`
+/// one value; each is the only key of its object, and its operands are mappings. A 0.1
+/// document refuses them all, and `params` (W01).
+#[test]
+fn w10_a_0_2_document_admits_the_operators() {
+    let as_0_2 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT_0_2));
+    let as_0_1 = |workflow: Value| with(workflow, "/format", json!(WORKFLOW_FORMAT));
+    let with_params = |params: Value| edited("/nodes/build/params", params);
+    for mapping in [
+        json!({"$if": [true, 1, {"$get": ["input", "x"]}]}),
+        json!({"$uuid": [{"$get": ["run", "id"]}]}),
+        json!({"$uuid": ["a", 2, {"$json": null}]}),
+        json!({"$json": {"a": [{"$get": ["input"]}]}}),
+        json!({"$join": [{"$get": ["input", "tools"]}, ","]}),
+        json!({"$join": [["a", "b"], {"$if": [false, ",", " "]}]}),
+        json!({"$literal": {"$if": "anything"}}),
+    ] {
+        assert_valid(&as_0_2(with_input(mapping.clone())));
+        assert_valid(&as_0_2(with_params(mapping.clone())));
+        assert_valid(&as_0_2(edited("/nodes/done/output", mapping.clone())));
+        if mapping.get("$literal").is_none() {
+            assert_invalid(&as_0_1(with_input(mapping)));
+        }
+    }
+    assert_invalid(&as_0_1(with_params(json!({}))));
+    for mapping in [
+        json!({"$if": [true, 1]}),
+        json!({"$if": [true, 1, 2, 3]}),
+        json!({"$if": true}),
+        json!({"$uuid": []}),
+        json!({"$uuid": "run"}),
+        json!({"$join": [["a"]]}),
+        json!({"$join": "a,b"}),
+        json!({"$json": 1, "x": 2}),
+        json!({"$if": [true, 1, 2], "$json": 1}),
+        json!({"$if": [{"$get": ["elsewhere"]}, 1, 2]}),
+        json!({"$json": {"$unknown": 1}}),
+        json!({"$resultSchema": {}}),
+        json!({"$outputSchemas": {}}),
+    ] {
+        assert_invalid(&as_0_2(with_input(mapping.clone())));
+        assert_invalid(&as_0_2(with_params(mapping)));
+    }
+}
+
 #[test]
 fn w11_fail_nodes() {
     for bad in ["", "Bad", "-x", "a_b", "has space", &"a".repeat(65)] {
