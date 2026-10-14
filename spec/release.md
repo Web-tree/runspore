@@ -70,7 +70,7 @@ any Ed25519 implementation:
 The public half, as one OpenSSH public key line:
 
 ```text
-ssh-ed25519 PENDING runspore-release
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGy3mjvtp10UZgB9Y8u3KNBOh66DHPo3bdbZEszh9b1k runspore-release
 ```
 
 When the line reads `PENDING`, no key has been made yet: no release is published, and
