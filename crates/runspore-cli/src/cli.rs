@@ -1384,7 +1384,8 @@ async fn list(engine: &Engine, db: &Path) -> Result<Output, Fail> {
 }
 
 async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {
-    let key = existing(engine, run).await?.key;
+    let run_view = existing(engine, run).await?;
+    let key = run_view.key.clone();
     let mut records = Vec::new();
     loop {
         let after = records
@@ -1397,7 +1398,19 @@ async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {
             break;
         }
     }
-    let text: Vec<String> = records.iter().map(view::event_text).collect();
+    // The replay only adds the node and the outcome; a run it cannot replay still lists.
+    let history = engine.history(&run_view).await.unwrap_or_default();
+    let happened = |r: &runspore_types::store::EventRecord| history.get(&r.event.sequence);
+    let width = records
+        .iter()
+        .filter_map(|r| happened(r)?.node_id.as_ref())
+        .map(|n| n.chars().count())
+        .max()
+        .unwrap_or(1);
+    let text: Vec<String> = records
+        .iter()
+        .map(|r| view::event_text(r, happened(r), width))
+        .collect();
     let json: Vec<Value> = records.iter().map(view::event_json).collect();
     done(json!({"runId": key.run, "events": json}), text.join("\n"))
 }

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use runspore_host::progress::{Change, Progress};
+use runspore_host::progress::{Change, Happened, Progress};
 use runspore_host::{Arrival, Arrow, ExternalStep, HeldSlot};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
@@ -811,27 +811,77 @@ fn tails_text(error: &Value, indent: &str) -> String {
     text
 }
 
-/// One line per event, then the ends of the streams of a command that failed.
-pub fn event_text(record: &EventRecord) -> String {
+/// One line per event: its sequence, its time in UTC, its kind, the revision that
+/// consumed it, the node it was for (`-` when none or not consumed yet, padded to
+/// `width`), what it said and what the run then did, its diagnostics and its ID. Then
+/// the ends of the streams of a command that failed.
+pub fn event_text(record: &EventRecord, happened: Option<&Happened>, width: usize) -> String {
     let event = &record.event;
     let revision = record
         .consumed_revision
         .map_or_else(|| "pending".to_string(), |r| format!("rev {r}"));
     let codes: Vec<&str> = record.diagnostics.iter().map(|d| d.code.as_str()).collect();
     let payload: Value = serde_json::from_slice(&event.body).unwrap_or(Value::Null);
-    let line = format!(
-        "{:>4}  {:<22} {:<10} {}  {}",
-        event.sequence,
-        event.kind,
-        revision,
-        event.id,
-        codes.join(",")
-    );
+    let node = happened.and_then(|h| h.node_id.as_deref()).unwrap_or("-");
+    let said = happened.map(happened_text).unwrap_or_default();
+    let line = [said, codes.join(","), event.id.clone()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .fold(
+            format!(
+                "{:>4}  {}  {:<22} {:<10} {node:<width$}",
+                event.sequence,
+                utc_text(event.accepted_at_ms),
+                event.kind,
+                revision,
+            ),
+            |line, part| format!("{line}  {part}"),
+        );
     let tails = tails_text(&payload["error"], "      ");
     match tails.strip_suffix('\n') {
         Some(tails) => format!("{line}\n{tails}"),
         None => line,
     }
+}
+
+/// What an event said and what the run then did: its outcome and the arrow the run took
+/// from its node, then the first line of its error or output, then the status the run
+/// came to. For example `red -> implement`, `failure: command.exit: exit code 1;
+/// needs intervention`.
+fn happened_text(happened: &Happened) -> String {
+    let mut text = happened.outcome.clone().unwrap_or_default();
+    let left = happened.changes.iter().find_map(|change| match change {
+        Change::Outcome {
+            node_id, arrow, to, ..
+        } if Some(node_id) == happened.node_id.as_ref() => Some((arrow, to)),
+        _ => None,
+    });
+    if let Some((arrow, to)) = left {
+        if Some(arrow) != happened.outcome.as_ref() {
+            text += &format!(", took {arrow}");
+        }
+        text += &format!(" -> {to}");
+    }
+    if let Some(detail) = &happened.detail {
+        if !text.is_empty() {
+            text += ": ";
+        }
+        text += detail;
+    }
+    let came = happened.changes.iter().find_map(|change| match change {
+        Change::Waiting { signal, .. } => Some(format!("waiting for {signal}")),
+        Change::NeedsIntervention { .. } => Some("needs intervention".to_string()),
+        Change::Completed { .. } => Some("completed".to_string()),
+        Change::Failed { .. } => Some("failed".to_string()),
+        _ => None,
+    });
+    if let Some(came) = came {
+        if !text.is_empty() {
+            text += "; ";
+        }
+        text += &came;
+    }
+    text
 }
 
 /// A change of a run as one line for a person: the time in UTC, the run's start key and

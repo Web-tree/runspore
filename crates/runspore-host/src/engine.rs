@@ -31,7 +31,7 @@ use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
 use crate::process::{self, Leftover};
-use crate::progress::{self, Change, Progress};
+use crate::progress::{self, Change, Happened, Progress};
 
 mod intervention;
 mod slots;
@@ -447,6 +447,18 @@ fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
         semantics_version: descriptor.semantics_version,
         codec_version: descriptor.codec_version,
     }
+}
+
+/// What replaying a run's events needs: its package, as bytes and decoded, and the
+/// identity its transitions ran under.
+struct Replay {
+    graph: Vec<u8>,
+    workflow: Workflow,
+    identity: Identity,
+}
+
+fn undecodable(e: canonical::CanonError) -> HostError {
+    HostError::invalid(e.code(), e.to_string())
 }
 
 /// The identity of a turn on `snapshot`: the semantics the run recorded, so a newer
@@ -899,10 +911,50 @@ impl Engine {
     /// node it ended at. Replays the run's consumed events through the reducer, so it
     /// costs one transition per event; the kernel's state holds no arrow.
     pub async fn arrival(&self, view: &RunView) -> Result<Arrival, HostError> {
-        let Some(current) = view.snapshot.as_deref() else {
+        let Some(replay) = self.replay_of(view).await? else {
             return Ok(Arrival::default());
         };
-        let undecodable = |e: canonical::CanonError| HostError::invalid(e.code(), e.to_string());
+        let mut trail = Trail::new(&replay.workflow);
+        self.replay(view, &replay, |_, state| trail.push(state))
+            .await?;
+        Ok(trail.finish())
+    }
+
+    /// What each of the run's consumed events was about, by sequence (`spec/cli.md`,
+    /// `events`). Replays them through the reducer as [`Engine::arrival`] does; an
+    /// event not consumed yet has no entry.
+    pub async fn history(&self, view: &RunView) -> Result<HashMap<u64, Happened>, HostError> {
+        let mut seen = HashMap::new();
+        let Some(replay) = self.replay_of(view).await? else {
+            return Ok(seen);
+        };
+        let mut before: Option<State> = None;
+        let mut nodes = HashMap::new();
+        self.replay(view, &replay, |event, after| {
+            let happened = progress::happened(
+                &replay.workflow,
+                before.as_ref(),
+                &after,
+                &event.kind,
+                &event.payload,
+                &nodes,
+            );
+            seen.insert(event.sequence, happened);
+            if let Some(i) = &after.invocation {
+                nodes.insert(i.invocation_id.clone(), i.node_id.clone());
+            }
+            before = Some(after);
+        })
+        .await?;
+        Ok(seen)
+    }
+
+    /// The run's package and the identity its transitions ran under; `None` before
+    /// its first transition.
+    async fn replay_of(&self, view: &RunView) -> Result<Option<Replay>, HostError> {
+        let Some(current) = view.snapshot.as_deref() else {
+            return Ok(None);
+        };
         let state: State = canonical::decode(current).map_err(undecodable)?;
         let package = self.inner.package(&view.package_digest).await?;
         let workflow: Workflow = canonical::decode(&package.bytes).map_err(undecodable)?;
@@ -910,6 +962,21 @@ impl Engine {
             semantics_version: state.semantics,
             ..identity(&*self.inner.reducer, &view.package_digest)
         };
+        Ok(Some(Replay {
+            graph: package.bytes.clone(),
+            workflow,
+            identity,
+        }))
+    }
+
+    /// Replays the run's consumed events through the reducer, oldest first, handing
+    /// `each` every event with the state its transition produced.
+    async fn replay(
+        &self,
+        view: &RunView,
+        replay: &Replay,
+        mut each: impl FnMut(&Envelope, State),
+    ) -> Result<(), HostError> {
         // Every replayed decision was committed once, so no budget can refuse it.
         let limits = Limits {
             microsteps: u32::MAX,
@@ -917,7 +984,6 @@ impl Engine {
             max_state_bytes: u32::MAX,
             max_command_count: u32::MAX,
         };
-        let mut trail = Trail::new(&workflow);
         let mut snapshot = None;
         let mut after = 0;
         while after < view.applied_sequence {
@@ -931,9 +997,9 @@ impl Engine {
                 if after > view.applied_sequence {
                     break;
                 }
-                let decision = self.inner.reducer.transition(&TransitionRequest {
-                    identity: identity.clone(),
-                    graph: package.bytes.clone(),
+                let request = TransitionRequest {
+                    identity: replay.identity.clone(),
+                    graph: replay.graph.clone(),
                     snapshot: snapshot.take(),
                     input_event: Envelope {
                         event_id: event.id,
@@ -943,12 +1009,16 @@ impl Engine {
                         payload: event.body,
                     },
                     frozen_limits: limits,
-                })?;
-                trail.push(canonical::decode(&decision.snapshot).map_err(undecodable)?);
+                };
+                let decision = self.inner.reducer.transition(&request)?;
+                each(
+                    &request.input_event,
+                    canonical::decode(&decision.snapshot).map_err(undecodable)?,
+                );
                 snapshot = Some(decision.snapshot);
             }
         }
-        Ok(trail.finish())
+        Ok(())
     }
 
     /// Number of attempts this engine is running.

@@ -33,7 +33,7 @@ marked **0.2** below are new since 0.1.
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs) |
 | `list` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs) |
-| `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics |
+| `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics. **0.2:** in text, each with its time, its node, its outcome, the arrow the run took and the first line of its error or output (§JSON output) |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
 | `release <runId>` | Lifts a quarantine |
@@ -707,6 +707,23 @@ Text output is for people and is not a stable interface.
 `stderrTail`, host.md §3), the text of `status` shows them under the error, and the
 text of `events` under the event that holds it, so a failed command's cause shows on
 whichever stream it went to. The JSON carries them in the error's `details`.
+
+**0.2:** the text of `events` shows, as Temporal's event history shows each event's
+attributes, one line per event: its sequence, its accepted time in UTC, its kind, the
+revision that consumed it, the node it was for, what it said and what the run then
+did, its diagnostics and its ID. The node is the start node for `run.started`, the
+step of the invocation a result or a resolution names (a stale result included), the
+await-signal node a signal was taken at, and the step an `onIntervention` action told
+about; `-` for a buffered signal or an event not consumed yet. What it said is its
+outcome (a result's outcome, or `failure`, `unknown` or `expired`; a signal's
+outcome; a resolution's action), the arrow the run took from the node, as in
+`red -> implement` or `red, took exhausted -> stuck`, then the first line of its error
+as `code: message` or of its output or data as JSON, cut to 100 characters, then the
+status the run came to when the event changed it (`waiting for <signal>`,
+`needs intervention`, `completed`, `failed`). A run going round a loop therefore
+shows the same arrows again with fresh times; a run that hangs shows an old last
+event. The node and the arrows are found by replaying the run's consumed events
+through the kernel, as `status` finds `position.from`; the JSON is unchanged.
 
 ## Interrupts
 
