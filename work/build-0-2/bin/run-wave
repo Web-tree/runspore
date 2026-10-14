@@ -157,15 +157,16 @@ def gave_up(t, run, st):
 
 
 def ask(k, step_md, tickets, feedback):
-    """Open the checkpoint issue, or comment on it when it was already asked."""
+    """Open the checkpoint issue, or reopen it when it was already asked. Either way its
+    text is the step file as it is now: a re-ask after an upgrade shows the new text."""
     cps = load_state("checkpoints")
     text = (STEPS / step_md).read_text()
     merged = "\n".join(f"- {t['id']}: {t['issue']}" for t in tickets)
+    title = text.splitlines()[0].lstrip("# ").strip()
+    body = f"{text}\n\n## Merged in this wave\n\n{merged}\n"
+    if k != "0":
+        body += UPGRADE
     if k not in cps:
-        title = text.splitlines()[0].lstrip("# ").strip()
-        body = f"{text}\n\n## Merged in this wave\n\n{merged}\n"
-        if k != "0":
-            body += UPGRADE
         url = create_issue(RUNSPORE, title, body, f"build-0-2 checkpoint {k}",
                            "--assignee", "@me", "--label", "checkpoint")
         cps[k] = {"url": url, "asked": [os.environ.get("RUNSPORE_EFFECT_KEY", "")]}
@@ -174,8 +175,11 @@ def ask(k, step_md, tickets, feedback):
     elif os.environ.get("RUNSPORE_EFFECT_KEY", "") not in cps[k]["asked"]:
         num = cps[k]["url"].rstrip("/").split("/")[-1]
         sh("gh", "issue", "reopen", num, "--repo", RUNSPORE, check=False)
+        sh("gh", "issue", "edit", num, "--repo", RUNSPORE, "--title", title,
+           "--body", f"{body}\n\n<!-- build-0-2 checkpoint {k} -->")
         why = (f"The tickets from your changes are merged:\n\n{merged}\n\nTry it again and answer." if feedback
-               else "The build run was restarted and asks this checkpoint again. Nothing new was merged.")
+               else f"The build run asks this checkpoint again, after these merges:\n\n{merged}\n\n"
+                    "The text above is this checkpoint as it is now.")
         sh("gh", "issue", "comment", num, "--repo", RUNSPORE, "--body", why)
         cps[k]["asked"].append(os.environ.get("RUNSPORE_EFFECT_KEY", ""))
         save_state("checkpoints", cps)

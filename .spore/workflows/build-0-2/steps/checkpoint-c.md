@@ -74,13 +74,15 @@ git add . && git commit -m "Start"
 spore init
 cp -R <runspore>/examples/coding-loop .spore/workflows/
 spore validate .spore/workflows/coding-loop
-spore run coding-loop --key try-c --input '{"task": "Add math.js exporting a sum(a, b) function, with a test in math.test.js."}'
+spore run coding-loop --key try-c-1 --input '{"task": "Add math.js exporting a sum(a, b) function, with a test in math.test.js."}'
 ```
+
+A start key names one run, tied to its first input. When this checkpoint is asked again after changes, use new keys (`try-c-2`, `try-c-stop-2`), or `spore run` answers `run.exists`.
 
 1. It stops at `approve`. Read the change with `git diff`.
 2. Reject it with a reason: `spore signal <run> approval --outcome rejected --id try-c-reject-1 --data '{"reason": "Name it add, not sum."}'`. The `--id` makes repeating the command harmless: the same message ID is applied only once. Then run the same `spore run` command again. Claude continues the same conversation and sees your reason, and the run stops at `approve` again.
 3. Approve it with `spore signal <run> approval --outcome approved --id try-c-approve-1`, then run the same `spore run` command again. The run ends at `done`.
-4. Start a second run with a bigger task and its own key: `spore run coding-loop --key try-c2 --input '{"task": "Add stats.js exporting mean, median and mode of an array of numbers, each throwing on an empty array, with tests in stats.test.js. Then add cli.js, which prints all three for the numbers given as its arguments, with a test that runs it."}'`. Press Ctrl-C while `implement` is working, a few seconds in or later, then run the same command again. The step resumes the same conversation. A try stopped within its first second has not opened its conversation yet, so it cannot be resumed: the step ends stuck after three tries, and you start again with a new key (#124 lists this as a known limit).
+4. Start a second run with a bigger task and its own key: `spore run coding-loop --key try-c-stop-1 --input '{"task": "Add stats.js exporting mean, median and mode of an array of numbers, each throwing on an empty array, with tests in stats.test.js. Then add cli.js, which prints all three for the numbers given as its arguments, with a test that runs it."}'`. Press Ctrl-C while `implement` is working, a few seconds in or later, then run the same command again. The step resumes the same conversation. A try stopped within its first second has not opened its conversation yet, so it cannot be resumed: the step ends stuck after three tries, and you start again with a new key (#124 lists this as a known limit).
 
 ## Feedback asked for
 

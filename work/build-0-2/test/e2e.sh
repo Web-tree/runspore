@@ -16,9 +16,10 @@
 # --retry` gets it merged; R12's checks stay red past the fix loop's limit, its run waits
 # at the stuck step, and `spore signal ... keep-going` gets it merged) and checkpoint A
 # asks; spore refuses answers that do not fit its schema; a `changes` answer, sent twice
-# with one message ID, builds two feedback tickets and asks again; `go` moves on to
-# checkpoint B and closes A's issue; a newer spore's worker goes on with the same database
-# and the same run, and its `go` on B closes B's issue and starts wave 4.
+# with one message ID, builds two feedback tickets and asks again, with the issue showing
+# the step's current text; `go` moves on to checkpoint B and closes A's issue; a newer
+# spore's worker goes on with the same database and the same run, and its `go` on B
+# closes B's issue and starts wave 4.
 set -euo pipefail
 # Run from inside a step (a ticket's test, say), RUNSPORE_DB names the real build's
 # database. Set below to the scratch one, so nothing here reaches the caller's.
@@ -146,14 +147,17 @@ wait_for waiting checkpoint_a 1
 echo "ok: spore refused answers that do not fit checkpoint A's schema, and recorded nothing"
 
 changes='{"changes": ["Errors should name the settings key", "skills: the menu needs a hint line"]}'
+# The checkpoint's text changes before it is asked again (an upgrade does this).
+echo "Edited before the second ask." >> .spore/workflows/build-0-2/steps/checkpoint-a.md
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null  # a repeat
 wait_for waiting checkpoint_a 2
+check "'Edited before the second ask.' in $(checkpoint A)['body'] and '<!-- build-0-2 checkpoint a -->' in $(checkpoint A)['body']"
 check "sum(1 for i in s['issues'].values() if i['title'].startswith('Checkpoint A feedback') and i['state'] == 'CLOSED') == 2"
 check "$(checkpoint A)['state'] == 'OPEN'"
 sleep 2
 wait_for waiting checkpoint_a 2
-echo "ok: changes built two feedback tickets, checkpoint A asked again; the repeat with the same --id was the same message"
+echo "ok: changes built two feedback tickets, checkpoint A asked again with its current text; the repeat with the same --id was the same message"
 
 spore signal "$run" checkpoint-a --outcome go > /dev/null
 wait_for waiting checkpoint_b 1

@@ -24,6 +24,8 @@ elif cmd == ("issue", "comment"):
 elif cmd == ("issue", "close"):
     i = issue(repo, a[2]); i["state"] = "CLOSED"
     if opt("--comment"): i["comments"].append(opt("--comment"))
+elif cmd == ("issue", "edit"):
+    i = issue(repo, a[2]); i["title"] = opt("--title", i["title"]); i["body"] = opt("--body", i["body"])
 elif cmd == ("issue", "reopen"):
     issue(repo, a[2])["state"] = "OPEN"
 elif cmd == ("issue", "list"):
