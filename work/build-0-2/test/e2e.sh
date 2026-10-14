@@ -148,16 +148,17 @@ echo "ok: spore refused answers that do not fit checkpoint A's schema, and recor
 
 changes='{"changes": ["Errors should name the settings key", "skills: the menu needs a hint line"]}'
 # The checkpoint's text changes before it is asked again (an upgrade does this).
-echo "Edited before the second ask." >> .spore/workflows/build-0-2/steps/checkpoint-a.md
+echo "Edited before the second ask, pass {pass}." >> .spore/workflows/build-0-2/steps/checkpoint-a.md
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null  # a repeat
 wait_for waiting checkpoint_a 2
-check "'Edited before the second ask.' in $(checkpoint A)['body'] and '<!-- build-0-2 checkpoint a -->' in $(checkpoint A)['body']"
+check "'Edited before the second ask, pass 2.' in $(checkpoint A)['body'] and '<!-- build-0-2 checkpoint a -->' in $(checkpoint A)['body']"
+check "'## Merged in this wave' in $(checkpoint A)['body'] and '## Merged from your changes, pass 2' in $(checkpoint A)['body']"
 check "sum(1 for i in s['issues'].values() if i['title'].startswith('Checkpoint A feedback') and i['state'] == 'CLOSED') == 2"
 check "$(checkpoint A)['state'] == 'OPEN'"
 sleep 2
 wait_for waiting checkpoint_a 2
-echo "ok: changes built two feedback tickets, checkpoint A asked again with its current text; the repeat with the same --id was the same message"
+echo "ok: changes built two feedback tickets, checkpoint A asked again with its current text, pass number and every round's merges; the repeat with the same --id was the same message"
 
 spore signal "$run" checkpoint-a --outcome go > /dev/null
 wait_for waiting checkpoint_b 1
