@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q10 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q11 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -503,4 +503,40 @@ async fn q10_a_version_5_file_is_upgraded() {
     assert_eq!(held.deadline_ms, Some(1_150));
     let shown = store.list_invocations(&new).await.unwrap().remove(0);
     assert_eq!(shown.holder, Some(b"{\"pid\":1}".to_vec()));
+}
+
+/// Q11: an upgrade that stops after one of its steps leaves the file at its old
+/// version, with nothing of the upgrade in it; the next open upgrades it whole.
+#[tokio::test]
+async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
+    let path = fresh_path();
+    assert!(child(&path, "create-run", None).status.success());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE attempts DROP COLUMN holder;
+         ALTER TABLE attempts DROP COLUMN deadline_ms;
+         DROP TABLE meta;
+         PRAGMA user_version = 4;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let crashed = child(&path, "create-run", Some("store.upgrade.after-step"));
+    assert!(!crashed.status.success(), "child did not abort");
+    assert_eq!(user_version(&path), 4, "the file keeps its old version");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let (meta, runs): (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT count(*) FROM sqlite_master WHERE name = 'meta'),
+                    (SELECT count(*) FROM runs)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((meta, runs), (0, 1), "the first step was rolled back");
+    drop(conn);
+
+    let store = SqliteStore::open(&path).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    assert!(effect(&store, "create-run").await);
 }

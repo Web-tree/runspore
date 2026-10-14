@@ -15,7 +15,12 @@ pub const WORKFLOW_FORMAT_0_2: &str = "runspore.workflow/0.2";
 /// Every format the kernel accepts. A 0.2 document follows 0.1's rules until a rule
 /// of `spec/kernel.md` names 0.2.
 pub const WORKFLOW_FORMATS: [&str; 2] = [WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2];
+/// The state format the kernel writes into every new snapshot.
 pub const STATE_FORMAT: &str = "runspore.state/0.1";
+/// Every state format the kernel decodes and continues: the one it writes and each
+/// older one a 0.2 kernel wrote (spec/kernel.md, Versions). A new format is added here, never
+/// swapped in.
+pub const STATE_FORMATS: [&str; 1] = [STATE_FORMAT];
 /// The semantics a host requests when it does not choose; see [`SEMANTICS_VERSIONS`].
 pub const SEMANTICS_VERSION: &str = "0.1";
 pub const SEMANTICS_VERSION_0_2: &str = "0.2";

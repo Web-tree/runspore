@@ -383,6 +383,23 @@ fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
     }
 }
 
+/// The identity of a turn on `snapshot`: the semantics the run recorded, so a newer
+/// kernel whose default moved on still continues it (spec/host.md §2). A run's first
+/// turn, with no snapshot, takes the kernel's default.
+fn turn_identity(reducer: &dyn Reducer, package_digest: &str, snapshot: Option<&[u8]>) -> Identity {
+    let recorded = snapshot
+        .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
+        .and_then(|state| state.get("semantics")?.as_str().map(str::to_string));
+    let identity = identity(reducer, package_digest);
+    match recorded {
+        Some(semantics_version) => Identity {
+            semantics_version,
+            ..identity
+        },
+        None => identity,
+    }
+}
+
 /// Checks a workflow without a store: canonicalizes it, validates every action with
 /// the runner its `kind` names, and runs a dry `run.started` transition with a null
 /// input. Returns the canonical package bytes. `start` performs the same checks.
@@ -1128,7 +1145,11 @@ impl Inner {
             let package = self.package(&turn.package_digest).await?;
             let event = &turn.next_event;
             let request = TransitionRequest {
-                identity: identity(&*self.reducer, &turn.package_digest),
+                identity: turn_identity(
+                    &*self.reducer,
+                    &turn.package_digest,
+                    turn.snapshot.as_deref(),
+                ),
                 graph: package.bytes.clone(),
                 snapshot: turn.snapshot.clone(),
                 input_event: Envelope {

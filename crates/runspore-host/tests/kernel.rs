@@ -16,8 +16,8 @@ use runspore_kernel::NativeReducer;
 use runspore_store_conformance::ManualClock;
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::digest::{self, ids};
-use runspore_types::model::Resolution;
-use runspore_types::reducer::{Limits, Reducer};
+use runspore_types::model::{Resolution, SEMANTICS_VERSION, SEMANTICS_VERSION_0_2};
+use runspore_types::reducer::{Decision, Descriptor, Failure, Limits, Reducer, TransitionRequest};
 use runspore_types::store::{InvocationStatus, RunKey, RunView, Store};
 use runspore_wasmtime::WasmtimeReducer;
 use serde_json::{json, Value};
@@ -535,6 +535,65 @@ async fn the_wasm_kernel_and_the_native_kernel_drive_a_run_to_identical_bytes() 
         native_view.snapshot, wasm_view.snapshot,
         "the final snapshot bytes differ"
     );
+}
+
+/// The native kernel once its default semantics has moved on to 0.2.
+struct NewerDefault;
+
+impl Reducer for NewerDefault {
+    fn describe(&self) -> Descriptor {
+        Descriptor {
+            semantics_version: SEMANTICS_VERSION_0_2.into(),
+            ..NativeReducer.describe()
+        }
+    }
+    fn kernel_digest(&self) -> String {
+        NativeReducer.kernel_digest()
+    }
+    fn transition(&self, request: &TransitionRequest) -> Result<Decision, Failure> {
+        NativeReducer.transition(request)
+    }
+}
+
+/// spec/host.md §2, tick: a turn passes the semantics the run recorded, not the
+/// kernel's default, so a newer kernel continues an older kernel's run.
+#[tokio::test]
+async fn a_newer_kernel_continues_a_run_under_the_semantics_it_recorded() {
+    let path = temp_db("recorded-semantics");
+    let effects = Arc::new(Effects::default());
+    let older = native(&path, None, flow_functions(effects.clone(), None));
+    let key = older
+        .start(&flow(), json!({"n": 7}), "flow")
+        .await
+        .unwrap()
+        .key;
+    let parked = older.run_until_parked(&key).await.unwrap();
+    assert_eq!(parked.status, "waiting");
+    assert_eq!(state(&parked)["semantics"], SEMANTICS_VERSION);
+    let arrived = older.arrival(&parked).await.unwrap();
+    drop(older);
+
+    let newer = kernel_engine(
+        store(&path, None),
+        Arc::new(NewerDefault),
+        flow_functions(effects, None),
+        EngineConfig::default(),
+    );
+    assert_eq!(
+        newer.arrival(&parked).await.unwrap(),
+        arrived,
+        "replaying the run's events gives the same arrow"
+    );
+    newer
+        .signal(&key, "m1", "approval", Some("approved".into()), json!({}))
+        .await
+        .unwrap();
+    let view = newer.run_until_parked(&key).await.unwrap();
+    assert_eq!(
+        (view.status.as_str(), view.quarantine.as_ref()),
+        ("completed", None)
+    );
+    assert_eq!(state(&view)["semantics"], SEMANTICS_VERSION);
 }
 
 #[tokio::test]
