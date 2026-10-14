@@ -234,10 +234,23 @@ fn a_running_step_shows_its_try_and_an_unknown_outcome_its_lost_lease() {
         running["invocationId"],
         status["invocation"]["invocationId"]
     );
+    assert_eq!(running["state"], "started", "{status}");
+    assert_eq!(running["pid"], status["invocation"]["process"]["pgid"]);
+    let worker = running["worker"].as_str().expect("worker").to_string();
     since(running, before);
     let text = dir.run(&args(&["status", &run])).stdout;
     assert!(
-        text.contains("running    work attempt 1 of 2, claimed, due since "),
+        text.contains(&format!(
+            "running    work attempt 1 of 2, started by {worker} since "
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(", pid {}\n", running["pid"])),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("slots      1 of 4 in use by {worker}\n")),
         "{text}"
     );
 
@@ -261,4 +274,122 @@ fn a_running_step_shows_its_try_and_an_unknown_outcome_its_lost_lease() {
         text.contains("needs      a person: step work its last attempt's lease ran out"),
         "{text}"
     );
+}
+
+/// A project whose settings give a worker one slot: the run that got it shows its
+/// program started, with its pid; the other shows it queued for a slot and which step
+/// holds the slot.
+#[test]
+fn a_step_waiting_for_a_slot_shows_queued_and_who_holds_the_slots() {
+    let dir = folder("status-slots", "idempotent", "sleep 5");
+    std::fs::create_dir_all(dir.file(".spore")).unwrap();
+    std::fs::write(
+        dir.file(".spore/settings.json"),
+        r#"{"worker": {"slots": 1}}"#,
+    )
+    .unwrap();
+    let db = dir.file(".spore/runspore.db");
+    let spore = |extra: &[&str]| {
+        let mut cmd = dir.cmd(&args(extra));
+        cmd.env("RUNSPORE_DB", &db);
+        common::run(cmd)
+    };
+    for key in ["first", "second"] {
+        assert_eq!(spore(&["start", "flow", "--key", key]).code(), Some(0));
+    }
+    let before = now_ms();
+    let mut worker = dir
+        .cmd(&args(&["worker"]))
+        .env("RUNSPORE_DB", &db)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    while dir.effects().is_empty() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let list = spore(&["--json", "list"]).json();
+    let statuses: Vec<Value> = list["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| spore(&["--json", "status", r["runId"].as_str().unwrap()]).json())
+        .collect();
+    let of = |state: &str| {
+        statuses
+            .iter()
+            .find(|s| s["running"]["state"] == state)
+            .unwrap_or_else(|| panic!("no run {state}: {statuses:?}"))
+    };
+    let (started, queued) = (of("started"), of("queued"));
+    let pid = &started["invocation"]["process"]["pgid"];
+    assert!(pid.is_i64(), "{started}");
+    assert_eq!(started["running"]["pid"], *pid);
+    since(&started["running"], before);
+    assert_eq!(
+        (&queued["running"]["claimed"], &queued["running"]["pid"]),
+        (&json!(false), &Value::Null)
+    );
+    let slots = &queued["slots"];
+    assert_eq!(slots["limit"], 1, "{queued}");
+    let held = slots["held"].as_array().unwrap();
+    assert_eq!(held.len(), 1, "{slots}");
+    assert_eq!(
+        (&held[0]["runId"], &held[0]["startKey"], &held[0]["nodeId"]),
+        (&started["runId"], &started["startKey"], &json!("work"))
+    );
+    assert_eq!(held[0]["pid"], *pid);
+    assert_eq!(held[0]["worker"], started["running"]["worker"]);
+    since(&held[0], before);
+
+    let run = queued["runId"].as_str().unwrap();
+    let text = spore(&["status", run]).stdout;
+    let worker_id = held[0]["worker"].as_str().unwrap();
+    let start_key = started["startKey"].as_str().unwrap();
+    assert!(
+        text.contains("running    work attempt 1 of 2, queued for a free worker slot since "),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("slots      1 of 1 in use by {worker_id}\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "             {start_key} at work attempt 1, pid {pid} since "
+        )),
+        "{text}"
+    );
+    worker.kill().unwrap();
+    worker.wait().unwrap();
+}
+
+#[test]
+fn project_settings_that_spore_does_not_know_are_refused() {
+    let dir = Dir::new("status-bad-settings");
+    std::fs::create_dir_all(dir.file(".spore")).unwrap();
+    let db = dir.file(".spore/runspore.db");
+    for (settings, says) in [
+        (r#"{"worker": {"slot": 2}}"#, "worker.slot is not a setting"),
+        (
+            r#"{"worker": {"slots": 0}}"#,
+            "worker.slots: expected a whole number from 1",
+        ),
+        ("{", "settings.json: "),
+    ] {
+        std::fs::write(dir.file(".spore/settings.json"), settings).unwrap();
+        let mut cmd = dir.cmd(&["--json", "worker"]);
+        cmd.env("RUNSPORE_DB", &db);
+        let out = common::run(cmd);
+        assert_eq!(out.code(), Some(2), "{settings}: {}", out.stdout);
+        let error = out.json();
+        assert_eq!(
+            error["error"]["code"], "project.settings-invalid",
+            "{error}"
+        );
+        assert!(
+            error["error"]["message"].as_str().unwrap().contains(says),
+            "{error}"
+        );
+    }
 }

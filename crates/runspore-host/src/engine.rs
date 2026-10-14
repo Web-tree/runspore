@@ -34,8 +34,10 @@ use crate::process::{self, Leftover};
 use crate::progress::{self, Change, Progress};
 
 mod intervention;
+mod slots;
 mod steps;
 
+pub use slots::HeldSlot;
 pub use steps::{ExternalStep, StepClaim, StepRenewed, StepReport, StepState, RESULT_CHANNEL};
 
 /// Quarantine code of a run whose stored artifact cannot be read.

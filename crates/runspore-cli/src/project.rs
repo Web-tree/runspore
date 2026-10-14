@@ -1,10 +1,11 @@
 //! The project folder of spec/cli.md: which database a command uses, a run's base
-//! folder, `spore init`, the ignore file, and workflows named by their graph id.
+//! folder, the project's settings, `spore init`, the ignore file, and workflows named by
+//! their graph id.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
+use serde_json::{json, Map, Value};
 
 use crate::cli::{Fail, Output};
 
@@ -13,6 +14,8 @@ pub const FOLDER: &str = ".spore";
 /// The database's file name, in the project folder or, without one, the current folder.
 pub const DATABASE: &str = "runspore.db";
 const WORKFLOWS: &str = "workflows";
+/// The project's settings file, in the project folder.
+const SETTINGS: &str = "settings.json";
 const IGNORE_FILE: &str = ".gitignore";
 /// The lines the ignore file must hold.
 const IGNORED: [&str; 3] = ["runspore.db", "runspore.db-*", "runspore.db.files/"];
@@ -56,6 +59,74 @@ pub fn root_of(db: &Path) -> Option<&Path> {
     let folder = db.parent()?;
     let named = db.file_name()? == DATABASE && folder.file_name()? == FOLDER;
     named.then(|| folder.parent()).flatten()
+}
+
+/// The project's settings, from `settings.json` in the database's project folder.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Settings {
+    /// `worker.slots`: how many steps one worker runs at once.
+    pub slots: Option<usize>,
+}
+
+/// The settings of the project whose database is `db`: none when `db` is not a project
+/// folder's or the folder has no `settings.json`. A file that is not JSON, holds a key
+/// spore does not know, or a slot count that is not a whole number from 1 is refused
+/// with exit 2.
+pub fn settings(db: &Path) -> Result<Settings, Fail> {
+    let Some(root) = root_of(db) else {
+        return Ok(Settings::default());
+    };
+    let path = root.join(FOLDER).join(SETTINGS);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Settings::default()),
+        Err(e) => {
+            let message = format!("{}: {e}", path.display());
+            return Err(Fail::internal("project.settings-unreadable", message));
+        }
+    };
+    let invalid = |message: String| {
+        Fail::usage(
+            "project.settings-invalid",
+            format!("{}: {message}", path.display()),
+        )
+    };
+    let value: Value = serde_json::from_str(&text).map_err(|e| invalid(e.to_string()))?;
+    let unknown = |object: &Map<String, Value>, at: &str, known: &[&str]| match object
+        .keys()
+        .find(|k| !known.contains(&k.as_str()))
+    {
+        Some(key) => Err(invalid(format!(
+            "{at}{key} is not a setting; known: {}",
+            known.join(", ")
+        ))),
+        None => Ok(()),
+    };
+    let Value::Object(top) = &value else {
+        return Err(invalid("expected an object".into()));
+    };
+    unknown(top, "", &["worker"])?;
+    let Some(worker) = top.get("worker") else {
+        return Ok(Settings::default());
+    };
+    let Value::Object(worker) = worker else {
+        return Err(invalid("worker: expected an object".into()));
+    };
+    unknown(worker, "worker.", &["slots"])?;
+    let slots = match worker.get("slots") {
+        None => None,
+        Some(n) => Some(
+            n.as_u64()
+                .filter(|n| *n >= 1)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "worker.slots: expected a whole number from 1, got {n}"
+                    ))
+                })?,
+        ),
+    };
+    Ok(Settings { slots })
 }
 
 /// A run's base folder: `given` (`--base-dir`), else the folder holding the database's

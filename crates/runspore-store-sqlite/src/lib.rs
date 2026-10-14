@@ -19,7 +19,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -44,6 +44,8 @@ const UPGRADE_6: &str = "ALTER TABLE invocations ADD COLUMN params BLOB;";
 /// Upgrades a version 7 database to version 8: the run's parent.
 const UPGRADE_7: &str = "ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
     ALTER TABLE runs ADD COLUMN parent_node_id TEXT;";
+/// Upgrades a version 8 database to version 9: when an attempt was claimed.
+const UPGRADE_8: &str = "ALTER TABLE attempts ADD COLUMN claimed_at_ms INTEGER;";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -437,6 +439,7 @@ impl SqliteStore {
                 (5, UPGRADE_5),
                 (6, UPGRADE_6),
                 (7, UPGRADE_7),
+                (8, UPGRADE_8),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -763,8 +766,8 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     .map_err(db)?;
     c.execute(
         "INSERT INTO attempts (tenant, run_id, attempt_id, invocation_id, attempt_number, owner,
-                               fence, lease_until_ms, status, holder, deadline_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9, ?10)",
+                               fence, lease_until_ms, status, holder, deadline_ms, claimed_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9, ?10, ?11)",
         params![
             q.key.tenant,
             q.key.run,
@@ -775,7 +778,8 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
             i(fence),
             i(lease_until_ms),
             q.holder,
-            deadline_ms.map(i)
+            deadline_ms.map(i),
+            i(now)
         ],
     )
     .map_err(db)?;
@@ -1367,7 +1371,8 @@ impl Store for SqliteStore {
             let mut stmt = c
                 .prepare(
                     "SELECT i.invocation_id, i.node_id, i.action_id, i.status, i.attempt_number, i.not_before_ms,
-                            a.lease_until_ms, a.owner, a.process, a.attempt_id, a.fence, a.holder, a.deadline_ms
+                            a.lease_until_ms, a.owner, a.process, a.attempt_id, a.fence, a.holder, a.deadline_ms,
+                            a.claimed_at_ms
                      FROM invocations i LEFT JOIN attempts a ON a.tenant = i.tenant AND a.run_id = i.run_id
                        AND a.invocation_id = i.invocation_id AND a.attempt_number = i.attempt_number
                      WHERE i.tenant = ?1 AND i.run_id = ?2 ORDER BY i.invocation_id",
@@ -1405,6 +1410,7 @@ impl Store for SqliteStore {
                         attempt,
                         holder: r.get(11)?,
                         deadline_ms: r.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+                        claimed_at_ms: r.get::<_, Option<i64>>(13)?.map(|v| v as u64),
                     })
                 })
                 .and_then(Iterator::collect)

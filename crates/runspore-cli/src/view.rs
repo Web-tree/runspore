@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use runspore_host::progress::{Change, Progress};
-use runspore_host::{Arrival, Arrow, ExternalStep};
+use runspore_host::{Arrival, Arrow, ExternalStep, HeldSlot};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
 use serde_json::{json, Value};
@@ -97,7 +97,8 @@ fn streaks_json(state: &State, package: Option<&Value>) -> Value {
 /// What `status` shows of a run beside its view: the arrow into its position and when
 /// it came to stand there, its package as JSON, its invocations and external step, the
 /// payload of the latest `activity.result` of its outstanding invocation, the runs
-/// below it, and the time the command read it all.
+/// below it, the steps that take workers' slots and how many slots a worker has, and
+/// the time the command read it all.
 pub struct Shown {
     pub arrival: Arrival,
     pub package: Option<Value>,
@@ -105,6 +106,8 @@ pub struct Shown {
     pub step: Option<ExternalStep>,
     pub last_result: Option<Value>,
     pub children: Tree,
+    pub slots: Vec<HeldSlot>,
+    pub slot_limit: usize,
     pub now_ms: u64,
 }
 
@@ -204,6 +207,7 @@ fn status_json(view: &RunView, shown: &Shown) -> Value {
         "waiting": detail("waiting").map_or(Value::Null, Stands::waiting),
         "intervention": detail("needs-intervention").map_or(Value::Null, Stands::intervention),
         "running": detail("running").map_or(Value::Null, Stands::running),
+        "slots": slots_json(shown),
         "streaks": state.as_ref().map_or(Value::Null, |s| streaks_json(s, package)),
         "result": field(|s| json!(s.result)),
         "end": arrival.end.as_ref().map(|end| json!({
@@ -240,12 +244,8 @@ impl<'a> Stands<'a> {
         }
     }
 
-    /// `sinceMs` and `forMs` of a stand that began at `since`, as decimal strings.
     fn since(&self, since: Option<u64>) -> (Value, Value) {
-        since.map_or((Value::Null, Value::Null), |since| {
-            let lasted = self.shown.now_ms.saturating_sub(since);
-            (json!(since.to_string()), json!(lasted.to_string()))
-        })
+        since_json(since, self.shown.now_ms)
     }
 
     fn output_schemas(&self) -> Value {
@@ -334,9 +334,10 @@ impl<'a> Stands<'a> {
                "commands": commands})
     }
 
-    /// At an activity: its attempt, whether a worker or an actor holds it, and how long
-    /// it has run. The store does not record when an attempt was claimed, so a try runs
-    /// from when it was due: the transition that scheduled it, or its backoff's end.
+    /// At an activity: its attempt, whether a worker or an actor holds it, and since
+    /// when. A started try runs from its claim, with the worker and the pid of its
+    /// program; a queued one waits, from when it was due, for a worker with a free
+    /// slot; one in backoff waits until it is due.
     fn running(&self) -> Value {
         let Some(invocation) = &self.state.invocation else {
             return Value::Null;
@@ -351,14 +352,53 @@ impl<'a> Stands<'a> {
             .arrival
             .since_ms
             .max(stored.map(|i| i.not_before_ms));
-        let (since, lasted) = self.since(due);
+        let claimed = stored.map(|i| i.status == InvocationStatus::Running);
+        let state = match (claimed, due) {
+            (Some(true), _) => "started",
+            (_, Some(due)) if due > self.shown.now_ms => "backoff",
+            _ => "queued",
+        };
+        let started = stored.filter(|_| state == "started");
+        // A try claimed before the store recorded claims runs from when it was due.
+        let (since, lasted) = self.since(started.and_then(|i| i.claimed_at_ms).or(due));
+        // An actor's hold takes no slot; `step` shows it.
+        let slot = self
+            .shown
+            .slots
+            .iter()
+            .find(|s| s.key.run == self.run_id && s.invocation_id == invocation.invocation_id);
+        let pid = started.and_then(|i| i.process.as_ref()).map(|p| p.pgid);
         let package = self.shown.package.as_ref();
         json!({"nodeId": invocation.node_id, "actionId": invocation.action_id,
                "invocationId": invocation.invocation_id, "attempt": invocation.attempt,
                "maxAttempts": package.map(|p| max_attempts(p, &invocation.action_id)),
-               "claimed": stored.map(|i| i.status == InvocationStatus::Running),
-               "sinceMs": since, "forMs": lasted})
+               "claimed": claimed, "state": state, "worker": slot.map(|s| &s.worker),
+               "pid": pid, "sinceMs": since, "forMs": lasted})
     }
+}
+
+/// `sinceMs` and `forMs` of a stand that began at `since`, as decimal strings.
+fn since_json(since: Option<u64>, now_ms: u64) -> (Value, Value) {
+    since.map_or((Value::Null, Value::Null), |since| {
+        let lasted = now_ms.saturating_sub(since);
+        (json!(since.to_string()), json!(lasted.to_string()))
+    })
+}
+
+/// The `slots` object of `status`: how many steps a worker runs at once, and each step
+/// a worker runs now, with the worker, since its claim and the pid of its program.
+fn slots_json(shown: &Shown) -> Value {
+    let held: Vec<Value> = shown
+        .slots
+        .iter()
+        .map(|slot| {
+            let (since, lasted) = since_json(slot.claimed_at_ms, shown.now_ms);
+            json!({"worker": slot.worker, "runId": slot.key.run, "startKey": slot.start_key,
+                   "nodeId": slot.node_id, "attempt": slot.attempt, "pid": slot.pid,
+                   "sinceMs": since, "forMs": lasted})
+        })
+        .collect();
+    json!({"limit": shown.slot_limit, "held": held})
 }
 
 /// `node on outcome`, the way an arrow reads in text.
@@ -419,7 +459,12 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     }
     text += &waiting_text(&s["waiting"]);
     text += &intervention_text(&s["intervention"], &s["invocation"]);
-    text += &running_text(&s["running"]);
+    // An external step waits for an actor, not for a worker's slot.
+    let external = shown.step.is_some();
+    text += &running_text(&s["running"], external);
+    if s["running"].is_object() && !external {
+        text += &slots_text(&s["slots"]);
+    }
     for (node, streak) in s["streaks"].as_object().into_iter().flatten() {
         text += &format!(
             "streak     {node} {} {} of {} in a row\n",
@@ -523,25 +568,72 @@ fn intervention_text(intervention: &Value, invocation: &Value) -> String {
     text + &commands_text("resolve", intervention)
 }
 
-fn running_text(running: &Value) -> String {
+/// The try, and whether its program runs, it waits for a slot (an `external` step: for
+/// an actor) or it waits to retry.
+fn running_text(running: &Value, external: bool) -> String {
     if !running.is_object() {
         return String::new();
     }
     let of = running["maxAttempts"]
         .as_u64()
         .map_or_else(String::new, |m| format!(" of {m}"));
-    // The claim's time is not recorded: the try is shown from when it was due.
-    let held = match running["claimed"].as_bool() {
-        Some(true) => ", claimed, due",
-        Some(false) => ", not claimed yet, due",
-        None => ", due",
+    let since = since_text(running);
+    let stands = match running["state"].as_str() {
+        Some("started") => {
+            let by = running["worker"]
+                .as_str()
+                .map_or_else(String::new, |w| format!(" by {w}"));
+            format!("started{by}{since}{}", pid_text(&running["pid"]))
+        }
+        Some("backoff") => match running["sinceMs"].as_str().and_then(|v| v.parse().ok()) {
+            Some(due) => format!("waiting to retry, due {}", utc_text(due)),
+            None => "waiting to retry".to_string(),
+        },
+        _ if external => format!("queued for an actor to claim it{since}"),
+        _ => format!("queued for a free worker slot{since}"),
     };
     format!(
-        "running    {} attempt {}{of}{held}{}\n",
+        "running    {} attempt {}{of}, {stands}\n",
         running["nodeId"].as_str().unwrap_or_default(),
         running["attempt"],
-        since_text(running)
     )
+}
+
+fn pid_text(pid: &Value) -> String {
+    pid.as_i64()
+        .map_or_else(String::new, |pid| format!(", pid {pid}"))
+}
+
+/// Per worker, how many of its slots are in use and the step in each; or that no
+/// worker runs a step.
+fn slots_text(slots: &Value) -> String {
+    let limit = &slots["limit"];
+    let held = slots["held"].as_array().map_or(&[][..], Vec::as_slice);
+    if held.is_empty() {
+        return format!("slots      none of {limit} in use: no worker runs a step\n");
+    }
+    let mut workers: Vec<&str> = Vec::new();
+    for worker in held.iter().filter_map(|h| h["worker"].as_str()) {
+        if !workers.contains(&worker) {
+            workers.push(worker);
+        }
+    }
+    let mut lines = Vec::new();
+    for worker in workers {
+        let steps: Vec<&Value> = held.iter().filter(|h| h["worker"] == worker).collect();
+        lines.push(format!("{} of {limit} in use by {worker}", steps.len()));
+        for step in steps {
+            lines.push(format!(
+                "  {} at {} attempt {}{}{}",
+                step["startKey"].as_str().unwrap_or_default(),
+                step["nodeId"].as_str().unwrap_or_default(),
+                step["attempt"],
+                pid_text(&step["pid"]),
+                since_text(step)
+            ));
+        }
+    }
+    lines_text("slots", lines)
 }
 
 /// A time in milliseconds since the Unix epoch, in UTC: `2026-10-14T20:46:03Z`.

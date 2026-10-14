@@ -572,6 +572,9 @@ pub struct InvocationView {
     pub holder: Option<Vec<u8>>,
     /// The latest attempt's deadline, if it was claimed with one.
     pub deadline_ms: Option<u64>,
+    /// When the latest attempt was claimed, by the store's clock; `None` before the
+    /// first claim and for attempts claimed before the store recorded it.
+    pub claimed_at_ms: Option<u64>,
 }
 
 #[async_trait]

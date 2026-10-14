@@ -363,6 +363,7 @@ root:
 ```text
 .spore/
 ├── .gitignore              # written by spore
+├── settings.json           # the project's settings, optional, committed
 ├── workflows/
 │   └── coding-loop/        # a workflow folder (dot.md), committed
 ├── runspore.db             # not committed
@@ -389,6 +390,24 @@ recorded folder is absolute. Every dispatch of the run, by any later command sta
 from any folder, runs the run's commands from it (host §2), so a run continued from a
 subfolder runs where its first try ran. A `start` whose key names an existing run keeps
 the folder recorded first.
+
+**Settings.** `.spore/settings.json` holds the project's settings. It is optional;
+`spore init` does not write it. Today it holds one setting:
+
+```json
+{"worker": {"slots": 8}}
+```
+
+`worker.slots` is how many steps one worker runs at once (host.md §2,
+`max_concurrent_activities`), a whole number from 1; without it, 4. It holds for every
+worker on the project's database, `run` and `worker`, and `status` shows it as the
+`slots` limit. A command reads the settings of the project whose database it uses:
+the file beside `<dir>/.spore/runspore.db`, however that path was given, so a step's
+`spore` reaches the settings of its run's project. A database outside a project
+folder has no settings. Every command that opens the database refuses, with exit 2
+and `project.settings-invalid`, a file that is not JSON, holds a key spore does not
+know, or a slot count that is not a whole number from 1; the message names the file
+and what is wrong.
 
 **`spore init`.** It creates `.spore/`, `.spore/workflows/` and `.spore/.gitignore` at
 the repository root: the nearest folder at or above the current one that holds `.git`
@@ -559,6 +578,7 @@ Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
                                "spore resolve run_… --complete ok",
                                "spore resolve run_… --fail <message>"]},
  "running": null,
+ "slots": {"limit": 4, "held": []},
  "streaks": {"test": {"outcome": "red", "count": 2, "limit": 3}},
  "step": null, "result": null, "end": null, "quarantine": null}
 ```
@@ -609,10 +629,40 @@ here is recorded for `status`: it is read from the state, the package and the st
   `spore resolve <runId> --retry`, one `--complete <o>` per outcome (with ` --output
   <json>` when it has a schema) and `--fail <message>`.
 - `running`, at an activity: `{"nodeId", "actionId", "invocationId", "attempt",
-  "maxAttempts", "claimed", "sinceMs", "forMs"}`. `claimed` is whether a worker or
-  an actor holds the attempt. The store does not record when an attempt was claimed,
-  so `sinceMs` is when the try was due: the later of the transition that scheduled it
-  and the end of its backoff.
+  "maxAttempts", "claimed", "state", "worker", "pid", "sinceMs", "forMs"}`. `claimed`
+  is whether a worker or an actor holds the attempt. `state` tells the kernel's one
+  `scheduled` apart, as Temporal tells scheduled from started:
+  - `started`: the attempt is claimed. `sinceMs` is when it was claimed (store.md
+    §2); `worker` is the worker that claimed it, null for an actor's hold (`step`
+    shows that); `pid` is the leader of the process group its program runs in, from
+    the attempt's process record, null until the program has started.
+  - `queued`: the try is due and nobody has claimed it: it waits for a worker with a
+    free slot (`slots` below), or for any worker at all; at an external step, for an
+    actor to claim it (`step`). `sinceMs` is when the try
+    was due: the later of the transition that scheduled it and the end of its
+    backoff.
+  - `backoff`: the try is not due yet; `sinceMs` is when it will be, `forMs` is
+    `"0"`.
+
+  For `queued` and `backoff`, `worker` and `pid` are null. An attempt claimed by a
+  `spore` before 0.2 recorded claim times runs from when it was due.
+
+**0.2: worker slots.** A worker runs at most `worker.slots` steps at once (§Project
+folder); each step a worker runs takes one of its slots until its try ends. `status`
+carries `slots`: `{"limit", "held"}`. `limit` is the slot count of a worker of this
+project, from its settings as `status` reads them. `held` lists every step a worker
+runs now, in any run of the database: `{"worker", "runId", "startKey", "nodeId",
+"attempt", "pid", "sinceMs", "forMs"}`, `sinceMs` being when the worker claimed it. A
+step an actor holds takes no slot and is not listed. A queued step whose worker shows
+`limit` steps in `held` waits for one of them to end; one with an empty `held` waits
+for a worker to run.
+
+Text mode shows `running` as `started by <worker> since …, for …, pid <pid>`,
+`queued for a free worker slot since …, for …` (at an external step `queued for an
+actor to claim it since …`) or `waiting to retry, due …`. Under it, except at an
+external step, `slots` shows, per worker, `<n> of <limit> in use by <worker>` and one line per step it
+runs: the run's start key, the node, the attempt, the pid and since when; with none,
+`none of <limit> in use: no worker runs a step`.
 
 The commands name the run and nothing else: a run in another database than the one
 found by default needs `--db` added. Text mode shows the same under `waiting`, `needs`

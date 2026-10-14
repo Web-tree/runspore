@@ -869,6 +869,7 @@ fn engine(
     base_dir: PathBuf,
     parent: Option<RunParent>,
 ) -> Result<Engine, Fail> {
+    let settings = project::settings(db)?;
     let store = SqliteStore::open(db)
         .map_err(|f| Fail::internal(&f.code, format!("{}: {}", db.display(), f.message)))?;
     let mut config = EngineConfig {
@@ -883,6 +884,7 @@ fn engine(
     config.poll_ms = cli.poll_ms.unwrap_or(config.poll_ms);
     config.shutdown_grace_ms = cli.grace_ms.unwrap_or(config.shutdown_grace_ms);
     config.stop_grace_ms = cli.stop_grace_ms.unwrap_or(config.stop_grace_ms);
+    config.max_concurrent_activities = settings.slots.unwrap_or(config.max_concurrent_activities);
     Ok(Engine::new(
         Arc::new(store),
         reducer(cli)?,
@@ -1112,6 +1114,7 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
 impl Shown {
     async fn read(engine: &Engine, view: &RunView) -> Result<Self, Fail> {
         let runs = all_runs(engine).await?;
+        let now = now_ms();
         Ok(Self {
             arrival: engine.arrival(view).await?,
             package: package(engine, view).await?,
@@ -1119,7 +1122,9 @@ impl Shown {
             step: engine.external_step(view).await?,
             last_result: last_result(engine, view).await?,
             children: read_tree(engine, runs, Some(&view.key.run)).await?,
-            now_ms: now_ms(),
+            slots: engine.held_slots(now).await?,
+            slot_limit: engine.config().max_concurrent_activities,
+            now_ms: now,
         })
     }
 }

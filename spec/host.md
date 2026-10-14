@@ -71,7 +71,7 @@ process on its own.
 | `heartbeat_ms` | 3000 | Lease renewal interval |
 | `poll_ms` | 200 | Idle sleep in `serve` |
 | `shutdown_grace_ms` | 10000 | How long `serve` waits for in-flight attempts on shutdown |
-| `max_concurrent_activities` | 4 | In-flight attempts |
+| `max_concurrent_activities` | 4 | In-flight attempts: the worker's slots. **0.2:** `spore` takes it from the project's settings, `worker.slots` (cli.md §Project folder) |
 | `turns_per_run` | 32 | Transitions per run per tick |
 | `limits` | `Limits::default()` | Frozen kernel budget |
 | `base_dir` | current directory | Base for relative `cwd` of command actions. **0.2:** `start` records it as the run's base folder, and dispatch uses the run's recorded folder; it serves only runs that have none |
@@ -188,6 +188,12 @@ One bounded pass. It never blocks on an activity.
 3. **Dispatch.** For each `Outbox` item, while fewer than `max_concurrent_activities`
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
    **0.2:** an invocation of an `external` action is skipped: an actor claims it.
+   **0.2:** a due invocation left unclaimed because every slot is taken is _queued_:
+   it waits for a worker with a free slot. `held_slots(now)` lists the attempts that
+   take a slot, those a worker claimed at a step that is not `external`, unfinished
+   and with a lease that has not run out, each with its run, node, attempt, worker,
+   claim time and the pid of its program; `spore status` shows them (cli.md,
+   `slots`).
    **0.2:** with `files_dir` set, before the claim, the host makes or checks the
    step's files and its work folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
    no attempt is spent and no lease runs out on a try that never started.

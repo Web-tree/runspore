@@ -1581,6 +1581,43 @@ pub async fn s22_params(factory: &dyn StoreFactory) {
     assert_eq!((second.attempt_number, second.params), (2, expected));
 }
 
+/// S24: `list_invocations` shows when the latest attempt was claimed, by the store's
+/// clock: nothing before the first claim, the retry's own time after it.
+pub async fn s24_claimed_at(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s24").await;
+    let invocation = w.scheduled(0).await;
+    assert_eq!(w.invocations().await[0].claimed_at_ms, None);
+
+    w.clock.set(1_200);
+    let first = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-1", &invocation, "w", 1_000))
+        .await
+        .expect("claim")
+        .value;
+    assert_eq!(w.invocations().await[0].claimed_at_ms, Some(1_200));
+    w.clock.set(1_250);
+    let replay = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-1", &invocation, "w", 1_000))
+        .await
+        .expect("replay");
+    assert_eq!(replay.disposition, Disposition::Duplicate);
+    assert_eq!(w.invocations().await[0].claimed_at_ms, Some(1_200));
+
+    w.store()
+        .finish_attempt(finish(&first.attempt, "finish-1", 1))
+        .await
+        .expect("finish");
+    w.commit("commit-2", vec![retry(&w.key, "a", 2, 0)]).await;
+    w.clock.set(1_400);
+    w.store()
+        .claim_attempt(claim(&w.key, "claim-2", &invocation, "w", 1_000))
+        .await
+        .expect("claim");
+    assert_eq!(w.invocations().await[0].claimed_at_ms, Some(1_400));
+}
+
 /// S23: the run keeps the parent it was created with; a repeat with another is a
 /// duplicate, and a run created without one shows none.
 pub async fn s23_parent(factory: &dyn StoreFactory) {
@@ -1632,7 +1669,7 @@ macro_rules! store_conformance_tests {
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
             s15_start_key_race s16_process_record s17_base_dir
             s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep
-            s22_params s23_parent);
+            s22_params s23_parent s24_claimed_at);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(
