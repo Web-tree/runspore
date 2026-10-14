@@ -125,7 +125,9 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
     // Its schema: what the file held before versions 5 to 7 were added.
     sql(&dir)
         .execute_batch(&format!(
-            "ALTER TABLE invocations DROP COLUMN params;
+            "ALTER TABLE runs DROP COLUMN parent_run_id;
+             ALTER TABLE runs DROP COLUMN parent_node_id;
+             ALTER TABLE invocations DROP COLUMN params;
              ALTER TABLE attempts DROP COLUMN holder;
              ALTER TABLE attempts DROP COLUMN deadline_ms;
              DROP TABLE meta;

@@ -1,6 +1,8 @@
 //! Rendering of store views as CLI JSON objects and text. Counters and timestamps are
 //! decimal strings.
 
+use std::collections::HashMap;
+
 use runspore_host::{Arrival, Arrow, ExternalStep};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
@@ -93,14 +95,15 @@ fn streaks_json(state: &State, package: Option<&Value>) -> Value {
 
 /// What `status` shows of a run beside its view: the arrow into its position and when
 /// it came to stand there, its package as JSON, its invocations and external step, the
-/// payload of the latest `activity.result` of its outstanding invocation, and the time
-/// the command read it all.
+/// payload of the latest `activity.result` of its outstanding invocation, the runs
+/// below it, and the time the command read it all.
 pub struct Shown {
     pub arrival: Arrival,
     pub package: Option<Value>,
     pub invocations: Vec<InvocationView>,
     pub step: Option<ExternalStep>,
     pub last_result: Option<Value>,
+    pub children: Tree,
     pub now_ms: u64,
 }
 
@@ -109,11 +112,55 @@ impl Shown {
     pub fn json(&self, view: &RunView) -> Value {
         let mut json = status_json(view, self);
         json["step"] = step_json(self.step.as_ref());
+        json["children"] = self.children.json();
         json
     }
 
     pub fn text(&self, view: &RunView) -> String {
-        status_text(view, self) + &step_text(self.step.as_ref())
+        let mut text = status_text(view, self) + &step_text(self.step.as_ref());
+        if !self.children.rows.is_empty() {
+            text += "children\n";
+            text += &self.children.text(1, self.now_ms);
+            text += "\n";
+        }
+        text
+    }
+}
+
+/// Runs as a tree, parents first, each unfinished one with its node and since when it
+/// has stood there (spec/cli.md, `list`).
+pub struct Tree {
+    pub runs: Vec<RunView>,
+    /// Index into `runs`, depth, node, since.
+    pub rows: Vec<(usize, usize, Option<String>, Option<u64>)>,
+}
+
+impl Tree {
+    fn each(&self) -> impl Iterator<Item = TreeRun<'_>> {
+        self.rows.iter().map(|(i, depth, node, since)| TreeRun {
+            view: &self.runs[*i],
+            depth: *depth,
+            node_id: node.clone(),
+            since_ms: *since,
+        })
+    }
+
+    pub fn json(&self) -> Value {
+        Value::Array(self.each().map(|r| tree_json(&r)).collect())
+    }
+
+    /// One line per run, `indent` levels in, with times up to `now_ms`.
+    pub fn text(&self, indent: usize, now_ms: u64) -> String {
+        let width = self
+            .each()
+            .map(|r| 2 * (r.depth + indent) + r.view.key.run.len())
+            .max()
+            .unwrap_or(0);
+        let lines: Vec<String> = self
+            .each()
+            .map(|r| tree_text(&r, indent, width, now_ms))
+            .collect();
+        lines.join("\n")
     }
 }
 
@@ -150,6 +197,7 @@ fn status_json(view: &RunView, shown: &Shown) -> Value {
         "revision": view.revision.to_string(),
         "packageDigest": view.package_digest,
         "artifactDigest": view.artifact_digest,
+        "parent": parent_json(view),
         "position": position,
         "invocation": invocation,
         "waiting": detail("waiting").map_or(Value::Null, Stands::waiting),
@@ -328,6 +376,9 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     );
     if let Some(artifact) = &view.artifact_digest {
         text += &format!("artifact   {artifact}\n");
+    }
+    if let Some(parent) = &view.parent {
+        text += &format!("parent     {} at {}\n", parent.run_id, parent.node_id);
     }
     if let Some(p) = s["position"].as_object() {
         text += &format!(
@@ -523,6 +574,109 @@ fn duration_text(ms: u64) -> String {
         3600..86_400 => format!("{}h{:02}m", secs / 3600, secs % 3600 / 60),
         _ => format!("{}d{}h", secs / 86_400, secs % 86_400 / 3600),
     }
+}
+
+/// One run of a `list` or `status` tree: how deep it sits under the runs that started
+/// it, and, while it is unfinished, its node and since when it has been there.
+struct TreeRun<'a> {
+    pub view: &'a RunView,
+    pub depth: usize,
+    pub node_id: Option<String>,
+    pub since_ms: Option<u64>,
+}
+
+/// `runs` as a tree, parents first, each with its depth. Under `root`, the runs it
+/// started and theirs, the direct children at depth 0; without it, every run, a run
+/// whose parent is not among `runs` at the top. Siblings keep the order of `runs`.
+pub fn tree<'a>(runs: &'a [RunView], root: Option<&str>) -> Vec<(&'a RunView, usize)> {
+    let index: HashMap<&str, usize> = runs
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.key.run.as_str(), i))
+        .collect();
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); runs.len()];
+    let mut tops = Vec::new();
+    for (i, run) in runs.iter().enumerate() {
+        match run
+            .parent
+            .as_ref()
+            .and_then(|p| index.get(p.run_id.as_str()))
+        {
+            Some(&parent) => children[parent].push(i),
+            None => tops.push(i),
+        }
+    }
+    if let Some(root) = root {
+        tops = index
+            .get(root)
+            .map_or_else(Vec::new, |&r| children[r].clone());
+    }
+    let mut out = Vec::new();
+    let mut seen = vec![false; runs.len()];
+    let mut walk = |top: usize, out: &mut Vec<(&'a RunView, usize)>| {
+        let mut stack = vec![(top, 0)];
+        while let Some((i, depth)) = stack.pop() {
+            if std::mem::replace(&mut seen[i], true) {
+                continue;
+            }
+            out.push((&runs[i], depth));
+            stack.extend(children[i].iter().rev().map(|&c| (c, depth + 1)));
+        }
+    };
+    for top in tops {
+        walk(top, &mut out);
+    }
+    // Runs whose parents start each other have no top; they still show.
+    if root.is_none() {
+        for i in 0..runs.len() {
+            walk(i, &mut out);
+        }
+    }
+    out
+}
+
+fn tree_json(run: &TreeRun<'_>) -> Value {
+    let v = run.view;
+    json!({
+        "runId": v.key.run, "startKey": v.start_key, "status": v.status,
+        "revision": v.revision.to_string(), "quarantined": v.quarantine.is_some(),
+        "parent": parent_json(v), "depth": run.depth, "nodeId": run.node_id,
+        "sinceMs": run.since_ms.map(|s| s.to_string()),
+    })
+}
+
+/// One line: the run indented under its parent, its status, node, time at the node,
+/// start key, and the parent's node that started it. `indent` levels go before every
+/// run; `width` is the width of the column of indented run IDs.
+fn tree_text(run: &TreeRun<'_>, indent: usize, width: usize, now_ms: u64) -> String {
+    let v = run.view;
+    let quarantined = if v.quarantine.is_some() {
+        " quarantined"
+    } else {
+        ""
+    };
+    let node = run.node_id.as_deref().unwrap_or("-");
+    let since = run.since_ms.map_or_else(
+        || "-".to_string(),
+        |s| duration_text(now_ms.saturating_sub(s)),
+    );
+    let from = match (&v.parent, run.depth + indent) {
+        (Some(p), 1..) => format!("  from {}", p.node_id),
+        _ => String::new(),
+    };
+    let head = format!("{:1$}{2}", "", 2 * (run.depth + indent), v.key.run);
+    format!(
+        "{head:<width$}  {:<18}{quarantined}  {node:<12} {since:>7}  {}{from}",
+        v.status, v.start_key
+    )
+}
+
+/// The run and node that started `view`, or null.
+fn parent_json(view: &RunView) -> Value {
+    view.parent.as_ref().map_or(
+        Value::Null,
+        |p| json!({"runId": p.run_id, "nodeId": p.node_id}),
+    )
 }
 
 pub fn event_json(record: &EventRecord) -> Value {

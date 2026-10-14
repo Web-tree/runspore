@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q12 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q13 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,8 +9,8 @@ use runspore_store_conformance::{
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
-    ExpireReason, InvocationStatus, Mutation, RunKey, Store, StoreFailureKind, StoredArtifact,
-    Turn, DEFAULT_TENANT,
+    ExpireReason, InvocationStatus, Mutation, RunKey, RunParent, Store, StoreFailureKind,
+    StoredArtifact, Turn, DEFAULT_TENANT,
 };
 use serde_json::{json, Value};
 
@@ -297,7 +297,9 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          ALTER TABLE attempts DROP COLUMN process;
@@ -350,7 +352,9 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          ALTER TABLE runs DROP COLUMN base_dir;
@@ -386,7 +390,9 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          ALTER TABLE runs DROP COLUMN artifact_digest;
@@ -438,7 +444,9 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          DROP TABLE meta;
@@ -466,7 +474,9 @@ async fn q10_a_version_5_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          PRAGMA user_version = 5;",
@@ -528,7 +538,9 @@ async fn q12_a_version_6_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          PRAGMA user_version = 6;",
     )
     .unwrap();
@@ -560,6 +572,43 @@ async fn q12_a_version_6_file_is_upgraded() {
     assert_eq!(claimed.params, Some(br#"{"tools":["Read"]}"#.to_vec()));
 }
 
+/// Q13: a version 7 file gains the run's parent; the runs it holds have none, and a
+/// new run records its own.
+#[tokio::test]
+async fn q13_a_version_7_file_is_upgraded() {
+    let path = fresh_path();
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let old = RunKey::new(DEFAULT_TENANT, "old");
+    store
+        .create_run(create_run(&old, "create", 0))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         PRAGMA user_version = 7;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    let kept = store.get_run(&old).await.unwrap().expect("old run kept");
+    assert_eq!((kept.revision, kept.parent), (0, None));
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    let mut request = create_run(&new, "create-new", 0);
+    let parent = RunParent {
+        run_id: old.run.clone(),
+        node_id: "ticket".into(),
+    };
+    request.parent = Some(parent.clone());
+    store.create_run(request).await.unwrap();
+    let run = store.get_run(&new).await.unwrap().expect("new run");
+    assert_eq!(run.parent, Some(parent));
+}
+
 /// Q11: an upgrade that stops after one of its steps leaves the file at its old
 /// version, with nothing of the upgrade in it; the next open upgrades it whole.
 #[tokio::test]
@@ -568,7 +617,9 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert!(child(&path, "create-run", None).status.success());
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE invocations DROP COLUMN params;
+        "ALTER TABLE runs DROP COLUMN parent_run_id;
+         ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          DROP TABLE meta;

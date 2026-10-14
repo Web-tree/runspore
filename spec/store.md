@@ -32,8 +32,8 @@ audit record of an expiry, the run's base folder, the artifact table with
 `get_artifact` and the run's artifact digest, the schema guard that names the version
 that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
-attempt, an invocation's node `params` in every claim, and scenarios S15 to S22;
-everything else is as in 0.1.
+attempt, an invocation's node `params` in every claim, the run's parent, and scenarios
+S15 to S23; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -66,6 +66,13 @@ and keeps the run's first artifact.
 
 Run IDs are chosen by the caller and random (host §2), so `run.start-key-mismatch` is
 how a store answers the second of two starts that raced with one start key.
+
+**0.2:** the request may carry the run's parent, `{runId, nodeId}`: the run and node of
+the step it was started from (host §2, `parent`), or null. It is stored with the run and
+shown by `get_run` and `list_runs`. Like `baseDir`, it is not part of the run's
+identity: a repeat with another parent is a `duplicate`, and the run keeps the parent
+it was created with. The store does not check that the parent run exists; it may be in
+another database.
 
 ### find_run (0.2)
 
@@ -254,6 +261,7 @@ and are idempotent on an already matching state.
   reference (`attemptId`, `owner`, `fence`), its holder handle and its `deadlineMs`, or
   nulls before its first claim, so a host can act on an attempt it did not claim. The
   reference is a credential: a host never prints the fence (host §2, Steps outside the worker).
+  **0.2:** a run shows its parent, or null.
 
 ## 3. SQLite adapter
 
@@ -278,7 +286,8 @@ and are idempotent on an already matching state.
   for runs created before; version 3 to 4 adds the artifact table and the run's
   artifact digest; version 4 to 5 adds the writer; version 5 to 6 adds an attempt's
   holder handle and deadline, null for attempts claimed before; version 6 to 7 adds an
-  invocation's `params`, null for invocations scheduled before. The refusal happens before any
+  invocation's `params`, null for invocations scheduled before; version 7 to 8 adds the
+  run's parent, null for runs created before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
 
   This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
@@ -334,6 +343,7 @@ Written once, generic over a store factory and a manual clock, in
 | S20 | `expire_attempt` with each reason, before the lease is due (0.2) | `abandoned`, `probe-dead` and `cancelled` are applied at once and append one `expired` result; `lease` is `lease.not-due`; the old holder's `heartbeat` and `finish_attempt` are then `lease.lost`, and its result can be kept as late evidence |
 | S21 | An attempt claimed with a deadline shorter than its lease; the clock passes the deadline (0.2) | The attempt is a `Lease` item of `scan_due` from its deadline on, and `expire_attempt` with reason `lease` is applied |
 | S22 | One commit schedules an invocation with `params` and one without; the first is retried (0.2) | Each claim of the first, the retry's included, returns its `params`; the claim of the second returns null |
+| S23 | `create_run` with a parent, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first parent; the repeat is `duplicate`; a run created without one shows null |
 
 SQLite-specific, in the adapter crate:
 
@@ -351,3 +361,4 @@ SQLite-specific, in the adapter crate:
 | Q10 | Open a version 5 file (0.2) | Upgraded to the current version; its attempts are kept with no holder and no deadline; a new claim records both |
 | Q11 | A child process aborts at `store.upgrade.after-step` while opening a version 4 file (0.2) | The file keeps version 4 and none of the upgrade; its runs are kept; the next open upgrades it to the current version |
 | Q12 | Open a version 6 file (0.2) | Upgraded to the current version; its invocations are kept and claim with null `params`; a new schedule records its `params` |
+| Q13 | Open a version 7 file (0.2) | Upgraded to the current version; its runs are kept with no parent; a new run records its parent |

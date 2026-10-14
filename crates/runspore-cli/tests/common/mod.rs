@@ -49,13 +49,16 @@ impl Dir {
         path
     }
 
-    /// A command in this directory on its own database, with an effects log.
+    /// A command in this directory on its own database, with an effects log, outside
+    /// any step.
     pub fn cmd(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new(BIN);
         cmd.current_dir(&self.path)
             .env("RUNSPORE_DB", self.file("runspore.db"))
             .env("EFFECTS_LOG", self.file("effects.log"))
             .env_remove("RUNSPORE_FAILPOINTS")
+            .env_remove("RUNSPORE_RUN_ID")
+            .env_remove("RUNSPORE_NODE_ID")
             .args(args)
             .stdin(Stdio::null());
         cmd

@@ -70,6 +70,10 @@ _Avoid_: previous step (the previous visit of the same step), parent
 How many times in a row a step may send the run along one arrow before the run takes that step's exhausted arrow instead. Any other result from the step starts the count again.
 _Avoid_: retry limit, max attempts, visit limit (the workflow-wide safety net)
 
+**Parent run**:
+The run whose step started another run, from inside that step: a build and the ticket runs it starts. The started run is its **child run**, and records the parent's run and node. `spore list` shows children under their parent.
+_Avoid_: sub-workflow, nested run, caller
+
 **Unfinished run**:
 A run that has not completed, failed or been cancelled. A repository may have several at once.
 _Avoid_: open run, active run, pending run
