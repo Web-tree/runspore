@@ -130,7 +130,7 @@ fn a_stuck_step_then_a_signal_say_what_they_wait_for_and_how_to_answer() {
 
     let text = dir.run(&args(&["status", &run])).stdout;
     for line in [
-        "needs      a person: step work it gave up and has no failed arrow since ".to_string(),
+        "needs      a person: step work gave up and has no failed arrow since ".to_string(),
         "stderr     err-line\n".to_string(),
         format!("resolve    spore resolve {run} --retry\n"),
         format!("           spore resolve {run} --fail <message>\n"),
@@ -258,7 +258,7 @@ fn a_running_step_shows_its_try_and_an_unknown_outcome_its_lost_lease() {
     since(intervention, before);
     let text = dir.run(&args(&["status", &run])).stdout;
     assert!(
-        text.contains("needs      a person: step work its last attempt's lease ran out"),
+        text.contains("needs      a person: step work lost its last attempt's lease"),
         "{text}"
     );
 }
