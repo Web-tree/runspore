@@ -127,6 +127,11 @@ deployed inv_365cb523af61e7de1ded53399d6ee056
 
 Commands, exit codes and JSON output: [spec/cli.md](spec/cli.md).
 
+## Guides
+
+- [Watch a run, and get told when it needs you](docs/guide/watch-a-run.md): `spore worker` prints each change of each run, `spore list` shows the runs as a tree, `spore status` says what a run waits for and how to move it on, and `onIntervention` sends a notification when a run stops for a person or fails.
+- [A Claude step with plain spore](docs/guide/claude-step.md): a workflow step done by Claude Code, with nothing installed but `spore` and `claude`.
+
 ## Documentation
 
 Read the [architecture index](docs/README.md) and [delivery plan](docs/17-delivery-plan.md). The design covers Rust, Node, Bun, browser and Cloudflare profiles; typed graphs; effects; SQLite and PostgreSQL adapters; security; OpenTelemetry; and Claude Code / skills integrations.

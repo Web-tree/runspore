@@ -97,6 +97,8 @@ run needs you, then prints its status. Here it stops at `approve` and exits 3:
 
 Read the change with `git status` and `git diff`. Claude's summary is the `implement`
 result in `spore events <run>`; `spore status <run>` shows where the run is at any time.
+To watch runs from another terminal, and to get a notification when one needs you
+instead of checking, see [Watch a run](watch-a-run.md).
 
 ## Send it back
 
@@ -285,3 +287,5 @@ Each node gets its own conversation, because the node ID is part of the session 
   marker.
 - [docs/design/c11-reference-loop.md](../design/c11-reference-loop.md): the design of
   the loop and what happens when a session or the machine dies at each step.
+- [watch-a-run.md](watch-a-run.md): watching runs with `spore worker`, `spore list`
+  and `spore status`, and `onIntervention` for a notification when a run needs you.

@@ -1,0 +1,38 @@
+{
+  "format": "runspore.workflow/0.2",
+  "inputSchema": {
+    "type": "object",
+    "required": ["service"],
+    "additionalProperties": false,
+    "properties": {
+      "service": { "type": "string", "minLength": 1, "description": "The service to ship." }
+    }
+  },
+  "actions": {
+    "build": {
+      "kind": "command",
+      "argv": ["sh", "-c", "echo \"built $1\"", "build", { "$get": ["params", "service"] }],
+      "effect": "idempotent"
+    },
+    "deploy": {
+      "kind": "command",
+      "argv": ["sh", "-c", "if [ -f down ]; then echo \"cannot reach the $1 target\" >&2; exit 1; fi; echo \"deployed $1\"", "deploy", { "$get": ["params", "service"] }],
+      "effect": "idempotent", "retry": { "maxAttempts": 2 }
+    },
+    "notify": {
+      "kind": "command",
+      "argv": ["sh", "-c", "msg=\"$1: $RUNSPORE_RUN_ID stopped at $RUNSPORE_NODE_ID\"; echo \"$msg\" >> notifications.log; if command -v osascript >/dev/null; then osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title \"spore\"' -e 'end run' \"$msg\"; elif command -v notify-send >/dev/null; then notify-send spore \"$msg\"; fi", "notify", { "$get": ["params", "service"] }],
+      "effect": "unsafe"
+    }
+  },
+  "nodes": {
+    "build":   { "action": "build",  "params": { "service": { "$get": ["input", "service"] } } },
+    "approve": { "signal": "approval" },
+    "deploy":  { "action": "deploy", "params": { "service": { "$get": ["input", "service"] } } },
+    "stopped": { "error": { "code": "ship.rejected", "message": "The release was rejected." } }
+  },
+  "onIntervention": {
+    "action": "notify",
+    "params": { "service": { "$get": ["input", "service"] } }
+  }
+}
