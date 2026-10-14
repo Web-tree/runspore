@@ -156,6 +156,19 @@ def gave_up(t, run, st):
     st["asked"].append(mark)
 
 
+def first_round(cp):
+    """The wave's merges of a checkpoint asked before its rounds were saved, read back
+    from its issue, where they sit under `## Merged in this wave`."""
+    if not cp.get("url"):
+        return []
+    num = cp["url"].rstrip("/").split("/")[-1]
+    body = gh_json("issue", "view", num, "--repo", RUNSPORE, "--json", "body").get("body") or ""
+    head = "## Merged in this wave\n\n"
+    if head not in body:
+        return []
+    return [{"pass": 1, "feedback": None, "merged": body.split(head, 1)[1].split("\n\n", 1)[0].strip()}]
+
+
 def ask(k, step_md, tickets, feedback):
     """Open the checkpoint issue, or reopen it when it was already asked. Either way its
     text is the step file as it is now: a re-ask after an upgrade shows the new text.
@@ -165,7 +178,7 @@ def ask(k, step_md, tickets, feedback):
     effect = os.environ.get("RUNSPORE_EFFECT_KEY", "")
     cp = cps.get(k, {"asked": []})
     new_ask = effect not in cp["asked"]
-    rounds = cp.get("rounds", [])
+    rounds = cp["rounds"] if "rounds" in cp else first_round(cp)
     merged = "\n".join(f"- {t['id']}: {t['issue']}" for t in tickets)
     if new_ask and (feedback or not rounds):
         rounds = rounds + [{"pass": len(cp["asked"]) + 1, "feedback": feedback, "merged": merged}]

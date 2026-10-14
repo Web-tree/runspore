@@ -149,6 +149,8 @@ echo "ok: spore refused answers that do not fit checkpoint A's schema, and recor
 changes='{"changes": ["Errors should name the settings key", "skills: the menu needs a hint line"]}'
 # The checkpoint's text changes before it is asked again (an upgrade does this).
 echo "Edited before the second ask, pass {pass}." >> .spore/workflows/build-0-2/steps/checkpoint-a.md
+# Asked by a run-wave from before rounds were saved: the wave's merges are only in the issue.
+python3 -c 'import json, sys; f = sys.argv[1]; s = json.load(open(f)); del s["a"]["rounds"]; json.dump(s, open(f, "w"))' "$E/state/checkpoints.json"
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null  # a repeat
 wait_for waiting checkpoint_a 2
