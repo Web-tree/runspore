@@ -18,7 +18,7 @@ schemars = "1.2.3"
 jsonschema = { version = "0.58.6", default-features = false }
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde"] }
 wasm-encoder = { version = "0.261.0", default-features = false, features = ["component-model"] }
-wit-component = { version = "0.261.0", default-features = false }
+wit-component = { version = "0.262.0", default-features = false }
 wit-parser = { version = "0.261.0", default-features = false }
 
 [lints]
