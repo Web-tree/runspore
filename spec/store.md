@@ -275,6 +275,16 @@ and are idempotent on an already matching state.
   artifact digest; version 4 to 5 adds the writer; version 5 to 6 adds an attempt's
   holder handle and deadline, null for attempts claimed before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
+
+  This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
+  upgraded in place, step by step, and only a 0.1 file and a newer one are refused.
+  Each schema change ships with its upgrade step from the version before, and its
+  scenario in §4. All steps and the new version run in the one transaction that opens
+  the file, so an upgrade that stops part way leaves the file at its old version,
+  still readable by the `spore` that wrote it. Once upgraded, that older `spore`
+  refuses the file as `schema.too-new`. The runs in the file carry on as they were:
+  each keeps its package, artifact and snapshot, and the kernel continues them
+  (kernel, Versions).
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
@@ -286,7 +296,9 @@ and are idempotent on an already matching state.
 Around the transaction commit of each mutating operation:
 `store.<op>.before-commit` and `store.<op>.after-commit`, with `<op>` one of
 `create-run`, `append-event`, `commit-turn`, `claim-attempt`, `heartbeat`,
-`set-process` (0.2), `finish-attempt`, `expire-attempt`. Use `runspore_types::failpoint::hit`.
+`set-process` (0.2), `finish-attempt`, `expire-attempt`. **0.2:** `store.upgrade.after-step`
+after each upgrade step of an open, before the transaction commits. Use
+`runspore_types::failpoint::hit`.
 
 ## 4. Conformance tests
 
@@ -331,3 +343,4 @@ SQLite-specific, in the adapter crate:
 | Q08 | Open a version 3 file (0.2) | Upgraded to the current version; its runs are kept and show no artifact; a new run stores its artifact |
 | Q09 | Open a version 4 file (0.2) | Upgraded to the current version; its runs are kept; the file records this `spore` as its writer |
 | Q10 | Open a version 5 file (0.2) | Upgraded to the current version; its attempts are kept with no holder and no deadline; a new claim records both |
+| Q11 | A child process aborts at `store.upgrade.after-step` while opening a version 4 file (0.2) | The file keeps version 4 and none of the upgrade; its runs are kept; the next open upgrades it to the current version |

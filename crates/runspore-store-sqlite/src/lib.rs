@@ -429,6 +429,7 @@ impl SqliteStore {
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
+                    failpoint::hit("store.upgrade.after-step");
                 }
             }
         }

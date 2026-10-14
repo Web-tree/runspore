@@ -159,7 +159,11 @@ One bounded pass. It never blocks on an activity.
    also removes step files no unfinished run needs (§3, Step files and work folders),
    at most once every 30 s per engine, starting with its first tick.
 2. **Coordinate.** For each key of `scan_ready`, up to `turns_per_run` times:
-   `load_turn`; fetch the package (cached by digest); call `reducer.transition`;
+   `load_turn`; fetch the package (cached by digest); call `reducer.transition` with
+   the semantics the run's snapshot records, not the kernel's default, so a newer
+   kernel continues an older kernel's runs (kernel, Versions). A run's first turn,
+   with no snapshot, takes the semantics `describe` reports. The arrow `status` shows
+   is found by replaying the run's events under the same recorded semantics;
    - on a decision: `commit_turn` with request ID
      `ids::commit_request(revision + 1, event_id)`. `stale`, or a `duplicate` receipt,
      means another coordinator won: drop the decision and move on. `conflict` /

@@ -70,4 +70,4 @@ may share a file; SQLite's file locks serialize their writers.
 
 `tests/conformance.rs` runs S01–S21 from `runspore-store-conformance`. S01, S03 and S15
 race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01 and
-Q03–Q10. Q03 runs `examples/crash.rs` as a child process at every failpoint.
+Q03–Q11. Q03 and Q11 run `examples/crash.rs` as a child process at a failpoint.
