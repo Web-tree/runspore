@@ -8,9 +8,14 @@
 //! node, the route of the result each node now holds (its `exhausted` route when that
 //! result used up a loop limit). Following each node's latest result skips any loop
 //! the transition went round, and ends with its last arrow.
+//! The same fold keeps when the run came to stand as it stands: the logical time of
+//! the last transition that changed its status, its position, or its invocation's
+//! attempt or state.
 //! This module only reads routes; it decides nothing.
 
-use runspore_types::model::{Node, RunResult, RunStatus, State, Workflow, OUTCOME_EXHAUSTED};
+use runspore_types::model::{
+    InvocationPhase, Node, RunResult, RunStatus, State, Workflow, OUTCOME_EXHAUSTED,
+};
 
 /// An arrow: the node whose result routed the run, and the outcome it routed on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,11 +33,14 @@ pub struct End {
 
 /// Where a run arrived. `from` is the arrow into the current position (`None` at the
 /// start node's first activation or with no position); `end` is set once the run is
-/// `completed` or `failed`.
+/// `completed` or `failed`. `since_ms` is the accepted time of the event whose
+/// transition last changed the run's status, position or invocation (its ID, attempt
+/// or state); `None` before the first transition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Arrival {
     pub from: Option<Arrow>,
     pub end: Option<End>,
+    pub since_ms: Option<u64>,
 }
 
 /// Folds a run's snapshots, oldest first, one per committed transition.
@@ -53,6 +61,9 @@ impl<'a> Trail<'a> {
 
     /// The snapshot the next committed transition produced.
     pub fn push(&mut self, state: State) {
+        if self.last.as_ref().map(stand) != Some(stand(&state)) {
+            self.arrival.since_ms = Some(state.last_accepted_at_ms);
+        }
         let Some(before) = self.last.take() else {
             if state.status.is_terminal() {
                 self.arrival.end = Some(End {
@@ -151,6 +162,24 @@ impl<'a> Trail<'a> {
     }
 }
 
+/// How a run stands: its status, its activation, and its invocation's ID, attempt and
+/// state.
+type Stand<'s> = (
+    RunStatus,
+    Option<&'s str>,
+    Option<(&'s str, u32, InvocationPhase)>,
+);
+
+/// How a run stands: what a person reading `status` waits on.
+fn stand(state: &State) -> Stand<'_> {
+    let position = state.position.as_ref().map(|p| p.activation_id.as_str());
+    let invocation = state
+        .invocation
+        .as_ref()
+        .map(|i| (i.invocation_id.as_str(), i.attempt, i.state));
+    (state.status, position, invocation)
+}
+
 /// The outcome whose route a node's recorded result took. A limited outcome with no
 /// streak left took the `exhausted` route: *Route* (kernel §7.4) keeps a streak after
 /// every limited outcome except the one that used the limit up.
@@ -216,7 +245,7 @@ mod tests {
                 input_event: Envelope {
                     event_id: format!("e{sequence}"),
                     sequence,
-                    accepted_at_ms: 1_000,
+                    accepted_at_ms: 1_000 * sequence,
                     kind: kind.to_string(),
                     payload: canonical::to_vec(&payload).unwrap(),
                 },
@@ -254,7 +283,19 @@ mod tests {
 
     #[test]
     fn the_start_node_has_no_arrow() {
-        assert_eq!(arrival(&gates(), &[]), Arrival::default());
+        let arrived = arrival(&gates(), &[]);
+        assert_eq!((arrived.from, arrived.end), (None, None));
+    }
+
+    /// A signal another node waits for is only buffered: the run stands as it did. The
+    /// result that moves it on is when it came to stand at the gate.
+    #[test]
+    fn since_is_the_last_transition_that_changed_how_the_run_stands() {
+        assert_eq!(arrival(&gates(), &[]).since_ms, Some(1_000));
+        let buffered = [signal("s2", "go")];
+        assert_eq!(arrival(&gates(), &buffered).since_ms, Some(1_000));
+        let moved = [signal("s2", "go"), result(1, "ok")];
+        assert_eq!(arrival(&gates(), &moved).since_ms, Some(3_000));
     }
 
     #[test]
@@ -289,15 +330,14 @@ mod tests {
             signal("s2", "end"),
             result(1, "ok"),
         ];
+        let arrived = arrival(&gates(), &events);
+        assert_eq!(arrived.from, None);
         assert_eq!(
-            arrival(&gates(), &events),
-            Arrival {
-                from: None,
-                end: Some(End {
-                    node_id: "done".into(),
-                    from: arrow("gate2", "end"),
-                }),
-            }
+            arrived.end,
+            Some(End {
+                node_id: "done".into(),
+                from: arrow("gate2", "end"),
+            })
         );
     }
 

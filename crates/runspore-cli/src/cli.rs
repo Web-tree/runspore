@@ -8,20 +8,21 @@ use std::sync::Arc;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
-    validate_workflow, ActivityRegistry, Arrival, Engine, EngineConfig, ExternalStep, HostError,
-    NativeRunner, StartOutcome, StepClaim, StepReport,
+    validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner,
+    StartOutcome, StepClaim, StepReport,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::digest;
-use runspore_types::model::{ErrorInfo, Resolution, State};
+use runspore_types::model::{event_kind, ErrorInfo, Resolution, RunStatus, State};
 use runspore_types::reducer::Reducer;
-use runspore_types::store::{Disposition, InvocationView, RunKey, RunView, StoreFailureKind};
+use runspore_types::store::{Disposition, RunKey, RunView, StoreFailureKind};
 use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
+use crate::view::Shown;
 use crate::{project, view};
 
 pub const FORMAT: &str = "runspore.cli/0.2";
@@ -950,35 +951,52 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
     })
 }
 
-/// What `status` shows of a run beside its view.
-struct Shown {
-    arrival: Arrival,
-    package: Option<Value>,
-    invocations: Vec<InvocationView>,
-    step: Option<ExternalStep>,
-}
-
 impl Shown {
     async fn read(engine: &Engine, view: &RunView) -> Result<Self, Fail> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
         Ok(Self {
             arrival: engine.arrival(view).await?,
             package: package(engine, view).await?,
             invocations: engine.list_invocations(&view.key).await?,
             step: engine.external_step(view).await?,
+            last_result: last_result(engine, view).await?,
+            now_ms,
         })
     }
+}
 
-    fn json(&self, view: &RunView) -> Value {
-        let (package, invocations) = (self.package.as_ref(), &self.invocations);
-        let mut json = view::status_json(view, &self.arrival, package, invocations);
-        json["step"] = view::step_json(self.step.as_ref());
-        json
-    }
-
-    fn text(&self, view: &RunView) -> String {
-        let (package, invocations) = (self.package.as_ref(), &self.invocations);
-        view::status_text(view, &self.arrival, package, invocations)
-            + &view::step_text(self.step.as_ref())
+/// The payload of the latest `activity.result` of the outstanding invocation of a run
+/// that needs intervention: the error of an attempt whose outcome is unknown. `None`
+/// for any other run.
+async fn last_result(engine: &Engine, view: &RunView) -> Result<Option<Value>, Fail> {
+    let invocation = view
+        .snapshot
+        .as_deref()
+        .and_then(|s| serde_json::from_slice::<State>(s).ok())
+        .filter(|s| s.status == RunStatus::NeedsIntervention)
+        .and_then(|s| s.invocation);
+    let Some(invocation) = invocation else {
+        return Ok(None);
+    };
+    let (mut last, mut after) = (None, 0);
+    loop {
+        let page = engine.list_events(&view.key, after, 100).await?;
+        let Some(end) = page.items.last() else {
+            return Ok(last);
+        };
+        after = end.event.sequence;
+        for record in &page.items {
+            let event = &record.event;
+            if event.kind != event_kind::ACTIVITY_RESULT || record.consumed_revision.is_none() {
+                continue;
+            }
+            let payload: Value = serde_json::from_slice(&event.body).unwrap_or(Value::Null);
+            if payload["invocationId"] == invocation.invocation_id.as_str() {
+                last = Some(payload);
+            }
+        }
     }
 }
 
