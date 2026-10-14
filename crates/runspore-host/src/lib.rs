@@ -16,7 +16,7 @@ pub mod process;
 
 pub use activity::{
     ActivityContext, ActivityOutput, ActivityRegistry, ActivityRunner, NativeFn, NativeRunner,
-    RecordProcess,
+    RecordProcess, ACTION_ROOTS,
 };
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;

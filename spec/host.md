@@ -364,7 +364,8 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
  "outcomes": ["ok", "red"], "effect": "read-only"}
 ```
 
-- `argv` is executed directly, never through a shell. `cwd` is resolved against
+- `argv` is executed directly, never through a shell. **0.2:** an item may be a
+  mapping (below). `cwd` is resolved against
   the run's base folder (**0.2**; 0.1: `base_dir`), recorded at `start`, so every
   dispatch of a run uses one folder whichever engine runs it. A run with no recorded
   folder uses `base_dir`. The child inherits the engine's environment plus `env`.
@@ -382,6 +383,54 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
   two forms and reads the same node input. The kernel never reads `cwd`. The run's
   records stay in the database where it started: the command gets `RUNSPORE_DB`
   (below) even when its folder holds a `.spore/` of its own.
+- **0.2: `argv` from mappings.** An item of `argv` is a string, kept as it is, or a
+  mapping (kernel.md §4). The host evaluates every mapping item before each try, at
+  dispatch, with the kernel's evaluator, over these roots:
+
+  | Root | Value |
+  | --- | --- |
+  | `input` | The node's evaluated input, the value the command gets on stdin |
+  | `params` | The node's evaluated `params` (§3), `{}` when it has none |
+  | `run` | `{"id", "tenant"}` of the run |
+  | `step` | `{"node", "visit", "attempt", "resumed"}`: the node ID, the visit (`RUNSPORE_VISIT`), the attempt number (`RUNSPORE_ATTEMPT`), and `resumed` |
+
+  `step.resumed` is `true` when this node already had a try earlier in this run: an
+  earlier try of this invocation (one that failed, timed out or was stopped), or an
+  earlier visit of the node. It is `false` on the first try of the first visit. So a
+  program that keeps a session starts it on the first try and resumes it on every
+  later one:
+
+  ```jsonc
+  "argv": [
+    "claude", "-p",
+    { "$if": [{ "$get": ["step", "resumed"] }, "--resume", "--session-id"] },
+    { "$uuid": [{ "$get": ["run", "id"] }, { "$get": ["step", "node"] }] },
+    "--tools", { "$join": [{ "$get": ["params", "tools"] }, ","] }
+  ]
+  ```
+
+  An item must evaluate to a string. One that evaluates to anything else is
+  `Failure`, `command.argv-invalid`, not retryable, details `{"index", "value"}`: the
+  item's index in `argv` and the value it gave. One that does not evaluate keeps the
+  kernel's code and details (`mapping.missing-path`, `mapping.invalid-operand` with a
+  path that starts `["argv", <index>]`, or `budget.value-depth`), not retryable.
+  Either way nothing is started, and since another try evaluates the same, the step
+  is stuck or takes its `failed` route (kernel §7.4). An `argv[0]` asset path
+  (below) is looked for after evaluation. `validate` checks every mapping item as a
+  mapping (W10) and refuses a `$get` path that starts with anything but `input`,
+  `params`, `run` or `step`, and an item that is neither a string nor an object. A
+  probe's, watch's or stop's `command.argv` takes the same items, which the build
+  checks the same way, and, once the host runs it, gets the same roots, `step`
+  included, for the try it looks after. `ActivityContext::scope(input)` gives these
+  roots to any runner.
+
+  **Known limit.** `resumed` says that a try happened, not how far its program got.
+  Measured with `claude` 2.1.296: a try stopped within about 1 second of starting has
+  not created its session yet, so the next try gets `resumed: true` and `--resume`
+  fails with "No conversation found"; a try stopped after 3 seconds or more resumes
+  correctly. A try that ended before its program ran (`command.spawn`) counts too. The
+  fix is a step reporting its progress, as Temporal's heartbeat details do, and
+  `resumed` reading that report; it is left to a later version.
 - Stdin receives the canonical input JSON, then EOF.
 - The child also gets `RUNSPORE_RUN_ID`, `RUNSPORE_NODE_ID`, `RUNSPORE_INVOCATION_ID`,
   `RUNSPORE_ATTEMPT`, `RUNSPORE_VISIT`, and `RUNSPORE_EFFECT_KEY`. The effect key is
@@ -411,6 +460,7 @@ Result mapping, in order:
 | What happened | Runner output |
 | --- | --- |
 | **0.2.** A `cwd` from input that names no existing folder | `Failure`, `command.cwd-invalid`, not retryable, details `{pointer, cwd?}` |
+| **0.2.** An `argv` mapping that gives no string, or does not evaluate | `Failure`, `command.argv-invalid`, not retryable, details `{index, value}`; or the kernel's mapping code |
 | Could not be spawned, or its program could not be run | `Failure`, `command.spawn`, retryable |
 | Killed by a signal it did not get from the engine, or its guard ended without reporting | `Unknown`, `command.signaled` |
 | Timed out, or stopped by the engine | `Unknown`, `command.timeout` or `command.stopped` |
@@ -473,7 +523,8 @@ and the output out of it, so no wrapper script is needed (AWS Step Functions'
 - `outcome` and `output` are both required; each is a mapping (kernel.md §4, every
   0.2 operator) whose `$get` paths start with one of `stdout`, the parsed stdout;
   `input`, the node's evaluated input; `params`, its params (`{}` without);
-  `run`, `{"id", "tenant"}`; or `step`, `{"node", "visit", "attempt"}`.
+  `run`, `{"id", "tenant"}`; or `step`, `{"node", "visit", "attempt", "resumed"}`, as
+  for `argv` mappings above.
 - On exit 0 the host parses stdout as `json` mode does (`command.output-too-large` and
   `command.malformed-output` as above), then evaluates `outcome`, then `output`, with
   the kernel's evaluator. The result is checked as in result mode: the outcome must be
@@ -502,8 +553,9 @@ its own roots (`mapping.path-root` names them). A `cwd`
 object has the one key `fromInput`, holding a JSON Pointer: empty, or `/` and its
 steps, each `~` followed by `0` or `1`.
 
-0.1 had no `result` mode, no `result` block, no `RUNSPORE_VISIT`, no `cwd` from input, and no
-undeclared-outcome or `command.cwd-invalid` row. Its
+0.1 had no `result` mode, no `result` block, no `RUNSPORE_VISIT`, no `cwd` from input,
+no `argv` mappings, and no undeclared-outcome, `command.cwd-invalid` or
+`command.argv-invalid` row. Its
 `text` mode gave `{"exitCode": n, "stdout": "<utf-8, lossy>"}` and failed with
 `command.output-too-large` when stdout passed 64 KiB, like the other modes.
 

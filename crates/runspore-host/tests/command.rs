@@ -529,7 +529,7 @@ async fn a_result_block_reads_input_params_run_and_step() {
         "input": "t",
         "params": ["Read"],
         "run": {"id": "run-1", "tenant": "default"},
-        "step": {"node": "node-a", "visit": 3, "attempt": 2},
+        "step": {"node": "node-a", "visit": 3, "attempt": 2, "resumed": true},
         "joined": "a b",
     });
     assert_eq!(
@@ -649,4 +649,132 @@ fn validate_takes_a_result_block_only_in_json_mode_with_its_roots() {
         CommandRunner.validate("act", &action).is_err(),
         "exit 0 reads stdout"
     );
+}
+
+/// `sh -c 'printf "%s|" "$@"' sh <items>`: prints each argument after the script.
+fn printing(items: Value) -> Value {
+    let mut argv = vec![
+        json!("sh"),
+        json!("-c"),
+        json!("printf '%s|' \"$@\""),
+        json!("sh"),
+    ];
+    argv.extend(items.as_array().unwrap().iter().cloned());
+    json!({"kind": "command", "argv": argv})
+}
+
+async fn printed(action: Value, ctx: &ActivityContext, input: Value) -> String {
+    CommandRunner
+        .validate("act", &action)
+        .expect("valid action");
+    match CommandRunner.run(ctx, &action, &input).await {
+        ActivityOutput::Success { output, .. } => output["stdout"].as_str().unwrap().to_string(),
+        other => panic!("expected success, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn argv_mappings_read_input_params_run_and_step() {
+    let (_stop, rx) = watch::channel(false);
+    let mut ctx = ctx(rx);
+    ctx.params = json!({"tools": ["Read", "Edit"]});
+    let action = printing(json!([
+        "plain",
+        {"$get": ["input", "repo"]},
+        {"$join": [{"$get": ["params", "tools"]}, ","]},
+        {"$get": ["run", "id"]},
+        {"$get": ["run", "tenant"]},
+        {"$get": ["step", "node"]},
+        {"$json": [{"$get": ["step", "visit"]}, {"$get": ["step", "attempt"]}]},
+        {"$if": [{"$get": ["step", "resumed"]}, "--resume", "--session-id"]},
+        {"$uuid": [{"$get": ["run", "id"]}, {"$get": ["step", "node"]}]},
+    ]));
+    let out = printed(action, &ctx, json!({"repo": "shop"})).await;
+    let session = runspore_types::digest::ids::uuid(br#"["run-1","node-a"]"#);
+    assert_eq!(
+        out,
+        format!("plain|shop|Read,Edit|run-1|default|node-a|[3,2]|--resume|{session}|")
+    );
+}
+
+#[tokio::test]
+async fn step_resumed_is_false_only_on_the_first_try_of_the_first_visit() {
+    let resumed = printing(json!([{"$json": {"$get": ["step", "resumed"]}}]));
+    for (attempt, visit, expected) in [(1, 1, "false|"), (2, 1, "true|"), (1, 2, "true|")] {
+        let (_stop, rx) = watch::channel(false);
+        let mut ctx = ctx(rx);
+        (ctx.attempt, ctx.visit) = (attempt, visit);
+        let out = printed(resumed.clone(), &ctx, json!({})).await;
+        assert_eq!(out, expected, "attempt {attempt}, visit {visit}");
+    }
+}
+
+#[tokio::test]
+async fn an_argv_mapping_that_gives_no_string_starts_nothing() {
+    let (_, path) = scratch("argv");
+    let started = path.join("started");
+    let touch = |item: Value| json!({"kind": "command", "argv": ["sh", "-c", "touch \"$0\"", started, item]});
+    let cases = [
+        (
+            touch(json!({"$get": ["input", "n"]})),
+            "command.argv-invalid",
+            json!({"index": 4, "value": 7}),
+        ),
+        (
+            touch(json!({"$get": ["params", "tools"]})),
+            "command.argv-invalid",
+            json!({"index": 4, "value": ["Read"]}),
+        ),
+        (
+            touch(json!({"$get": ["input", "missing"]})),
+            "mapping.missing-path",
+            json!({"path": ["input", "missing"]}),
+        ),
+        (
+            touch(json!({"$join": [{"$get": ["input", "n"]}, ","]})),
+            "mapping.invalid-operand",
+            json!({"operator": "$join", "path": ["argv", 4, "$join", 0], "value": 7}),
+        ),
+    ];
+    for (action, code, expected) in cases {
+        let (_stop, rx) = watch::channel(false);
+        let mut ctx = ctx(rx);
+        ctx.params = json!({"tools": ["Read"]});
+        CommandRunner
+            .validate("act", &action)
+            .expect("valid action");
+        let out = CommandRunner.run(&ctx, &action, &json!({"n": 7})).await;
+        let (got, retryable, details) = failure(&out);
+        assert_eq!((got, retryable), (code, false), "{action}");
+        assert_eq!(details, &expected, "{action}");
+        assert!(!started.exists(), "{action} started its program");
+    }
+    std::fs::remove_dir_all(&path).unwrap();
+}
+
+#[test]
+fn validate_checks_argv_mappings_and_their_roots() {
+    for item in [
+        json!({"$get": ["input", "a"]}),
+        json!({"$get": ["params", "a"], "default": "x"}),
+        json!({"$get": ["run", "id"]}),
+        json!({"$get": ["step", "resumed"]}),
+        json!({"$literal": "x"}),
+    ] {
+        let action = printing(json!([item.clone()]));
+        assert!(CommandRunner.validate("act", &action).is_ok(), "{item}");
+    }
+    for item in [
+        json!({"$get": ["nodes", "a"]}),
+        json!({"$get": ["from", "node"]}),
+        json!({"$get": "input"}),
+        json!({"$if": [true, "a"]}),
+        json!({"$nope": 1}),
+        json!(7),
+        json!(["a"]),
+        json!(null),
+    ] {
+        let action = printing(json!([item.clone()]));
+        assert!(CommandRunner.validate("act", &action).is_err(), "{item}");
+    }
 }

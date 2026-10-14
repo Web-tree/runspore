@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use crate::activity::{ActivityContext, ActivityOutput, ActivityRunner};
+use crate::activity::{ActivityContext, ActivityOutput, ActivityRunner, ACTION_ROOTS};
 use crate::guard::{Ending, Guarded};
 use crate::process;
 
@@ -36,7 +36,8 @@ enum Cwd {
 }
 
 struct Spec {
-    argv: Vec<String>,
+    /// Strings, and mappings evaluated before each try.
+    argv: Vec<Value>,
     cwd: Option<Cwd>,
     env: Vec<(String, String)>,
     timeout_ms: Option<u64>,
@@ -48,15 +49,20 @@ struct Spec {
 }
 
 fn parse(action: &Value) -> Result<Spec, String> {
-    let argv: Vec<String> = action
+    let argv = action
         .get("argv")
         .and_then(Value::as_array)
         .filter(|a| !a.is_empty())
-        .ok_or("`argv` must be a non-empty array of strings")?
-        .iter()
-        .map(|v| v.as_str().map(str::to_string))
-        .collect::<Option<_>>()
-        .ok_or("`argv` must be a non-empty array of strings")?;
+        .ok_or(ARGV_SHAPE)?
+        .clone();
+    for (index, item) in argv.iter().enumerate() {
+        match item {
+            Value::String(_) => {}
+            Value::Object(_) => mapping::check(item, &ACTION_ROOTS)
+                .map_err(|e| format!("`argv` item {index}: {e}"))?,
+            _ => return Err(ARGV_SHAPE.into()),
+        }
+    }
     let cwd = match action.get("cwd") {
         None => None,
         Some(Value::String(s)) => Some(Cwd::Path(s.clone())),
@@ -149,7 +155,37 @@ fn parse(action: &Value) -> Result<Spec, String> {
     })
 }
 
+const ARGV_SHAPE: &str = "`argv` must be a non-empty array of strings and mappings";
 const CWD_SHAPE: &str = "`cwd` must be a string or {\"fromInput\": \"<JSON Pointer>\"}";
+
+/// The words of `argv` for this try: each mapping evaluated against `scope`. One that
+/// does not give a string is `command.argv-invalid`; one that does not evaluate keeps
+/// the kernel's mapping code. Neither is retryable: another try evaluates the same.
+fn words(argv: &[Value], scope: &Map<String, Value>) -> Result<Vec<String>, ActivityOutput> {
+    let mut operations = 0;
+    let mut words = Vec::with_capacity(argv.len());
+    for (index, item) in argv.iter().enumerate() {
+        if let Value::String(word) = item {
+            words.push(word.clone());
+            continue;
+        }
+        match mapping::evaluate(item, scope, &mut operations) {
+            Ok(Value::String(word)) => words.push(word),
+            Ok(value) => {
+                let message =
+                    format!("`argv` item {index} evaluates to a value that is not a string");
+                let details = json!({ "index": index, "value": value });
+                return Err(failure("command.argv-invalid", message, details, false));
+            }
+            Err(error) => {
+                let message = format!("`argv` item {index} does not evaluate");
+                let details = error.details(&[json!("argv"), json!(index)]);
+                return Err(failure(error.code(), message, details, false));
+            }
+        }
+    }
+    Ok(words)
+}
 
 /// Whether `pointer` is a JSON Pointer (RFC 6901): empty, or `/` and its steps, each
 /// `~` followed by `0` or `1`.
@@ -319,19 +355,8 @@ fn mapped_result(
     input: &Value,
     outcomes: &[String],
 ) -> ActivityOutput {
-    let roots: Map<String, Value> = [
-        ("stdout", parsed),
-        ("input", input.clone()),
-        ("params", ctx.params.clone()),
-        ("run", json!({"id": ctx.key.run, "tenant": ctx.key.tenant})),
-        (
-            "step",
-            json!({"node": ctx.node_id, "visit": ctx.visit, "attempt": ctx.attempt}),
-        ),
-    ]
-    .into_iter()
-    .map(|(root, value)| (root.to_string(), value))
-    .collect();
+    let mut roots = ctx.scope(input);
+    roots.insert("stdout".into(), parsed);
     let fail = |code: &str, message: String, mut details: Map<String, Value>| {
         let end = String::from_utf8_lossy(tail(raw, STDOUT_TAIL)).into_owned();
         details.insert("stdoutTail".into(), Value::String(end));
@@ -407,6 +432,10 @@ impl ActivityRunner for CommandRunner {
             Ok(cwd) => cwd,
             Err(invalid) => return invalid,
         };
+        let mut argv = match words(&spec.argv, &ctx.scope(input)) {
+            Ok(argv) => argv,
+            Err(invalid) => return invalid,
+        };
         let stdin_bytes = canonical::to_vec(input).unwrap_or_default();
         let setup = |command: &mut Command| {
             command
@@ -440,7 +469,6 @@ impl ActivityRunner for CommandRunner {
                 };
             }
         };
-        let mut argv = spec.argv.clone();
         if let Some(program) = ctx.files.as_ref().and_then(|f| f.program(&argv[0])) {
             argv[0] = program.to_string_lossy().into_owned();
         }
