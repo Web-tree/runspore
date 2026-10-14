@@ -297,7 +297,8 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
@@ -352,7 +353,8 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
@@ -390,7 +392,8 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
@@ -444,7 +447,8 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
@@ -474,7 +478,8 @@ async fn q10_a_version_5_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
@@ -538,7 +543,8 @@ async fn q12_a_version_6_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          PRAGMA user_version = 6;",
@@ -586,7 +592,8 @@ async fn q13_a_version_7_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          PRAGMA user_version = 7;",
     )
@@ -609,6 +616,50 @@ async fn q13_a_version_7_file_is_upgraded() {
     assert_eq!(run.parent, Some(parent));
 }
 
+/// Q14: a version 8 file gains when an attempt was claimed; the attempts it holds show
+/// none, and a new claim records its time.
+#[tokio::test]
+async fn q14_a_version_8_file_is_upgraded() {
+    let path = fresh_path();
+    let (store, attempt) = expired_lease(&path, "old").await;
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         PRAGMA user_version = 8;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    let shown = store
+        .list_invocations(&attempt.key)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        (shown.attempt.as_ref(), shown.claimed_at_ms),
+        (Some(&attempt), None)
+    );
+
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    store
+        .create_run(create_run(&new, "create", 1))
+        .await
+        .unwrap();
+    let turn = store.load_turn(&new).await.unwrap().unwrap();
+    let (command, invocation) = schedule(&new, "a", 0);
+    let commit = runspore_store_conformance::commit(&turn, "commit", 0, vec![command]);
+    store.commit_turn(commit).await.unwrap();
+    store
+        .claim_attempt(claim(&new, "claim", &invocation, "w", 100))
+        .await
+        .unwrap();
+    let shown = store.list_invocations(&new).await.unwrap().remove(0);
+    assert_eq!(shown.claimed_at_ms, Some(1_100));
+}
+
 /// Q11: an upgrade that stops after one of its steps leaves the file at its old
 /// version, with nothing of the upgrade in it; the next open upgrades it whole.
 #[tokio::test]
@@ -617,7 +668,8 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert!(child(&path, "create-run", None).status.success());
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN parent_run_id;
+        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;

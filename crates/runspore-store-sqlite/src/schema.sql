@@ -106,6 +106,7 @@ CREATE TABLE attempts (
     process BLOB,
     holder BLOB,
     deadline_ms INTEGER,
+    claimed_at_ms INTEGER,
     PRIMARY KEY (tenant, run_id, attempt_id),
     UNIQUE (tenant, run_id, invocation_id, attempt_number),
     UNIQUE (tenant, run_id, fence),

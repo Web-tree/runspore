@@ -165,6 +165,9 @@ held outside the worker (host §2, Steps outside the worker):
   nearer of `now + leaseDurationMs` and `deadlineMs`. Null leaves `deadlineMs` null:
   the attempt is bounded by its lease alone, as in 0.1.
 
+**0.2:** the attempt records when it was claimed, `claimedAtMs`, by the store's
+clock; a replayed claim keeps the first time.
+
 The `Claim` returns both. Who the owner is stays the caller's choice: a host gives an
 attempt held outside the worker a fresh owner per claim (host §2, Steps outside the worker), so its token names
 that claim alone.
@@ -261,7 +264,8 @@ and are idempotent on an already matching state.
   reference (`attemptId`, `owner`, `fence`), its holder handle and its `deadlineMs`, or
   nulls before its first claim, so a host can act on an attempt it did not claim. The
   reference is a credential: a host never prints the fence (host §2, Steps outside the worker).
-  **0.2:** a run shows its parent, or null.
+  **0.2:** a run shows its parent, or null. **0.2:** an invocation shows its latest
+  attempt's `claimedAtMs`, or null before its first claim.
 
 ## 3. SQLite adapter
 
@@ -287,7 +291,8 @@ and are idempotent on an already matching state.
   artifact digest; version 4 to 5 adds the writer; version 5 to 6 adds an attempt's
   holder handle and deadline, null for attempts claimed before; version 6 to 7 adds an
   invocation's `params`, null for invocations scheduled before; version 7 to 8 adds the
-  run's parent, null for runs created before. The refusal happens before any
+  run's parent, null for runs created before; version 8 to 9 adds when an attempt was
+  claimed, null for attempts claimed before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
 
   This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
@@ -344,6 +349,7 @@ Written once, generic over a store factory and a manual clock, in
 | S21 | An attempt claimed with a deadline shorter than its lease; the clock passes the deadline (0.2) | The attempt is a `Lease` item of `scan_due` from its deadline on, and `expire_attempt` with reason `lease` is applied |
 | S22 | One commit schedules an invocation with `params` and one without; the first is retried (0.2) | Each claim of the first, the retry's included, returns its `params`; the claim of the second returns null |
 | S23 | `create_run` with a parent, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first parent; the repeat is `duplicate`; a run created without one shows null |
+| S24 | An invocation before its claim, after it, after a replay of the claim, and after a retry's claim at a later time (0.2) | `list_invocations` shows `claimedAtMs` null, then the claim's time, the same time after the replay, then the retry's time |
 
 SQLite-specific, in the adapter crate:
 
@@ -362,3 +368,4 @@ SQLite-specific, in the adapter crate:
 | Q11 | A child process aborts at `store.upgrade.after-step` while opening a version 4 file (0.2) | The file keeps version 4 and none of the upgrade; its runs are kept; the next open upgrades it to the current version |
 | Q12 | Open a version 6 file (0.2) | Upgraded to the current version; its invocations are kept and claim with null `params`; a new schedule records its `params` |
 | Q13 | Open a version 7 file (0.2) | Upgraded to the current version; its runs are kept with no parent; a new run records its parent |
+| Q14 | Open a version 8 file (0.2) | Upgraded to the current version; its attempts are kept with no claim time; a new claim records its time |
