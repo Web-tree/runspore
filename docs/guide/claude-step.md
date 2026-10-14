@@ -158,8 +158,10 @@ with an object holding a non-empty `summary`. spore holds Claude to it twice:
 
 1. **Before Claude answers.** `"schema": {"$resultSchema": {}}` in the node's `params`
    is replaced, when the workflow is built, with the schema of a whole answer:
-   `{"outcome": "ok", "output": {"summary": "…"}}`, one branch per outcome the action
-   declares. The action passes it to `claude` as `--json-schema`, and Claude Code makes
+   `{"outcome": "ok", "output": {"summary": "…"}}`, an object whose `outcome` is one
+   of the outcomes the action declares and whose `output` fits their schemas. Its top
+   level is an object, because the Claude API refuses a schema whose top level is
+   `anyOf`. The action passes it to `claude` as `--json-schema`, and Claude Code makes
    Claude answer in that shape, in `structured_output`.
 2. **Before spore records it.** The action's `result` block reads the outcome and the
    output from `claude`'s JSON, and spore checks the output against `outputSchemas`. An
