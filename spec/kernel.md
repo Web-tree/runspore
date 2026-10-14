@@ -18,6 +18,15 @@ The kernel speaks semantics `0.1` and `0.2` and accepts workflow documents in fo
 created under (check 5). The two are independent: a request of either semantics may
 carry a document of either format.
 
+A newer kernel continues every run an older 0.2 kernel left. It decodes and continues
+a snapshot of every state format and every semantics a 0.2 kernel ever wrote: a new
+state format or semantics is added beside the old ones, never swapped in, and its old
+rules stay as they were. A host passes each run the semantics its state records (host
+§2, tick). Replaying an old run's events from `run.started` under that semantics gives
+the same snapshots, byte for byte, as when they were first applied, so what a host
+reads from the replay (the arrow into the current step) does not change across an
+upgrade.
+
 Version 0.2 is being added beside 0.1 one rule at a time. A rule that applies to one
 version only says so, and is keyed by the document's `format`; every other rule
 applies to both. Outside those rules, a `runspore.workflow/0.2` document is validated
@@ -255,7 +264,8 @@ In order; the first failing check returns its failure and nothing else happens.
 5. Snapshot: absent with a kind other than `run.started` is `invalid-input` /
    `state.missing`; present with `run.started` is `invalid-input` /
    `state.unexpected-start`; undecodable is `invalid-input` / `state.invalid`; a
-   `format` other than `runspore.state/0.1`, or a `semantics` other than
+   `format` the kernel does not decode (today only `runspore.state/0.1`; see
+   Versions), or a `semantics` other than
    `identity.semanticsVersion`, is `incompatible-version` / `version.state-format`.
 6. Sequence: `run.started` must have sequence 1; any other event must have sequence
    `lastSequence + 1`. Else `invalid-input` / `event.out-of-order`.
