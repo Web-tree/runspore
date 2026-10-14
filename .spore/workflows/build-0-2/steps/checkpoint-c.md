@@ -26,7 +26,8 @@ The action, from `examples/coding-loop/settings.json`:
     "--json-schema", { "$json": { "$get": ["params", "schema"] } },
     "--tools",        { "$join": [{ "$get": ["params", "tools"] }, ","] },
     "--allowedTools", { "$join": [{ "$get": ["params", "tools"] }, ","] },
-    "--append-system-prompt", { "$get": ["params", "instructions"] }
+    "--append-system-prompt", { "$get": ["params", "instructions"] },
+    "--permission-mode", "default"
   ],
   "output": "json",
   "result": {
@@ -71,9 +72,9 @@ spore run coding-loop --key try-c --input '{"task": "<a small change>"}'
 ```
 
 1. It stops at `approve`. Read the change with `git diff`.
-2. Reject it with a reason: `spore signal <run> approval --outcome rejected --data '{"reason": "…"}'`. Then run the same `spore run` command again. Claude continues the same conversation and sees your reason.
-3. Give it a bigger task, press Ctrl-C while `implement` is working, and run the same command again. The step resumes the same conversation.
-4. Approve it with `spore signal <run> approval --outcome approved`, then run the same `spore run` command again. The run ends at `done`.
+2. Reject it with a reason: `spore signal <run> approval --outcome rejected --id try-c-reject-1 --data '{"reason": "…"}'`. The `--id` makes repeating the command harmless: the same message ID is applied only once. Then run the same `spore run` command again. Claude continues the same conversation and sees your reason, and the run stops at `approve` again.
+3. Approve it with `spore signal <run> approval --outcome approved --id try-c-approve-1`, then run the same `spore run` command again. The run ends at `done`.
+4. Start a second run with a bigger task and its own key: `spore run coding-loop --key try-c2 --input '{"task": "<a bigger change>"}'`. Press Ctrl-C while `implement` is working, a few seconds in or later, then run the same command again. The step resumes the same conversation. A try stopped within its first second has not opened its conversation yet, so it cannot be resumed (#124 lists this as a known limit).
 
 ## Feedback asked for
 
