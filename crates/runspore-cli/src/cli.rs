@@ -290,6 +290,9 @@ impl From<HostError> for Fail {
             HostError::InputInvalid(misfit) => {
                 return refused(misfit.to_string(), misfit.details())
             }
+            HostError::OutcomeUnrouted(unrouted) => {
+                return refused(unrouted.to_string(), unrouted.details())
+            }
             HostError::Invalid { .. } | HostError::Kernel(_) => true,
             HostError::Store(f) => {
                 f.kind == StoreFailureKind::Conflict

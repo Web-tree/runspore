@@ -129,6 +129,22 @@ In JSON mode the error object carries `details`:
 A folder's schema outside the subset is the diagnostic `schema.outside-subset` (dot.md
 §6).
 
+**0.2: unrouted outcomes.** While the run waits at an await-signal node for the
+signal, `signal` with an outcome the node does not route (`received` when `--outcome`
+is missing) exits 2 with code `signal.outcome-unrouted` and records nothing (host.md
+§2). Text mode prints the refusal and then the outcomes the node accepts, the same ones
+`status` lists:
+
+```text
+spore: signal.outcome-unrouted: the run waits at review for signal approval, which does not route outcome "approve"
+accepted outcomes: approved, rejected
+```
+
+In JSON mode the error carries `details`: `{"nodeId": "review", "signal": "approval",
+"outcome": "approve", "outcomes": ["approved", "rejected"]}`. A signal sent while the
+run does not wait for it is recorded as before; if the node it reaches does not route
+its outcome, `events` shows it dropped with the diagnostic `signal.outcome-unrouted`.
+
 ## Steps outside the worker (0.2)
 
 An external step (host.md §2, Steps outside the worker) is done by an actor, who
