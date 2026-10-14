@@ -8,13 +8,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use runspore_types::model::ErrorInfo;
 use runspore_types::store::{ProcessRecord, RunKey};
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use tokio::sync::watch;
 
 use crate::files::StepFiles;
 
 /// Default `stop_grace_ms`: SIGTERM to SIGKILL when a process group is stopped.
 pub const DEFAULT_STOP_GRACE_MS: u64 = 5_000;
+
+/// The `$get` roots of an action's own mappings: its `argv`, and its probe's, watch's
+/// and stop's (spec/host.md §3). [`ActivityContext::scope`] gives their values.
+pub const ACTION_ROOTS: [&str; 4] = ["input", "params", "run", "step"];
 
 /// What an activity reports. The engine maps it to an `ActivityResult` unchanged.
 #[derive(Debug, Clone, PartialEq)]
@@ -140,6 +144,35 @@ impl ActivityContext {
             process: Arc::new(|_| Box::pin(async { Ok(()) })),
             stop,
         }
+    }
+
+    /// Whether this node already had a try earlier in this run: an earlier try of this
+    /// invocation, or an earlier visit. `false` on the first try of the first visit.
+    pub fn resumed(&self) -> bool {
+        self.attempt > 1 || self.visit > 1
+    }
+
+    /// What an action's own mappings see at dispatch (spec/host.md §3): `input`,
+    /// `params`, `run` (`id`, `tenant`) and `step` (`node`, `visit`, `attempt`,
+    /// `resumed`), as `$get` roots.
+    pub fn scope(&self, input: &Value) -> Map<String, Value> {
+        let mut scope = Map::new();
+        scope.insert("input".into(), input.clone());
+        scope.insert("params".into(), self.params.clone());
+        scope.insert(
+            "run".into(),
+            json!({"id": self.key.run, "tenant": self.key.tenant}),
+        );
+        scope.insert(
+            "step".into(),
+            json!({
+                "node": self.node_id,
+                "visit": self.visit,
+                "attempt": self.attempt,
+                "resumed": self.resumed(),
+            }),
+        );
+        scope
     }
 
     /// Records the attempt's process record before its program runs, or clears it
