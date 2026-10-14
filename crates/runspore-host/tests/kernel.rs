@@ -712,6 +712,72 @@ async fn two_command_activities_pass_output_through_a_mapping() {
     assert_eq!(statuses, vec![json!("success"), json!("success")]);
 }
 
+/// One action serves two nodes, each with its own params: the runner gets the params
+/// the kernel evaluated for the node, on every try, and `{}` for a node without them.
+#[tokio::test]
+async fn a_node_s_params_reach_its_action_on_every_try() {
+    let path = temp_db("params");
+    let workflow = serde_json::to_vec(&json!({
+        "format": "runspore.workflow/0.2",
+        "name": "params",
+        "start": "implement",
+        "actions": {
+            "claude": {"kind": "native", "function": "claude", "effect": "idempotent",
+                       "retry": {"maxAttempts": 2}}
+        },
+        "nodes": {
+            "implement": {"kind": "activity", "action": "claude",
+                          "input": {"task": {"$get": ["input", "task"]}},
+                          "params": {"tools": {"$join": [{"$get": ["input", "tools"]}, ","]},
+                                     "session": {"$uuid": [{"$get": ["run", "id"]}, "implement"]}},
+                          "outcomes": {"ok": "review"}},
+            "review": {"kind": "activity", "action": "claude",
+                       "input": {"$get": ["from", "output"]}, "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete", "output": {"$get": ["nodes", "review", "output"]}}
+        }
+    }))
+    .unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let calls = seen.clone();
+    let functions = NativeRunner::new().function("claude", move |ctx, input| {
+        calls
+            .lock()
+            .unwrap()
+            .push((ctx.node_id.clone(), ctx.attempt, ctx.params.clone()));
+        async move {
+            if ctx.node_id == "implement" && ctx.attempt == 1 {
+                transient()
+            } else {
+                ok(input)
+            }
+        }
+    });
+    let engine = native(&path, None, functions);
+    let key = engine
+        .start(
+            &workflow,
+            json!({"task": "fix it", "tools": ["Read", "Edit"]}),
+            "params",
+        )
+        .await
+        .unwrap()
+        .key;
+    let view = engine.run_until_parked(&key).await.unwrap();
+    assert_eq!(view.status, "completed");
+    let params = json!({
+        "session": ids::uuid(format!(r#"["{}","implement"]"#, key.run).as_bytes()),
+        "tools": "Read,Edit",
+    });
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            ("implement".to_string(), 1, params.clone()),
+            ("implement".to_string(), 2, params),
+            ("review".to_string(), 1, json!({})),
+        ]
+    );
+}
+
 /// H7: a command learns its visit; result mode names the outcome.
 #[tokio::test]
 async fn a_command_gets_the_visit_of_its_activation() {

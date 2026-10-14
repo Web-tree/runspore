@@ -64,6 +64,9 @@ pub struct ActivityContext {
     pub visit: u32,
     /// Identical on every attempt of one invocation.
     pub effect_key: String,
+    /// The node's evaluated `params` (spec/kernel.md §4): how it sets up its action,
+    /// apart from the input. `{}` for a node without them.
+    pub params: Value,
     /// Base for relative working directories: the run's base folder.
     pub base_dir: PathBuf,
     /// The database's absolute path, given to every program as `RUNSPORE_DB`.
@@ -94,6 +97,7 @@ impl std::fmt::Debug for ActivityContext {
             .field("attempt", &self.attempt)
             .field("visit", &self.visit)
             .field("effect_key", &self.effect_key)
+            .field("params", &self.params)
             .field("base_dir", &self.base_dir)
             .field("db", &self.db)
             .field("files", &self.files)
@@ -126,6 +130,7 @@ impl ActivityContext {
             attempt,
             visit,
             effect_key,
+            params: Value::Object(serde_json::Map::new()),
             base_dir,
             db: None,
             files: None,

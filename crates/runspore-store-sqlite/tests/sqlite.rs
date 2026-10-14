@@ -1,11 +1,11 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q11 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q12 of `spec/store.md` section 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runspore_store_conformance::{
-    claim, claim_held, create_run, expire, expire_for, schedule, ManualClock,
+    claim, claim_held, create_run, expire, expire_for, schedule, schedule_with, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
@@ -297,7 +297,8 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN holder;
+        "ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          ALTER TABLE attempts DROP COLUMN process;
          ALTER TABLE audit DROP COLUMN kind;
@@ -349,7 +350,8 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN holder;
+        "ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          ALTER TABLE runs DROP COLUMN base_dir;
          ALTER TABLE runs DROP COLUMN artifact_digest;
@@ -384,7 +386,8 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN holder;
+        "ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
@@ -435,7 +438,8 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN holder;
+        "ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          DROP TABLE meta;
          PRAGMA user_version = 4;",
@@ -462,7 +466,8 @@ async fn q10_a_version_5_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN holder;
+        "ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          PRAGMA user_version = 5;",
     )
@@ -505,6 +510,56 @@ async fn q10_a_version_5_file_is_upgraded() {
     assert_eq!(shown.holder, Some(b"{\"pid\":1}".to_vec()));
 }
 
+/// Q12: a version 6 file gains an invocation's params; the invocations it holds have
+/// none, and a new schedule records them.
+#[tokio::test]
+async fn q12_a_version_6_file_is_upgraded() {
+    let path = fresh_path();
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let old = RunKey::new(DEFAULT_TENANT, "old");
+    store
+        .create_run(create_run(&old, "create", 0))
+        .await
+        .unwrap();
+    let turn = store.load_turn(&old).await.unwrap().unwrap();
+    let (command, scheduled) = schedule(&old, "a", 0);
+    let commit = runspore_store_conformance::commit(&turn, "commit", 0, vec![command]);
+    store.commit_turn(commit).await.unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE invocations DROP COLUMN params;
+         PRAGMA user_version = 6;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    let kept = store
+        .claim_attempt(claim(&old, "claim", &scheduled, "w", 100))
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(kept.params, None);
+
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    store
+        .create_run(create_run(&new, "create", 1))
+        .await
+        .unwrap();
+    let turn = store.load_turn(&new).await.unwrap().unwrap();
+    let (command, invocation) = schedule_with(&new, "a", 0, Some(json!({"tools": ["Read"]})));
+    let commit = runspore_store_conformance::commit(&turn, "commit", 0, vec![command]);
+    store.commit_turn(commit).await.unwrap();
+    let claimed = store
+        .claim_attempt(claim(&new, "claim", &invocation, "w", 100))
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(claimed.params, Some(br#"{"tools":["Read"]}"#.to_vec()));
+}
+
 /// Q11: an upgrade that stops after one of its steps leaves the file at its old
 /// version, with nothing of the upgrade in it; the next open upgrades it whole.
 #[tokio::test]
@@ -513,7 +568,8 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert!(child(&path, "create-run", None).status.success());
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN holder;
+        "ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          DROP TABLE meta;
          PRAGMA user_version = 4;",

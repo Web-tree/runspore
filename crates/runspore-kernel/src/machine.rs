@@ -19,11 +19,12 @@ use serde_json::Value;
 use crate::event::Event;
 use crate::failure::{self, object};
 use crate::graph::Graph;
-use crate::mapping::{self, Context, MissingPath};
+use crate::mapping::{self, Context};
 
 const MESSAGE_VISITS_EXCEEDED: &str = "node visit limit exceeded";
 const MESSAGE_ACTIVATIONS_EXCEEDED: &str = "run activation limit exceeded";
 const MESSAGE_MISSING_PATH: &str = "mapping path does not resolve";
+const MESSAGE_INVALID_OPERAND: &str = "mapping operand has the wrong type";
 const MESSAGE_UNDECLARED_OUTCOME: &str = "activity reported an undeclared outcome";
 const MESSAGE_ATTEMPTS_EXHAUSTED: &str = "activity attempts exhausted";
 const MESSAGE_ACTIVITY_FAILED: &str = "activity failed";
@@ -350,11 +351,23 @@ impl<'a> Machine<'a> {
             };
 
             match node {
-                Node::Activity { action, input, .. } => {
-                    return match self.evaluate(input, node_id, from) {
-                        Some(input) => self.schedule(position, action, input),
-                        None => Ok(()),
+                Node::Activity {
+                    action,
+                    input,
+                    params,
+                    ..
+                } => {
+                    let Some(input) = self.evaluate(input, "input", node_id, from)? else {
+                        return Ok(());
                     };
+                    let params = match params {
+                        Some(params) => match self.evaluate(params, "params", node_id, from)? {
+                            Some(params) => Some(params),
+                            None => return Ok(()),
+                        },
+                        None => None,
+                    };
+                    return self.schedule(position, action, input, params);
                 }
                 Node::AwaitSignal { .. } => {
                     self.state.position = Some(position);
@@ -369,7 +382,7 @@ impl<'a> Machine<'a> {
                     }
                 }
                 Node::Complete { output } => {
-                    if let Some(output) = self.evaluate(output, node_id, from) {
+                    if let Some(output) = self.evaluate(output, "output", node_id, from)? {
                         self.state.status = RunStatus::Completed;
                         self.state.result = Some(RunResult::Output(output));
                         self.state.position = None;
@@ -387,7 +400,13 @@ impl<'a> Machine<'a> {
     }
 
     /// Creates the invocation of a freshly entered activity and authorizes attempt 1.
-    fn schedule(&mut self, position: Position, action: &str, input: Value) -> Result<(), Failure> {
+    fn schedule(
+        &mut self,
+        position: Position,
+        action: &str,
+        input: Value,
+        params: Option<Value>,
+    ) -> Result<(), Failure> {
         let input_digest = digest::body(&failure::to_vec(&input)?);
         let invocation_id = ids::invocation(
             &self.state.tenant,
@@ -403,6 +422,7 @@ impl<'a> Machine<'a> {
             attempt: 1,
             not_before_ms: self.state.last_accepted_at_ms,
             input,
+            params,
         };
         self.command(
             &position.activation_id,
@@ -672,9 +692,15 @@ impl<'a> Machine<'a> {
         self.state.invocation = None;
     }
 
-    /// Evaluates a node's mapping; `from` reads the recorded result of the node that
-    /// routed here. An unresolved path ends the run and yields `None`.
-    fn evaluate(&mut self, mapping: &Value, node_id: &str, from: Option<&str>) -> Option<Value> {
+    /// Evaluates a node's mapping, its `field`; `from` reads the recorded result of
+    /// the node that routed here. A mapping error ends the run and yields `None`.
+    fn evaluate(
+        &mut self,
+        mapping: &Value,
+        field: &str,
+        node_id: &str,
+        from: Option<&str>,
+    ) -> Result<Option<Value>, Failure> {
         let context = Context {
             input: &self.state.input,
             nodes: &self.state.nodes,
@@ -684,18 +710,18 @@ impl<'a> Machine<'a> {
                 .and_then(|id| self.state.nodes.get_key_value(id))
                 .map(|(id, result)| (id.as_str(), result)),
         };
-        match mapping::evaluate(mapping, &context, &mut self.operations) {
-            Ok(value) => Some(value),
-            Err(MissingPath(path)) => {
-                self.terminate(node_error(
-                    code::MAPPING_MISSING_PATH,
-                    MESSAGE_MISSING_PATH,
-                    node_id,
-                    object([("path", path)]),
-                ));
-                None
-            }
-        }
+        let error = match mapping::evaluate(mapping, &context, &mut self.operations) {
+            Ok(value) => return Ok(Some(value)),
+            Err(mapping::Error::Unencodable(error)) => return Err(failure::unencodable(error)),
+            Err(error) => error,
+        };
+        let message = match error {
+            mapping::Error::MissingPath(_) => MESSAGE_MISSING_PATH,
+            _ => MESSAGE_INVALID_OPERAND,
+        };
+        let details = error.details(&[Value::String(field.to_string())]);
+        self.terminate(node_error(error.code(), message, node_id, details));
+        Ok(None)
     }
 
     fn activity(&self) -> Result<Activity<'a>, Failure> {

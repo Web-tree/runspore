@@ -1,0 +1,33 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "validation-W10-operators",
+  "description": "W10 in a 0.2 document: $if takes exactly [cond, then, else]; one with two operands, here in a node's params, fails with invalid-input / workflow.invalid.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "validation-W10-operators",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "work": {
+        "action": "work",
+        "kind": "activity",
+        "outcomes": {"ok": "done"},
+        "params": {"mode": {"$if": [true, "--resume"]}}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {}, "runId": "run_w10_operators", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {"failure": {"kind": "invalid-input", "code": "workflow.invalid"}}
+    }
+  ]
+}

@@ -1072,7 +1072,7 @@ fn claimed(claim: &StepClaim) -> Result<Output, Fail> {
         "claimed": true, "token": token, "runId": claim.key.run,
         "nodeId": claim.node_id, "actionId": claim.action_id,
         "invocationId": claim.invocation_id, "attempt": claim.attempt,
-        "input": claim.input, "outcomes": claim.outcomes,
+        "input": claim.input, "params": claim.params, "outcomes": claim.outcomes,
         "outputSchemas": claim.output_schemas,
         "deadlineMs": claim.deadline_ms.to_string(),
         "leaseUntilMs": claim.lease_until_ms.to_string(),

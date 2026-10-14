@@ -49,7 +49,7 @@ pub(crate) fn to_vec(value: &Value) -> Result<Vec<u8>, Failure> {
 
 /// Inputs are canonical, so their integers and counters are in range; only nesting
 /// can leave the domain, when a value is recorded deeper than it arrived.
-fn unencodable(error: CanonError) -> Failure {
+pub(crate) fn unencodable(error: CanonError) -> Failure {
     match error {
         CanonError::TooDeep => resource(code::BUDGET_VALUE_DEPTH, error.to_string()),
         other => invariant(format!("emitted value is not canonical: {other}")),

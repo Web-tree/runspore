@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S21 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S22 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::fmt::Debug;
@@ -113,6 +113,16 @@ pub fn append(key: &RunKey, request_id: &str, event_id: &str, body: Value) -> Ap
 
 /// An `activity.schedule` command for the first visit of `node`, and its invocation ID.
 pub fn schedule(key: &RunKey, node: &str, not_before_ms: u64) -> (Command, String) {
+    schedule_with(key, node, not_before_ms, None)
+}
+
+/// The same, for a node with `params` (or none).
+pub fn schedule_with(
+    key: &RunKey,
+    node: &str,
+    not_before_ms: u64,
+    params: Option<Value>,
+) -> (Command, String) {
     let activation_id = ids::activation(node, 1);
     let invocation_id = ids::invocation(&key.tenant, &key.run, &activation_id);
     let payload = ScheduleActivity {
@@ -124,6 +134,7 @@ pub fn schedule(key: &RunKey, node: &str, not_before_ms: u64) -> (Command, Strin
         attempt: 1,
         not_before_ms,
         input: json!({"node": node}),
+        params,
     };
     let command = Command {
         command_id: ids::command(&key.tenant, &key.run, &activation_id, 0),
@@ -1530,6 +1541,45 @@ pub async fn s21_deadline_sweep(factory: &dyn StoreFactory) {
     assert_eq!(expired.disposition, Disposition::Applied);
 }
 
+/// S22: the claim of an invocation scheduled with `params` returns them, and a
+/// retry's claim returns them again; one scheduled without returns none.
+pub async fn s22_params(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s22").await;
+    let params = json!({"tools": ["Read", "Edit"], "schema": {"type": "object"}});
+    let (with, invocation) = schedule_with(&w.key, "a", 0, Some(params.clone()));
+    let (without, plain) = schedule(&w.key, "b", 0);
+    w.commit("commit-1", vec![with, without]).await;
+    let expected = Some(canonical::to_vec(&params).expect("params"));
+
+    let first = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-1", &invocation, "w", 1_000))
+        .await
+        .expect("claim")
+        .value;
+    assert_eq!(first.params, expected);
+    let bare = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-2", &plain, "w", 1_000))
+        .await
+        .expect("claim")
+        .value;
+    assert_eq!(bare.params, None);
+
+    w.store()
+        .finish_attempt(finish(&first.attempt, "finish-1", 1))
+        .await
+        .expect("finish");
+    w.commit("commit-2", vec![retry(&w.key, "a", 2, 0)]).await;
+    let second = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-3", &invocation, "w", 1_000))
+        .await
+        .expect("claim")
+        .value;
+    assert_eq!((second.attempt_number, second.params), (2, expected));
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1540,7 +1590,8 @@ macro_rules! store_conformance_tests {
             s07_concurrent_appends s08_atomic_commit s09_not_before s10_fences
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
             s15_start_key_race s16_process_record s17_base_dir
-            s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep);
+            s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep
+            s22_params);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

@@ -15,7 +15,7 @@ use runspore_types::model::{code, WORKFLOW_FORMAT, WORKFLOW_FORMAT_0_2};
 use serde_json::{json, Value};
 
 /// Files a checkout must hold; more may be added.
-const MINIMUM_TRACES: usize = 69;
+const MINIMUM_TRACES: usize = 75;
 
 /// Every failure code, diagnostic code and kernel-produced error code. Each must
 /// be expected by at least one trace, so no part of the vocabulary goes unpinned.
@@ -47,6 +47,7 @@ const VOCABULARY: &[&str] = &[
     code::LIMIT_VISITS_EXCEEDED,
     code::LIMIT_ACTIVATIONS_EXCEEDED,
     code::MAPPING_MISSING_PATH,
+    code::MAPPING_INVALID_OPERAND,
     code::ACTIVITY_UNDECLARED_OUTCOME,
     code::ACTIVITY_ATTEMPTS_EXHAUSTED,
     code::ACTIVITY_FAILED,
@@ -133,21 +134,27 @@ const STUCK_UNDER_0_2: &[&str] = &[
 ];
 
 /// Traces of a 0.2 document that pin a rule naming 0.2 (`from`, `$get` `default`,
-/// the stuck step, `outputSchemas`, `inputSchema`, loop limits, W14, W15): a 0.1
-/// document is refused or runs differently there, by design.
+/// the stuck step, `outputSchemas`, `inputSchema`, loop limits, W14, W15, `params`
+/// and the operators): a 0.1 document is refused or runs differently there, by
+/// design. The W01 `params` trace is a 0.1 document that a 0.2 one would accept.
 const RULES_NAMING_0_2: &[&str] = &[
     "from-arrows",
     "get-default",
+    "if-not-boolean",
     "input-schema-never-read",
+    "join-bad-item",
     "loop-exhausted",
     "loop-exhausted-resets",
     "loop-other-outcome-resets",
     "loop-signal-exhausted-unrouted",
     "output-schemas-never-read",
+    "params-and-operators",
     "stuck-expiries-exhausted",
     "stuck-non-retryable-failure",
     "stuck-retries-exhausted",
     "stuck-undeclared-outcome",
+    "uuid-bad-part",
+    "validation-W01-params",
     "validation-W07-exhausted-reserved",
     "validation-W14-reachable",
     "validation-W15-end-reachable",

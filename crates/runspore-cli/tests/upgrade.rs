@@ -122,10 +122,11 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
     );
     assert_eq!(before[1].1, "external");
 
-    // Its schema: what the file held before version 5 and 6 were added.
+    // Its schema: what the file held before versions 5 to 7 were added.
     sql(&dir)
         .execute_batch(&format!(
-            "ALTER TABLE attempts DROP COLUMN holder;
+            "ALTER TABLE invocations DROP COLUMN params;
+             ALTER TABLE attempts DROP COLUMN holder;
              ALTER TABLE attempts DROP COLUMN deadline_ms;
              DROP TABLE meta;
              PRAGMA user_version = {OLDER};"

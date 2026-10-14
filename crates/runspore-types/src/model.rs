@@ -155,6 +155,10 @@ pub enum Node {
         /// Mapping evaluated against the run context to build the activity input.
         #[serde(default)]
         input: Value,
+        /// 0.2: mapping evaluated with `input` to build how the node sets up its
+        /// action. Absent means `{}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<Value>,
         outcomes: BTreeMap<String, String>,
         /// 0.2: the schema each outcome's output must fit. The kernel checks only the
         /// field's shape (W13) and never reads it in a transition; hosts check results.
@@ -573,6 +577,10 @@ pub struct ScheduleActivity {
     #[serde(with = "u64_str")]
     pub not_before_ms: u64,
     pub input: Value,
+    /// The evaluated `params` of a node that has them; absent for one that has none,
+    /// whose params are `{}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
 }
 
 /// Authorizes one more attempt of an existing invocation, with its original input.
@@ -623,6 +631,7 @@ pub mod code {
     pub const LIMIT_VISITS_EXCEEDED: &str = "limit.visits-exceeded";
     pub const LIMIT_ACTIVATIONS_EXCEEDED: &str = "limit.activations-exceeded";
     pub const MAPPING_MISSING_PATH: &str = "mapping.missing-path";
+    pub const MAPPING_INVALID_OPERAND: &str = "mapping.invalid-operand";
     pub const ACTIVITY_UNDECLARED_OUTCOME: &str = "activity.undeclared-outcome";
     pub const ACTIVITY_ATTEMPTS_EXHAUSTED: &str = "activity.attempts-exhausted";
     pub const ACTIVITY_FAILED: &str = "activity.failed";

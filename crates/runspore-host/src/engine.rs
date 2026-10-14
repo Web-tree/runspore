@@ -188,6 +188,8 @@ struct Runnable {
     action: Value,
     runner: Arc<dyn crate::ActivityRunner>,
     input: Value,
+    /// The node's params, `None` when it has none.
+    params: Option<Value>,
     visit: u32,
     base_dir: PathBuf,
     package: Arc<Package>,
@@ -1512,6 +1514,7 @@ impl Inner {
                 action,
                 runner,
                 input,
+                params,
                 visit,
                 base_dir,
                 package,
@@ -1527,6 +1530,9 @@ impl Inner {
                     base_dir,
                     stop_rx,
                 );
+                if let Some(params) = params {
+                    ctx.params = params;
+                }
                 ctx.db = self.config.db_path.clone();
                 ctx.files = delivery.files.clone();
                 ctx.work_dir = delivery.work_dir.clone();
@@ -1680,6 +1686,12 @@ impl Inner {
             .ok_or_else(|| fail("host.runner-missing", kind.to_string()))?;
         let input = canonical::parse(&claim.input)
             .map_err(|e| fail("host.input-invalid", e.to_string()))?;
+        let params = claim
+            .params
+            .as_deref()
+            .map(canonical::parse)
+            .transpose()
+            .map_err(|e| fail("host.params-invalid", e.to_string()))?;
         let visit = invocation_visit(key, claim, package.max_visits).ok_or_else(|| {
             fail(
                 "host.invocation-unknown",
@@ -1693,6 +1705,7 @@ impl Inner {
             action,
             runner,
             input,
+            params,
             visit,
             base_dir,
             package,

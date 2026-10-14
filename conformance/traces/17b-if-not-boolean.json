@@ -1,0 +1,67 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "if-not-boolean",
+  "description": "0.2: a $if whose cond evaluates to something other than true or false ends the run failed with mapping.invalid-operand, naming the operator, where the cond sits (from the node's params) and the value.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "if-not-boolean",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "work": {
+        "action": "work",
+        "input": {"task": {"$get": ["input", "task"]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"},
+        "params": {"mode": {"$if": [{"$get": ["input", "resume"]}, "--resume", "--session-id"]}}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {
+          "input": {"resume": "yes", "task": "t-1"},
+          "runId": "run_if",
+          "tenant": "default"
+        }
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"resume": "yes", "task": "t-1"},
+          "invocation": null,
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.invalid-operand",
+              "details": {"operator": "$if", "path": ["params", "mode", "$if", 0], "value": "yes"},
+              "message": "mapping operand has the wrong type",
+              "nodeId": "work"
+            }
+          },
+          "runId": "run_if",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:a647656f52c4e91088870f2d02751571aab0487cb5fdbb2fcbcde1ecad203fee",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:bfca6162f7e66217248ab15b4032121186362cd7cc0f2baff579beeb63ef629a"
+      }
+    }
+  ]
+}

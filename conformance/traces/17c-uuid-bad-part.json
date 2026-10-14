@@ -1,0 +1,66 @@
+{
+  "format": "runspore.trace/0.1",
+  "name": "uuid-bad-part",
+  "description": "0.2: a $uuid part that evaluates to something other than a string or a number ends the run failed with mapping.invalid-operand, naming the operator, the part's place in the node's input and its value.",
+  "workflow": {
+    "actions": {"work": {"argv": ["work"], "effect": "idempotent", "kind": "command"}},
+    "format": "runspore.workflow/0.2",
+    "name": "uuid-bad-part",
+    "nodes": {
+      "done": {"kind": "complete"},
+      "work": {
+        "action": "work",
+        "input": {"id": {"$uuid": [{"$get": ["run", "id"]}, {"$get": ["input", "owner"]}]}},
+        "kind": "activity",
+        "outcomes": {"ok": "done"}
+      }
+    },
+    "start": "work"
+  },
+  "steps": [
+    {
+      "event": {
+        "eventId": "start",
+        "sequence": "1",
+        "acceptedAtMs": "1000",
+        "kind": "run.started",
+        "payload": {"input": {"owner": {"name": "max"}}, "runId": "run_uuid", "tenant": "default"}
+      },
+      "identity": {"semanticsVersion": "0.2"},
+      "expect": {
+        "snapshot": {
+          "activations": 1,
+          "format": "runspore.state/0.1",
+          "input": {"owner": {"name": "max"}},
+          "invocation": null,
+          "lastAcceptedAtMs": "1000",
+          "lastSequence": "1",
+          "nodes": {},
+          "position": null,
+          "result": {
+            "error": {
+              "code": "mapping.invalid-operand",
+              "details": {
+                "operator": "$uuid",
+                "path": ["input", "id", "$uuid", 1],
+                "value": {"name": "max"}
+              },
+              "message": "mapping operand has the wrong type",
+              "nodeId": "work"
+            }
+          },
+          "runId": "run_uuid",
+          "semantics": "0.2",
+          "signals": [],
+          "status": "failed",
+          "tenant": "default",
+          "visits": {"work": 1}
+        },
+        "snapshotDigest": "sha256:5bbaa82a4e611a90e8e9c1f9baae543173332a701e92b5252f7ee9184f5231db",
+        "commands": [],
+        "diagnostics": [],
+        "decisionDigest": "sha256:a3291ae72e2cd44c9afb402fcc959a630e84b29354ddeea3662324b25f6d162a"
+      }
+    }
+  ]
+}
