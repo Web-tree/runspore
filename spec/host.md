@@ -199,6 +199,17 @@ never claims again.
 `needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or at
 an external step (Steps outside the worker, below).
 
+**0.2: progress.** `observe(observer)` gives the engine a callback it calls with each
+change of each run it commits from then on, in commit order: after every `applied`
+`commit_turn`, the changes `progress::changes` finds from the snapshot before the
+turn, the snapshot after it and the event it consumed (a step started, a try failed,
+an outcome and its arrow, waiting, needs intervention, completed, failed), and after
+every `applied` `quarantine_run`, the quarantine. Each change carries the run key, its
+start key and the wall-clock time. The changes are read from committed state only, so a
+reader of the store finds the same ones by replaying a run's events. An engine has at
+most one observer; without one it finds no changes. `spore` prints them (cli.md,
+Progress).
+
 ### One attempt
 
 1. `claim_attempt`. If the receipt is `duplicate`, heartbeat once and proceed only if

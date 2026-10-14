@@ -90,6 +90,8 @@ is `workflow.not-found`; two folders with it are `workflow.ambiguous`. Both exit
 and `workflow.not-found` lists the names that exist.
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
+While they work, `run` and `worker` print the changes of the runs they work on stderr
+(§Progress).
 Run IDs are random (host §2): `start` and `run` print the run ID the engine returned,
 and the same key in another database names another run.
 `worker --run` and `--until-parked` are only valid together. `release` on a run that is
@@ -427,6 +429,51 @@ Two versions of `spore` therefore never share a database, and neither can damage
 other's runs. A database written by an earlier 0.2 `spore` is upgraded in place and
 used. `init` opens no database; it refuses a 0.1 database at the root by its
 name (`project.legacy-database`, above).
+
+## Progress (0.2)
+
+`run`, `worker` and `worker --until-parked` print one line on stderr for each change
+of each run they commit, as they commit it, so a person can watch the runs work. A
+line is the time in UTC, the run's start key and the change, two spaces apart:
+
+```text
+2026-10-14T19:22:03Z  ticket-148  step build started, attempt 1
+2026-10-14T19:22:05Z  ticket-148  step build attempt 1 failed: command.exit: exit code 1
+2026-10-14T19:22:05Z  ticket-148  step build started, attempt 2
+2026-10-14T19:23:41Z  ticket-148  build returned ok -> test
+2026-10-14T19:24:10Z  ticket-148  test returned red, took exhausted -> review
+2026-10-14T19:24:10Z  ticket-148  waiting at review for signal approval
+```
+
+The changes are: a step started, with its node and attempt; a try failed, with its
+error code and the first line of its message; a node's outcome and the arrow the run
+took (`took exhausted` when the outcome used up a loop limit), one line per node the
+run left in that transition; waiting at an await-signal node, with the signal's name;
+needs intervention, with the reason (a stuck step's error, or an unknown outcome);
+completed, at its complete node; failed, with the error that ended it; and quarantined,
+with its code and details. A transition that goes round a loop of buffered signals
+shows each node it left once, with its last arrow. A result that comes too late to
+count changes nothing and prints nothing.
+
+With `--json` each line is one JSON object instead: `format`, `atMs`, `runId`,
+`startKey`, `change`, and the change's fields:
+
+| `change` | Fields |
+| --- | --- |
+| `step-started` | `nodeId`, `attempt` |
+| `try-failed` | `nodeId`, `attempt`, `error: {code, message}` |
+| `outcome` | `nodeId`, `outcome`, `arrow`, `to` |
+| `waiting` | `nodeId`, `signal` |
+| `needs-intervention` | `nodeId`, `reason` |
+| `completed` | `nodeId` (null when not known) |
+| `failed` | `nodeId` (null when not known), `error: {code, message}` |
+| `quarantined` | `code`, `details` |
+
+`message` is the first line of the error's message; `status` shows the whole error.
+Stdout is unchanged: `run` and `worker --until-parked` still print the run's status
+there when they return, in JSON mode one object. A worker prints only what it commits
+itself; a run another worker moves shows on that worker's stderr. The planned `status --follow`
+is to print the same lines, found by replaying the run's events.
 
 ## Exit codes
 

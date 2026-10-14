@@ -183,7 +183,7 @@ fn stand(state: &State) -> Stand<'_> {
 /// The outcome whose route a node's recorded result took. A limited outcome with no
 /// streak left took the `exhausted` route: *Route* (kernel §7.4) keeps a streak after
 /// every limited outcome except the one that used the limit up.
-fn taken<'s>(state: &'s State, node_id: &str, node: &Node) -> Option<&'s str> {
+pub(crate) fn taken<'s>(state: &'s State, node_id: &str, node: &Node) -> Option<&'s str> {
     let outcome = state.nodes.get(node_id)?.outcome.as_str();
     let limited = node
         .loop_limits()
