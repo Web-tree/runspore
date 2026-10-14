@@ -23,7 +23,7 @@ runspore-kernel.workspace = true
 serde_json = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wit-bindgen = { version = "0.62.0", default-features = false, features = ["macros", "realloc"] }
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
 
 # Generated export glue uses `#[unsafe(export_name)]` and raw ABI pointers.
 [lints.rust]
