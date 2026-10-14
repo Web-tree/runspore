@@ -101,8 +101,8 @@ details pre { margin: 0; padding: 12px; border-top: 1px solid var(--line); overf
   <section>
     <h2>How it runs</h2>
     <div class="how">
-      <div><b>Started by an upgrade</b><p><code>work/build-0-2/bin/build --upgrade</code> installs spore from <code>main</code>, starts the run on it and works on it. You answer a checkpoint with <code>work/build-0-2/bin/answer a go</code>. This page reads the run from <code>spore status</code>.</p></div>
-      <div><b>On 0.2 from checkpoint 0</b><p>The fast lane builds R1 and R3 first, so spore reads this folder as it is. At checkpoint 0, and at every later one, <code>build --upgrade</code> moves the build onto the newest spore: what is done passes at once and your <code>go</code> answers are sent up front.</p></div>
+      <div><b>Plain spore</b><p><code>spore start build-0-2 --key build-0-2</code> starts the run once and <code>spore worker</code> works on it. You answer a checkpoint with <code>spore signal &lt;run&gt; checkpoint-c --outcome go</code>. This page reads the run from <code>spore status</code>.</p></div>
+      <div><b>On the newest spore</b><p>The fast lane builds R1 and R3 first, so spore reads this folder as it is. At any checkpoint, installing spore from <code>main</code> and starting <code>spore worker</code> again moves the build onto it, with the same database and the same run.</p></div>
       <div><b>From checkpoint F</b><p>The plugin's run line and live view (P7) draw this same workflow inside Claude Code.</p></div>
     </div>
   </section>

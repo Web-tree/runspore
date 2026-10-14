@@ -24,7 +24,8 @@
     "setup": {
       "kind": "command",
       "argv": [
-        "ticket-step",
+        "python3",
+        "work/build-0-2/bin/ticket-step",
         "setup"
       ],
       "output": "json",
@@ -42,12 +43,10 @@
     "implement": {
       "kind": "command",
       "argv": [
-        "ticket-step",
+        "python3",
+        "work/build-0-2/bin/ticket-step",
         "implement"
       ],
-      "cwd": {
-        "fromInput": "/worktree/dir"
-      },
       "output": "json",
       "effect": "idempotent",
       "retry": {
@@ -63,12 +62,10 @@
     "test": {
       "kind": "command",
       "argv": [
-        "ticket-step",
+        "python3",
+        "work/build-0-2/bin/ticket-step",
         "test"
       ],
-      "cwd": {
-        "fromInput": "/worktree/dir"
-      },
       "effect": "read-only",
       "retry": {
         "maxAttempts": 2,
@@ -87,12 +84,10 @@
     "ship": {
       "kind": "command",
       "argv": [
-        "ticket-step",
+        "python3",
+        "work/build-0-2/bin/ticket-step",
         "ship"
       ],
-      "cwd": {
-        "fromInput": "/worktree/dir"
-      },
       "effect": "idempotent",
       "retry": {
         "maxAttempts": 5,

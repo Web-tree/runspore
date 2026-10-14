@@ -82,7 +82,7 @@ Is a plain `claude -p` step good enough to build the rest of the plugin on? Is a
 
 ## Answer
 
-From the orchestrator folder:
+From the orchestrator folder, with the build run's ID from `spore list`:
 
-- `work/build-0-2/bin/answer c go` starts the next wave.
-- `work/build-0-2/bin/answer c changes "<change>" ["skills: <change>"]...` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.
+- `spore signal <run> checkpoint-c --outcome go` starts the next wave, which closes this issue.
+- `spore signal <run> checkpoint-c --outcome changes --data '{"changes": ["<change>", "skills: <change>"]}'` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.

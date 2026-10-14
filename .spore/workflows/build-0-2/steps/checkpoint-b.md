@@ -6,7 +6,7 @@ Comes after wave 3 (R8, R10, R11, R12, R13).
 
 **Feedback asked for:** Do the stuck pause, loop limits and <code>from</code> behave the way you expect, before any Claude work builds on them?
 
-Answer from the orchestrator folder:
+Answer from the orchestrator folder, with the build run's ID from `spore list`:
 
-- `work/build-0-2/bin/answer b go` starts the next wave.
-- `work/build-0-2/bin/answer b changes "<change>" ["skills: <change>"]...` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.
+- `spore signal <run> checkpoint-b --outcome go` starts the next wave, which closes this issue.
+- `spore signal <run> checkpoint-b --outcome changes --data '{"changes": ["<change>", "skills: <change>"]}'` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.

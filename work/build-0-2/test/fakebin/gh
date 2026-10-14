@@ -54,7 +54,11 @@ elif cmd == ("pr", "merge"):
 elif cmd == ("pr", "close"):
     st["prs"][f"{repo}#{a[2]}"]["state"] = "CLOSED"
 elif cmd == ("label", "create"):
-    pass
+    labels = st.setdefault("labels", {}).setdefault(repo, [])
+    if a[2] in labels:
+        print(f"label with name \"{a[2]}\" already exists; use `--force` to update its color and description", file=sys.stderr)
+        save(); sys.exit(1)
+    labels.append(a[2])
 else:
     print(f"fake gh: unsupported {a}", file=sys.stderr); save(); sys.exit(1)
 save()

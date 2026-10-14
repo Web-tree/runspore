@@ -812,6 +812,17 @@
         }
       }
     },
+    "finish": {
+      "action": "run-wave",
+      "input": {
+        "wave": {
+          "$literal": "finish"
+        },
+        "tickets": {
+          "$literal": []
+        }
+      }
+    },
     "done": {}
   }
 }

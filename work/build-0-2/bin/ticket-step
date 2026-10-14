@@ -3,6 +3,9 @@
 
     ticket-step <step>     (spore runs it with the step's input on stdin)
 
+spore runs it from the orchestrator checkout, so every step runs this copy of the
+script, not the worktree's; the steps after setup change into the worktree first.
+
 setup      makes or reuses a git worktree for the ticket, on its own branch from
            origin/main, and prints {dir, branch, ...} as JSON.
 implement  runs the examples/headless-agent Claude wrapper in the worktree with
@@ -225,6 +228,8 @@ def main():
     raw = sys.stdin.read()
     inp = json.loads(raw)
     step = sys.argv[1]
+    if step != "setup":
+        os.chdir(inp["worktree"]["dir"])
     if step == "setup":
         setup(inp)
     elif step == "implement":

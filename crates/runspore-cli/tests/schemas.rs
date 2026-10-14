@@ -206,7 +206,7 @@ fn dogfood(name: &str) -> String {
 }
 
 /// The build's checkpoints declare the shape of a `changes` answer; spore holds
-/// `work/build-0-2/bin/answer` to it. The `ticket` workflow declares the input a run
+/// `spore signal` to it. The `ticket` workflow declares the input a run
 /// needs, so a start without a ticket is refused. No step runs: nothing works the run.
 #[test]
 fn the_build_checks_checkpoint_answers() {

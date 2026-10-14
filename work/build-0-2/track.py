@@ -225,7 +225,7 @@ def page(out_path):
     elif st["status"] == "completed":
         now = "0.2 shipped"
     elif st["status"] == "failed":
-        now = "The build run failed: start a new try with work/build-0-2/bin/build --restart"
+        now = "The build run failed: start a new try with spore start build-0-2 --key build-0-2:<n>"
     else:
         now = f"The build run is {st['status']}: see spore status {st['runId']}"
     waves = []

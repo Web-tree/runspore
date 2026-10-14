@@ -6,7 +6,7 @@ Comes after wave 8 (P2, P4, P5, R19, R20, R21, R22, R23, R24, R27).
 
 **Feedback asked for:** Is following a run from your session the right default? Is anything missing in the decision flow?
 
-Answer from the orchestrator folder:
+Answer from the orchestrator folder, with the build run's ID from `spore list`:
 
-- `work/build-0-2/bin/answer e go` starts the next wave.
-- `work/build-0-2/bin/answer e changes "<change>" ["skills: <change>"]...` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.
+- `spore signal <run> checkpoint-e --outcome go` starts the next wave, which closes this issue.
+- `spore signal <run> checkpoint-e --outcome changes --data '{"changes": ["<change>", "skills: <change>"]}'` makes one ticket per change (in runspore, or in the skills repo with the `skills:` prefix), builds them, then asks you again.
