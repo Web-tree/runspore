@@ -4,6 +4,6 @@ The "$get" of step "build" is "input.repo", and it must be a list of steps such 
  11 │     "build": { "action": "build", "input": { "repo": { "$get": "input.repo" } } }
     │                                                                ^^^^^^^^^^^^
 
-To fix: write it as a list, starting with "input", "nodes", "run" or "from".
+To fix: write it as a list starting with one of "input" | "nodes" | "run" | "from".
 
 1 problem in release. Nothing was run.

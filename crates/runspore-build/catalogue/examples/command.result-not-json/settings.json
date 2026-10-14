@@ -1,0 +1,20 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "review": {
+      "kind": "command",
+      "argv": ["make", "review"],
+      "effect": "read-only",
+      "outcomes": ["approved", "changes"],
+      "output": "text",
+      "result": {
+        "outcome": { "$get": ["stdout", "verdict"] },
+        "output": { "$get": ["stdout", "notes"] }
+      }
+    }
+  },
+  "nodes": {
+    "review": { "action": "review" },
+    "redo": { "error": { "code": "review.changes", "message": "The review asked for changes." } }
+  }
+}

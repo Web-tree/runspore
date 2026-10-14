@@ -415,8 +415,9 @@ Result mapping, in order:
 | Killed by a signal it did not get from the engine, or its guard ended without reporting | `Unknown`, `command.signaled` |
 | Timed out, or stopped by the engine | `Unknown`, `command.timeout` or `command.stopped` |
 | An exit code listed in `exitOutcomes` | `Success` with the mapped outcome |
-| Exit 0, `output` other than `result` | `Success` with outcome `ok` |
+| Exit 0, `output` other than `result`, no `result` block | `Success` with outcome `ok` |
 | Exit 0, `output: "result"` | What stdout says (below) |
+| **0.2.** Exit 0, `output: "json"` with a `result` block | What the block maps from stdout (below) |
 | Any other exit code | `Failure`, `command.exit`, retryable, details `{exitCode, stderrTail}` (the last 4 KiB of stderr) |
 | Stdout over 64 KiB, `output` other than `text` | `Failure`, `command.output-too-large`, not retryable |
 | `output: "json"` and stdout is not JSON in the canonical domain | `Failure`, `command.malformed-output`, not retryable |
@@ -435,7 +436,8 @@ Success output by `output` mode:
   `true` when either stream was cut. Text mode never fails with
   `command.output-too-large`: a long log reaches the next step as its end, where test
   runners and compilers print their failures.
-- `json`: the parsed stdout value.
+- `json`: the parsed stdout value, or with a `result` block on exit 0 what its
+  `output` maps (below).
 - `result`: the output stdout names (below). An exit code listed in `exitOutcomes`
   gives `null`.
 - `none`: `null`.
@@ -454,12 +456,53 @@ non-zero exit maps through the table above as in every mode, so `exitOutcomes` s
 applies to it; a crash that exits 1 is then `command.exit`, never an outcome. These are
 the shapes an async `watch` prints.
 
+**0.2: the `result` block.** Most programs print JSON of their own shape, not
+`{"outcome", "output"}`. With `"output": "json"`, a `result` block maps the outcome
+and the output out of it, so no wrapper script is needed (AWS Step Functions'
+`ResultSelector` and `Choice` do the same in two states):
+
+```jsonc
+{"kind": "command", "argv": ["claude", "-p", "--output-format", "json", "…"],
+ "output": "json", "outcomes": ["approved", "changes"],
+ "result": {
+   "outcome": {"$get": ["stdout", "structured_output", "outcome"]},
+   "output":  {"$get": ["stdout", "structured_output", "output"]}
+ }}
+```
+
+- `outcome` and `output` are both required; each is a mapping (kernel.md §4, every
+  0.2 operator) whose `$get` paths start with one of `stdout`, the parsed stdout;
+  `input`, the node's evaluated input; `params`, its params (`{}` without);
+  `run`, `{"id", "tenant"}`; or `step`, `{"node", "visit", "attempt"}`.
+- On exit 0 the host parses stdout as `json` mode does (`command.output-too-large` and
+  `command.malformed-output` as above), then evaluates `outcome`, then `output`, with
+  the kernel's evaluator. The result is checked as in result mode: the outcome must be
+  a declared one, and the engine checks the output against the node's `outputSchemas`
+  (`output.invalid`).
+- An `outcome` or `output` that does not evaluate (a `$get` that selects nothing and
+  has no `default`, an operator given the wrong operand), or an `outcome` that is not
+  a string, is `Failure`, `command.result-invalid`, not retryable, details
+  `{"field": "outcome" | "output"}` plus the mapping error's `path` (and `operator`
+  and `value` for an operand), or `value` for a non-string outcome. An undeclared
+  outcome is `command.undeclared-outcome`, details `{outcome}`. Each also carries
+  `stdoutTail`, the last 4 KiB of stdout, cut on a character boundary, so the program's
+  real answer shows in the error. Another try would read the same kind of answer, so
+  the step is stuck or takes its `failed` route.
+- An exit code listed in `exitOutcomes` gives its outcome and the parsed stdout as
+  output, as without the block; the block is not evaluated. A non-zero exit maps
+  through the table above.
+- Without a `result` block, `json` mode gives the whole parsed stdout as outcome `ok`,
+  as in 0.1.
+
 `validate` checks the shape of every field above, that every `exitOutcomes` value is a
-declared outcome, and, in result mode, that `exitOutcomes` does not map 0. A `cwd`
+declared outcome, and, in result mode or with a `result` block, that `exitOutcomes`
+does not map 0. A `result` block goes with `"output": "json"` only
+(`command.result-not-json`, dot.md §6), and its mappings are checked as mappings with
+its own roots (`mapping.path-root` names them). A `cwd`
 object has the one key `fromInput`, holding a JSON Pointer: empty, or `/` and its
 steps, each `~` followed by `0` or `1`.
 
-0.1 had no `result` mode, no `RUNSPORE_VISIT`, no `cwd` from input, and no
+0.1 had no `result` mode, no `result` block, no `RUNSPORE_VISIT`, no `cwd` from input, and no
 undeclared-outcome or `command.cwd-invalid` row. Its
 `text` mode gave `{"exitCode": n, "stdout": "<utf-8, lossy>"}` and failed with
 `command.output-too-large` when stdout passed 64 KiB, like the other modes.

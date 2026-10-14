@@ -39,6 +39,8 @@ const OPERATORS: [Operator; 4] = [
     ("$join", Some((2, true)), "[list, separator]"),
 ];
 const ROOTS: [&str; 4] = ["input", "nodes", "run", "from"];
+/// What a command's `result` block reads (spec/host.md §3, `command`).
+const RESULT_ROOTS: [&str; 5] = ["stdout", "input", "params", "run", "step"];
 /// An external action's `async.timeoutMs` when it gives none (spec/host.md §2).
 const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
 /// Characters a shell would treat specially: a command line holding one is not
@@ -547,6 +549,8 @@ impl<'a> Checks<'a> {
             .outcomes
             .clone()
             .unwrap_or_else(|| vec![OUTCOME_OK.to_string()]);
+        // Exit 0 reads the result from stdout in result mode and with a `result` block.
+        let reads_result = action.output == Some(Output::Result) || action.result.is_some();
         let exits_at = pointer(&here, "exitOutcomes");
         for (code, outcome) in action.exit_outcomes.iter().flatten() {
             let at = pointer(&exits_at, code);
@@ -555,7 +559,7 @@ impl<'a> Checks<'a> {
                     Diagnostic::new("command.bad-exit-code", At::key(&at))
                         .arg("exit", Arg::Key(at.clone())),
                 );
-            } else if code.parse::<i32>() == Ok(0) && action.output == Some(Output::Result) {
+            } else if code.parse::<i32>() == Ok(0) && reads_result {
                 self.push(
                     Diagnostic::new("command.result-exit-zero", At::key(&at))
                         .fix(Fix::review(vec![Edit::Remove { at: at.clone() }])),
@@ -572,6 +576,26 @@ impl<'a> Checks<'a> {
                             value: json!(with),
                         }])),
                 );
+            }
+        }
+        if let Some(result) = &action.result {
+            let at = pointer(&here, "result");
+            if action.output != Some(Output::Json) {
+                self.push(
+                    Diagnostic::new("command.result-not-json", At::key(&at)).fix(Fix::review(
+                        vec![Edit::Set {
+                            at: pointer(&here, "output"),
+                            value: json!("json"),
+                        }],
+                    )),
+                );
+            }
+            for field in ["outcome", "output"] {
+                let field_at = pointer(&at, field);
+                if let (Some(mapping), false) = (result.get(field), self.broken.touches(&field_at))
+                {
+                    self.mapping(&field_at, mapping, None, id, &RESULT_ROOTS);
+                }
             }
         }
     }
@@ -776,14 +800,14 @@ impl<'a> Checks<'a> {
             if let Some(value) = entry.get(field) {
                 let at = pointer(&here, field);
                 if allowed.contains(&field) && !self.broken.touches(&at) {
-                    self.mapping(&at, value, Some(field), id);
+                    self.mapping(&at, value, Some(field), id, &ROOTS);
                 }
             }
         }
         if let Some(output) = entry.get("output") {
             let at = pointer(&here, "output");
             if allowed.contains(&"output") && !self.broken.touches(&at) {
-                self.mapping(&at, output, None, id);
+                self.mapping(&at, output, None, id, &ROOTS);
             }
         }
     }
@@ -1300,7 +1324,7 @@ impl<'a> Checks<'a> {
 
     /// Mappings (kernel.md §4, W10), and in a step's input or params (`field`) the
     /// `$outputSchemas` and `$resultSchema` markers.
-    fn mapping(&mut self, at: &str, value: &Value, field: Option<&str>, id: &str) {
+    fn mapping(&mut self, at: &str, value: &Value, field: Option<&str>, id: &str, roots: &[&str]) {
         let marker = match value {
             Value::Object(map) => MARKERS.into_iter().find(|m| map.contains_key(*m)),
             _ => None,
@@ -1355,12 +1379,12 @@ impl<'a> Checks<'a> {
                     Value::Array(path) if !path.is_empty() => {
                         let first = pointer(&path_at, "0");
                         match path[0].as_str() {
-                            Some(root) if ROOTS.contains(&root) => {}
+                            Some(root) if roots.contains(&root) => {}
                             other => {
-                                let near = other.and_then(|r| closest(r, ROOTS));
+                                let near = other.and_then(|r| closest(r, roots.iter().copied()));
                                 let mut d = Diagnostic::new("mapping.path-root", At::value(&first))
                                     .arg("root", Arg::Input(first.clone()))
-                                    .arg("roots", Arg::computed(ROOTS.to_vec()));
+                                    .arg("roots", Arg::computed(roots.to_vec()));
                                 if let Some(near) = near {
                                     d = d.fix(Fix::review(vec![Edit::Set {
                                         at: first.clone(),
@@ -1387,7 +1411,8 @@ impl<'a> Checks<'a> {
                     }
                     _ => self.push(
                         Diagnostic::new("mapping.path-not-list", At::value(&path_at))
-                            .arg("path", Arg::Input(path_at.clone())),
+                            .arg("path", Arg::Input(path_at.clone()))
+                            .arg("roots", Arg::computed(roots.to_vec())),
                     ),
                 }
             }
@@ -1419,7 +1444,7 @@ impl<'a> Checks<'a> {
                     return;
                 };
                 let Some((count, exact)) = count else {
-                    self.mapping(&op, operand, field, id);
+                    self.mapping(&op, operand, field, id, roots);
                     return;
                 };
                 match operand {
@@ -1427,7 +1452,7 @@ impl<'a> Checks<'a> {
                         if items.len() == count || (!exact && items.len() > count) =>
                     {
                         for (i, item) in items.iter().enumerate() {
-                            self.mapping(&pointer(&op, &i.to_string()), item, field, id);
+                            self.mapping(&pointer(&op, &i.to_string()), item, field, id, roots);
                         }
                     }
                     _ => self.push(
@@ -1456,13 +1481,13 @@ impl<'a> Checks<'a> {
                         }
                         self.push(d);
                     } else {
-                        self.mapping(&k, member, field, id);
+                        self.mapping(&k, member, field, id, roots);
                     }
                 }
             }
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
-                    self.mapping(&pointer(at, &i.to_string()), item, field, id);
+                    self.mapping(&pointer(at, &i.to_string()), item, field, id, roots);
                 }
             }
             _ => {}

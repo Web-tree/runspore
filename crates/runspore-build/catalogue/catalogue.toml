@@ -13,7 +13,7 @@
 #   explanation  optional; a longer text for `spore explain`, and "More:" in a block
 #   args         the placeholders a check passes, by kind: input and key (quoted from
 #                settings.json), place (a path in it), computed, code (shown as is).
-#                Host names need no entry: {action}, {step}, {file}, {workflow}.
+#                Host names need no entry: {action}, {step}, {owner}, {file}, {workflow}.
 #   example      the folder under catalogue/examples/ that produces the code;
 #                catalogue/fixed/<code>/ is that folder after the first fix
 #   also         the other codes the example produces
@@ -764,7 +764,7 @@ example = "input.marker-too-deep"
 code = "mapping.unknown-operator"
 severity = "problem"
 title = '''Unknown "$" key'''
-message = '''{key} in step {step} is not something spore can work out; a key starting with "$" is "$get", "$literal", "$if", "$uuid", "$json" or "$join".'''
+message = '''{key} in {owner} is not something spore can work out; a key starting with "$" is "$get", "$literal", "$if", "$uuid", "$json" or "$join".'''
 fix = '''use one of those, or put the value inside "$literal" to keep the key as it is.'''
 args = { key = "key" }
 example = "mapping.unknown-operator"
@@ -773,7 +773,7 @@ example = "mapping.unknown-operator"
 code = "mapping.operator-shape"
 severity = "problem"
 title = '''Operator with the wrong operands'''
-message = '''{operator} in step {step} is given {operands}, and it takes a list shaped {shape}.'''
+message = '''{operator} in {owner} is given {operands}, and it takes a list shaped {shape}.'''
 fix = '''give {operator} a list shaped {shape}, each item a value or a mapping.'''
 args = { operator = "key", operands = "input", shape = "code" }
 example = "mapping.operator-shape"
@@ -782,7 +782,7 @@ example = "mapping.operator-shape"
 code = "mapping.operator-extra-key"
 severity = "problem"
 title = '''Operator with another key'''
-message = '''The {operator} object in step {step} also has {key}, and it may have only {operator}.'''
+message = '''The {operator} object in {owner} also has {key}, and it may have only {operator}.'''
 fix = '''remove {key}, or put the object inside "$literal".'''
 args = { operator = "key", key = "key" }
 example = "mapping.operator-extra-key"
@@ -791,7 +791,7 @@ example = "mapping.operator-extra-key"
 code = "mapping.get-extra-key"
 severity = "problem"
 title = '''"$get" with another key'''
-message = '''The "$get" object in step {step} also has {key}, and it may have only "$get" and "default".'''
+message = '''The "$get" object in {owner} also has {key}, and it may have only "$get" and "default".'''
 fix = '''remove {key}, or put the object inside "$literal".'''
 args = { key = "key" }
 example = "mapping.get-extra-key"
@@ -800,7 +800,7 @@ example = "mapping.get-extra-key"
 code = "mapping.literal-extra-key"
 severity = "problem"
 title = '''"$literal" with another key'''
-message = '''The "$literal" object in step {step} also has {key}, and it may have only "$literal".'''
+message = '''The "$literal" object in {owner} also has {key}, and it may have only "$literal".'''
 fix = '''remove {key}, or move it into the "$literal" value.'''
 args = { key = "key" }
 example = "mapping.literal-extra-key"
@@ -809,16 +809,16 @@ example = "mapping.literal-extra-key"
 code = "mapping.path-not-list"
 severity = "problem"
 title = '''"$get" path that is not a list'''
-message = '''The "$get" of step {step} is {path}, and it must be a list of steps such as ["input", "repo"].'''
-fix = '''write it as a list, starting with "input", "nodes", "run" or "from".'''
-args = { path = "input" }
+message = '''The "$get" of {owner} is {path}, and it must be a list of steps such as ["input", "repo"].'''
+fix = '''write it as a list starting with one of {roots}.'''
+args = { path = "input", roots = "computed" }
 example = "mapping.path-not-list"
 
 [[code]]
 code = "mapping.path-root"
 severity = "problem"
 title = '''"$get" path with an unknown start'''
-message = '''The "$get" path of step {step} starts with {root}, and a path starts with one of {roots}.'''
+message = '''The "$get" path of {owner} starts with {root}, and a path starts with one of {roots}.'''
 fix = '''start it with one of {roots}.'''
 args = { root = "input", roots = "computed" }
 example = "mapping.path-root"
@@ -827,7 +827,7 @@ example = "mapping.path-root"
 code = "mapping.path-step"
 severity = "problem"
 title = '''"$get" path with a wrong step'''
-message = '''{value} in a "$get" path of step {step} is not a step of a path; a step is a key or a whole number of zero or more.'''
+message = '''{value} in a "$get" path of {owner} is not a step of a path; a step is a key or a whole number of zero or more.'''
 fix = '''use a key or a whole number here.'''
 args = { value = "input" }
 example = "mapping.path-step"
@@ -985,6 +985,14 @@ title = '''Outcome for exit code 0 in result mode'''
 message = '''Action {action} reads its result from what it prints when it exits with 0, so "exitOutcomes" cannot give 0 an outcome.'''
 fix = '''remove "0" from "exitOutcomes".'''
 example = "command.result-exit-zero"
+
+[[code]]
+code = "command.result-not-json"
+severity = "problem"
+title = '''"result" without JSON output'''
+message = '''Action {action} maps its outcome and output from what it prints with "result", which reads that as JSON, but its "output" is not "json".'''
+fix = '''set "output" to "json", or remove "result".'''
+example = "command.result-not-json"
 
 [[code]]
 code = "command.exit-outcome"
