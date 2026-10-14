@@ -154,6 +154,14 @@ fn decisions(mut status: serde_json::Value) -> serde_json::Value {
     for own in ["runId", "startKey", "artifactDigest", "db"] {
         fields.remove(own);
     }
+    // The commands name the run, and the times are when each run got there.
+    for detail in ["waiting", "intervention", "running"] {
+        if let Some(detail) = fields[detail].as_object_mut() {
+            for own in ["commands", "sinceMs", "forMs"] {
+                detail.remove(own);
+            }
+        }
+    }
     status
 }
 

@@ -31,7 +31,7 @@ marked **0.2** below are new since 0.1.
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder. The input is checked against the workflow's `inputSchema` (0.2) |
 | `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
-| `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation |
+| `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on |
 | `list` | All runs with status |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
@@ -414,6 +414,15 @@ Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
  "invocation": {"invocationId": "inv_…", "attempt": 3, "maxAttempts": 3, "state": "stuck",
                 "error": {"code": "command.exit", "message": "exit code 1", "nodeId": "deploy",
                           "details": {…}}},
+ "waiting": null,
+ "intervention": {"nodeId": "deploy", "reason": "stuck", "invocationId": "inv_…",
+                  "attempt": 3, "maxAttempts": 3, "attemptStatus": "failure",
+                  "error": {"code": "command.exit", …}, "sinceMs": "…", "forMs": "…",
+                  "outcomes": ["ok"], "outputSchemas": {},
+                  "commands": ["spore resolve run_… --retry",
+                               "spore resolve run_… --complete ok",
+                               "spore resolve run_… --fail <message>"]},
+ "running": null,
  "streaks": {"test": {"outcome": "red", "count": 2, "limit": 3}},
  "step": null, "result": null, "end": null, "quarantine": null}
 ```
@@ -438,6 +447,42 @@ until it reaches the new node. The cost is one transition per event of the run.
 (kernel.md §3), plus `maxAttempts` from its action's retry policy (1 when it has
 none). `state` is `scheduled`, `unknown` or `stuck`; at a stuck step `error` is the
 kept error. `run` and `worker --until-parked` print the same object.
+
+**0.2: what the run waits for.** `waiting`, `intervention` and `running` say, for the
+run's status, what it waits for and how to move it on. The one named for the status
+is an object; the other two are null, and all three are null for a `completed` or
+`failed` run. Each has `sinceMs`, when the run came to stand so, and `forMs`, how long
+ago that was when `status` read it. `sinceMs` is the accepted time of the event whose
+transition last changed the run's status, its position or its invocation (its ID,
+attempt or state); `status` finds it in the same replay as `position.from`. Nothing
+here is recorded for `status`: it is read from the state, the package and the store.
+
+- `waiting`, at an await-signal node: `{"nodeId", "signal", "sinceMs", "forMs",
+  "outcomes", "outputSchemas", "commands"}`. `outcomes` are the node's outcomes but
+  `exhausted`; `outputSchemas` is the node's (`{}` without them); `commands` has one
+  `spore signal <runId> <signal> --outcome <o>` per outcome, ending ` --data <json>`
+  when the outcome has a schema its data must fit.
+- `intervention`, at a stuck step or an unsafe step whose outcome is unknown:
+  `{"nodeId", "reason", "invocationId", "attempt", "maxAttempts", "attemptStatus",
+  "error", "sinceMs", "forMs", "outcomes", "outputSchemas", "commands"}`. `reason` is
+  `stuck` or `unknown`, the invocation's state. `attemptStatus` is the `status` of the
+  invocation's latest consumed `activity.result` (`failure`, `success`, `unknown` or
+  `expired`), or null. `error` is the kept error of a stuck step, else that result's
+  error, null when it has none (an expired lease); its `details` carry the stream
+  tails. `outcomes` are the action's, with the node's `outputSchemas`; `commands` are
+  `spore resolve <runId> --retry`, one `--complete <o>` per outcome (with ` --output
+  <json>` when it has a schema) and `--fail <message>`.
+- `running`, at an activity: `{"nodeId", "actionId", "invocationId", "attempt",
+  "maxAttempts", "claimed", "sinceMs", "forMs"}`. `claimed` is whether a worker or
+  an actor holds the attempt. The store does not record when an attempt was claimed,
+  so `sinceMs` is when the try was due: the later of the transition that scheduled it
+  and the end of its backoff.
+
+The commands name the run and nothing else: a run in another database than the one
+found by default needs `--db` added. Text mode shows the same under `waiting`, `needs`
+and `running`, with the time in UTC and the duration in its two largest units, each
+outcome with its schema, and the commands one per line; an unknown step's error and
+its stream tails show there too.
 
 **0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
 the absolute path of the database the command used (§Project folder). `list` prints

@@ -2,8 +2,8 @@
 //! decimal strings.
 
 use runspore_host::{Arrival, Arrow, ExternalStep};
-use runspore_types::model::State;
-use runspore_types::store::{EventRecord, InvocationView, RunView};
+use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
+use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
 use serde_json::{json, Value};
 
 /// The exit code a parked run maps to: quarantine first, then the run status. A
@@ -24,7 +24,7 @@ pub fn exit_for(view: &RunView, step: Option<&ExternalStep>) -> u8 {
 
 /// The `step` object of `status`: the external step the run is at, or null. Never its
 /// input or token.
-pub fn step_json(step: Option<&ExternalStep>) -> Value {
+fn step_json(step: Option<&ExternalStep>) -> Value {
     step.map_or(Value::Null, |s| {
         json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
@@ -33,7 +33,7 @@ pub fn step_json(step: Option<&ExternalStep>) -> Value {
     })
 }
 
-pub fn step_text(step: Option<&ExternalStep>) -> String {
+fn step_text(step: Option<&ExternalStep>) -> String {
     let Some(s) = step else {
         return String::new();
     };
@@ -91,15 +91,37 @@ fn streaks_json(state: &State, package: Option<&Value>) -> Value {
     Value::Object(streaks.collect())
 }
 
-/// The `status` object of spec/cli.md, plus `startKey` and the latest result per node.
-/// With the run's `package`, the invocation carries its action's `maxAttempts`; it shows
-/// the process record of its latest attempt, from `invocations`.
-pub fn status_json(
-    view: &RunView,
-    arrival: &Arrival,
-    package: Option<&Value>,
-    invocations: &[InvocationView],
-) -> Value {
+/// What `status` shows of a run beside its view: the arrow into its position and when
+/// it came to stand there, its package as JSON, its invocations and external step, the
+/// payload of the latest `activity.result` of its outstanding invocation, and the time
+/// the command read it all.
+pub struct Shown {
+    pub arrival: Arrival,
+    pub package: Option<Value>,
+    pub invocations: Vec<InvocationView>,
+    pub step: Option<ExternalStep>,
+    pub last_result: Option<Value>,
+    pub now_ms: u64,
+}
+
+impl Shown {
+    /// The `status` object of spec/cli.md.
+    pub fn json(&self, view: &RunView) -> Value {
+        let mut json = status_json(view, self);
+        json["step"] = step_json(self.step.as_ref());
+        json
+    }
+
+    pub fn text(&self, view: &RunView) -> String {
+        status_text(view, self) + &step_text(self.step.as_ref())
+    }
+}
+
+/// The `status` object of spec/cli.md but `step`, plus `startKey` and the latest result
+/// per node. With the run's package, the invocation carries its action's `maxAttempts`;
+/// it shows the process record of its latest attempt.
+fn status_json(view: &RunView, shown: &Shown) -> Value {
+    let (arrival, package) = (&shown.arrival, shown.package.as_ref());
     let state = state(view);
     let field = |f: fn(&State) -> Value| state.as_ref().map_or(Value::Null, f);
     let mut position = field(|s| json!(s.position));
@@ -112,12 +134,15 @@ pub fn status_json(
         i.insert("maxAttempts".into(), max_attempts(package, &action_id));
     }
     if let Value::Object(fields) = &mut invocation {
-        let process = invocations
+        let process = shown
+            .invocations
             .iter()
             .find(|i| fields.get("invocationId").and_then(Value::as_str) == Some(&i.invocation_id))
             .and_then(|i| i.process.as_ref());
         fields.insert("process".into(), json!(process));
     }
+    let stands = state.as_ref().map(|s| Stands::new(view, s, shown));
+    let detail = |status: &str| stands.as_ref().filter(|_| view.status == status);
     json!({
         "runId": view.key.run,
         "startKey": view.start_key,
@@ -127,6 +152,9 @@ pub fn status_json(
         "artifactDigest": view.artifact_digest,
         "position": position,
         "invocation": invocation,
+        "waiting": detail("waiting").map_or(Value::Null, Stands::waiting),
+        "intervention": detail("needs-intervention").map_or(Value::Null, Stands::intervention),
+        "running": detail("running").map_or(Value::Null, Stands::running),
         "streaks": state.as_ref().map_or(Value::Null, |s| streaks_json(s, package)),
         "result": field(|s| json!(s.result)),
         "end": arrival.end.as_ref().map(|end| json!({
@@ -137,6 +165,153 @@ pub fn status_json(
     })
 }
 
+/// How a run that is not terminal stands, read from its state, its package and the
+/// store: what it waits for, since when, and the commands that move it on.
+struct Stands<'a> {
+    run_id: &'a str,
+    state: &'a State,
+    shown: &'a Shown,
+    /// The node the run is parked at, from the package.
+    node: &'a Value,
+}
+
+impl<'a> Stands<'a> {
+    fn new(view: &'a RunView, state: &'a State, shown: &'a Shown) -> Self {
+        let node_id = state.position.as_ref().map_or("", |p| p.node_id.as_str());
+        let node = shown
+            .package
+            .as_ref()
+            .and_then(|p| p.get("nodes")?.get(node_id))
+            .unwrap_or(&Value::Null);
+        Self {
+            run_id: &view.key.run,
+            state,
+            shown,
+            node,
+        }
+    }
+
+    /// `sinceMs` and `forMs` of a stand that began at `since`, as decimal strings.
+    fn since(&self, since: Option<u64>) -> (Value, Value) {
+        since.map_or((Value::Null, Value::Null), |since| {
+            let lasted = self.shown.now_ms.saturating_sub(since);
+            (json!(since.to_string()), json!(lasted.to_string()))
+        })
+    }
+
+    fn output_schemas(&self) -> Value {
+        self.node
+            .get("outputSchemas")
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+    }
+
+    /// ` <flag> <json>` when `outcome` has an output schema, which its data must fit.
+    fn data_flag(&self, flag: &str, outcome: &str) -> String {
+        match self.node.get("outputSchemas").and_then(|s| s.get(outcome)) {
+            Some(_) => format!(" {flag} <json>"),
+            None => String::new(),
+        }
+    }
+
+    /// At an await-signal node: the signal, since when, its outcomes and their schemas,
+    /// and one `spore signal` per outcome.
+    fn waiting(&self) -> Value {
+        let signal = self.node["signal"].as_str().unwrap_or_default();
+        let outcomes: Vec<&str> = self.node["outcomes"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(outcome, _)| outcome.as_str())
+            .filter(|outcome| *outcome != OUTCOME_EXHAUSTED)
+            .collect();
+        let commands: Vec<String> = outcomes
+            .iter()
+            .map(|outcome| {
+                format!(
+                    "spore signal {} {signal} --outcome {outcome}{}",
+                    self.run_id,
+                    self.data_flag("--data", outcome)
+                )
+            })
+            .collect();
+        let (since, lasted) = self.since(self.shown.arrival.since_ms);
+        json!({"nodeId": self.state.position.as_ref().map(|p| &p.node_id),
+               "signal": signal, "sinceMs": since, "forMs": lasted,
+               "outcomes": outcomes, "outputSchemas": self.output_schemas(),
+               "commands": commands})
+    }
+
+    /// At a stuck step, or an unsafe step whose outcome is unknown: why, the step's last
+    /// error, its attempts, since when, and the `spore resolve` commands.
+    fn intervention(&self) -> Value {
+        let Some(invocation) = &self.state.invocation else {
+            return Value::Null;
+        };
+        let reason = match invocation.state {
+            InvocationPhase::Stuck => "stuck",
+            InvocationPhase::Unknown => "unknown",
+            InvocationPhase::Scheduled => return Value::Null,
+        };
+        let last = self.shown.last_result.as_ref();
+        let error = invocation.error.as_ref().map_or_else(
+            || last.map_or(Value::Null, |r| r["error"].clone()),
+            |kept| json!(kept),
+        );
+        let package = self.shown.package.as_ref();
+        let outcomes = package
+            .and_then(|p| p.pointer(&format!("/actions/{}/outcomes", invocation.action_id)))
+            .cloned()
+            .unwrap_or_else(|| json!([OUTCOME_OK]));
+        let resolve = format!("spore resolve {}", self.run_id);
+        let mut commands = vec![format!("{resolve} --retry")];
+        for outcome in outcomes
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            let output = self.data_flag("--output", outcome);
+            commands.push(format!("{resolve} --complete {outcome}{output}"));
+        }
+        commands.push(format!("{resolve} --fail <message>"));
+        let (since, lasted) = self.since(self.shown.arrival.since_ms);
+        json!({"nodeId": invocation.node_id, "reason": reason,
+               "invocationId": invocation.invocation_id, "attempt": invocation.attempt,
+               "maxAttempts": package.map(|p| max_attempts(p, &invocation.action_id)),
+               "attemptStatus": last.map(|r| r["status"].clone()),
+               "error": error, "sinceMs": since, "forMs": lasted,
+               "outcomes": outcomes, "outputSchemas": self.output_schemas(),
+               "commands": commands})
+    }
+
+    /// At an activity: its attempt, whether a worker or an actor holds it, and how long
+    /// it has run. The store does not record when an attempt was claimed, so a try runs
+    /// from when it was due: the transition that scheduled it, or its backoff's end.
+    fn running(&self) -> Value {
+        let Some(invocation) = &self.state.invocation else {
+            return Value::Null;
+        };
+        let stored = self
+            .shown
+            .invocations
+            .iter()
+            .find(|i| i.invocation_id == invocation.invocation_id);
+        let due = self
+            .shown
+            .arrival
+            .since_ms
+            .max(stored.map(|i| i.not_before_ms));
+        let (since, lasted) = self.since(due);
+        let package = self.shown.package.as_ref();
+        json!({"nodeId": invocation.node_id, "actionId": invocation.action_id,
+               "invocationId": invocation.invocation_id, "attempt": invocation.attempt,
+               "maxAttempts": package.map(|p| max_attempts(p, &invocation.action_id)),
+               "claimed": stored.map(|i| i.status == InvocationStatus::Running),
+               "sinceMs": since, "forMs": lasted})
+    }
+}
+
 /// `node on outcome`, the way an arrow reads in text.
 fn arrow_text(arrow: &Value) -> String {
     match (arrow["nodeId"].as_str(), arrow["outcome"].as_str()) {
@@ -145,13 +320,8 @@ fn arrow_text(arrow: &Value) -> String {
     }
 }
 
-pub fn status_text(
-    view: &RunView,
-    arrival: &Arrival,
-    package: Option<&Value>,
-    invocations: &[InvocationView],
-) -> String {
-    let s = status_json(view, arrival, package, invocations);
+fn status_text(view: &RunView, shown: &Shown) -> String {
+    let s = status_json(view, shown);
     let mut text = format!(
         "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\npackage    {}\n",
         view.key.run, view.start_key, view.status, view.revision, view.package_digest
@@ -185,12 +355,7 @@ pub fn status_text(
             i["state"].as_str().unwrap_or_default()
         );
         if let Some(error) = i.get("error") {
-            text += &format!(
-                "error      {}: {}\n",
-                error["code"].as_str().unwrap_or_default(),
-                error["message"].as_str().unwrap_or_default()
-            );
-            text += &tails_text(error, "");
+            text += &error_text(error);
         }
         if let Some(p) = i.get("process").and_then(Value::as_object) {
             text += &format!(
@@ -200,6 +365,9 @@ pub fn status_text(
             );
         }
     }
+    text += &waiting_text(&s["waiting"]);
+    text += &intervention_text(&s["intervention"], &s["invocation"]);
+    text += &running_text(&s["running"]);
     for (node, streak) in s["streaks"].as_object().into_iter().flatten() {
         text += &format!(
             "streak     {node} {} {} of {} in a row\n",
@@ -216,6 +384,145 @@ pub fn status_text(
         text += &format!("quarantine {}: {}\n", q.code, q.details);
     }
     text
+}
+
+/// An error's code and message, then the ends of its command's streams.
+fn error_text(error: &Value) -> String {
+    format!(
+        "error      {}: {}\n",
+        error["code"].as_str().unwrap_or_default(),
+        error["message"].as_str().unwrap_or_default()
+    ) + &tails_text(error, "")
+}
+
+/// ` since <time>, for <duration>` from a detail's `sinceMs` and `forMs`.
+fn since_text(detail: &Value) -> String {
+    let ms = |key: &str| detail[key].as_str().and_then(|v| v.parse::<u64>().ok());
+    match (ms("sinceMs"), ms("forMs")) {
+        (Some(since), Some(lasted)) => {
+            format!(" since {}, for {}", utc_text(since), duration_text(lasted))
+        }
+        _ => String::new(),
+    }
+}
+
+/// One line each, `label` before the first and blanks before the rest.
+fn lines_text(label: &str, lines: impl IntoIterator<Item = String>) -> String {
+    let mut text = String::new();
+    for (i, line) in lines.into_iter().enumerate() {
+        let label = if i == 0 { label } else { "" };
+        text += &format!("{label:<10} {line}\n");
+    }
+    text
+}
+
+fn commands_text(label: &str, detail: &Value) -> String {
+    let commands = detail["commands"].as_array().into_iter().flatten();
+    lines_text(
+        label,
+        commands.filter_map(Value::as_str).map(str::to_string),
+    )
+}
+
+/// The signal and since when, each outcome with the schema its data must fit, and the
+/// `spore signal` commands.
+fn waiting_text(waiting: &Value) -> String {
+    if !waiting.is_object() {
+        return String::new();
+    }
+    let header = format!(
+        "waiting    for signal {}{}\n",
+        waiting["signal"].as_str().unwrap_or_default(),
+        since_text(waiting)
+    );
+    let outcomes = waiting["outcomes"].as_array().into_iter().flatten();
+    let outcomes = outcomes.filter_map(Value::as_str).map(|outcome| {
+        match waiting["outputSchemas"].get(outcome) {
+            Some(schema) => format!("{outcome}, with data that fits {schema}"),
+            None => outcome.to_string(),
+        }
+    });
+    header + &lines_text("outcomes", outcomes) + &commands_text("answer", waiting)
+}
+
+/// Why a person is needed and since when, the last error when it is not the kept one
+/// shown with the invocation, and the `spore resolve` commands.
+fn intervention_text(intervention: &Value, invocation: &Value) -> String {
+    if !intervention.is_object() {
+        return String::new();
+    }
+    let why = match (
+        intervention["reason"].as_str(),
+        intervention["attemptStatus"].as_str(),
+    ) {
+        (Some("unknown"), Some("expired")) => "its last attempt's lease ran out with no result",
+        (Some("unknown"), _) => "the outcome of its last attempt is unknown",
+        _ => "it gave up and has no failed arrow",
+    };
+    let mut text = format!(
+        "needs      a person: step {} {why}{}\n",
+        intervention["nodeId"].as_str().unwrap_or_default(),
+        since_text(intervention)
+    );
+    let error = &intervention["error"];
+    if error.is_object() && invocation.get("error") != Some(error) {
+        text += &error_text(error);
+    }
+    text + &commands_text("resolve", intervention)
+}
+
+fn running_text(running: &Value) -> String {
+    if !running.is_object() {
+        return String::new();
+    }
+    let of = running["maxAttempts"]
+        .as_u64()
+        .map_or_else(String::new, |m| format!(" of {m}"));
+    // The claim's time is not recorded: the try is shown from when it was due.
+    let held = match running["claimed"].as_bool() {
+        Some(true) => ", claimed, due",
+        Some(false) => ", not claimed yet, due",
+        None => ", due",
+    };
+    format!(
+        "running    {} attempt {}{of}{held}{}\n",
+        running["nodeId"].as_str().unwrap_or_default(),
+        running["attempt"],
+        since_text(running)
+    )
+}
+
+/// A time in milliseconds since the Unix epoch, in UTC: `2026-10-14T20:46:03Z`.
+fn utc_text(ms: u64) -> String {
+    let secs = ms / 1000;
+    let (days, rest) = (secs / 86_400, secs % 86_400);
+    // The civil date of a day count since 1970-01-01 (Howard Hinnant's days_from_civil
+    // inverse), in eras of 400 years from 0000-03-01.
+    let z = days + 719_468;
+    let (era, doe) = (z / 146_097, z % 146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + u64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
+}
+
+/// A duration in milliseconds, in its two largest units: `45s`, `3m12s`, `2h05m`, `3d4h`.
+fn duration_text(ms: u64) -> String {
+    let secs = ms / 1000;
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m{:02}s", secs / 60, secs % 60),
+        3600..86_400 => format!("{}h{:02}m", secs / 3600, secs % 3600 / 60),
+        _ => format!("{}d{}h", secs / 86_400, secs % 86_400 / 3600),
+    }
 }
 
 pub fn event_json(record: &EventRecord) -> Value {
@@ -277,5 +584,26 @@ pub fn event_text(record: &EventRecord) -> String {
     match tails.strip_suffix('\n') {
         Some(tails) => format!("{line}\n{tails}"),
         None => line,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn times_read_in_utc() {
+        assert_eq!(utc_text(0), "1970-01-01T00:00:00Z");
+        assert_eq!(utc_text(951_782_400_000), "2000-02-29T00:00:00Z");
+        assert_eq!(utc_text(1_791_924_363_999), "2026-10-13T20:46:03Z");
+    }
+
+    #[test]
+    fn durations_read_in_their_two_largest_units() {
+        assert_eq!(duration_text(999), "0s");
+        assert_eq!(duration_text(45_000), "45s");
+        assert_eq!(duration_text(192_000), "3m12s");
+        assert_eq!(duration_text(7_500_000), "2h05m");
+        assert_eq!(duration_text(273_600_000), "3d4h");
     }
 }
