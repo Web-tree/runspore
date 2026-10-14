@@ -14,7 +14,8 @@ use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
 use runspore_types::model::{
     event_kind, ActivityResult, AttemptStatus, InvocationResolved, Resolution, RunStarted,
-    RunStatus, SignalReceived, State, Workflow, WorkflowLimits, OUTCOME_RECEIVED,
+    RunStatus, SignalReceived, State, Workflow, WorkflowLimits, OUTCOME_EXHAUSTED,
+    OUTCOME_RECEIVED, WORKFLOW_FORMAT_0_2,
 };
 use runspore_types::reducer::{Envelope, Identity, Limits, Reducer, TransitionRequest};
 use runspore_types::store::*;
@@ -25,7 +26,7 @@ use tokio::task::JoinSet;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::arrival::{Arrival, Trail};
-use crate::error::HostError;
+use crate::error::{HostError, Unrouted};
 use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
@@ -242,9 +243,25 @@ struct Package {
     max_visits: u32,
     /// The workflow's `onIntervention`, if it has one.
     on_intervention: Option<Value>,
+    /// A 0.2 workflow, where no signal takes the `exhausted` route (spec/kernel.md §7.4).
+    reserves_exhausted: bool,
 }
 
 impl Package {
+    /// The outcomes an await-signal node `node_id` waiting for `signal` lets a signal
+    /// route, as *consume* decides (spec/kernel.md §7.4); `None` when it is no such node.
+    fn signal_routes(&self, node_id: &str, signal: &str) -> Option<Vec<String>> {
+        let node = self.nodes.get(node_id)?;
+        let waits = node.get("kind").and_then(Value::as_str) == Some("await-signal")
+            && node.get("signal").and_then(Value::as_str) == Some(signal);
+        let outcomes = node.get("outcomes")?.as_object().filter(|_| waits)?;
+        let routed = outcomes
+            .keys()
+            .filter(|outcome| !(self.reserves_exhausted && *outcome == OUTCOME_EXHAUSTED))
+            .cloned();
+        Some(routed.collect())
+    }
+
     /// The schema node `node_id` declares for `outcome`, if any.
     fn schema(&self, node_id: &str, outcome: &str) -> Option<&Value> {
         self.nodes.get(node_id)?.get("outputSchemas")?.get(outcome)
@@ -383,6 +400,20 @@ fn snapshot_status(snapshot: &[u8]) -> Option<&'static str> {
     let state: Value = serde_json::from_slice(snapshot).ok()?;
     let status: RunStatus = serde_json::from_value(state.get("status")?.clone()).ok()?;
     Some(status.as_str())
+}
+
+/// The node a run waits at for `signal`, with the outcomes a signal may route there:
+/// `None` unless its committed state is `waiting` there and no event is pending, so the
+/// next signal is taken by that node.
+fn waiter(view: &RunView, package: &Package, signal: &str) -> Option<(String, Vec<String>)> {
+    if view.status != RunStatus::Waiting.as_str() || view.applied_sequence + 1 != view.next_sequence
+    {
+        return None;
+    }
+    let state: State = canonical::decode(view.snapshot.as_deref()?).ok()?;
+    let node_id = state.position?.node_id;
+    let outcomes = package.signal_routes(&node_id, signal)?;
+    Some((node_id, outcomes))
 }
 
 /// The visit `v` of the claimed node, at most `max_visits`, whose activation
@@ -698,8 +729,19 @@ impl Engine {
         outcome: Option<String>,
         data: Value,
     ) -> Result<Receipt<EventAccepted>, HostError> {
-        if let Some(package) = self.run_package(key).await? {
+        if let Some(view) = self.get_run(key).await? {
+            let package = self.inner.package(&view.package_digest).await?;
             let routed = outcome.as_deref().unwrap_or(OUTCOME_RECEIVED);
+            if let Some((node_id, outcomes)) = waiter(&view, &package, name) {
+                if !outcomes.iter().any(|o| o == routed) {
+                    return Err(HostError::OutcomeUnrouted(Unrouted {
+                        node_id,
+                        signal: name.to_string(),
+                        outcome: routed.to_string(),
+                        outcomes,
+                    }));
+                }
+            }
             if let Some(schema) = package.signal_schema(name, routed) {
                 runspore_schema::fit(routed, schema, &data).map_err(HostError::OutputInvalid)?;
             }
@@ -1101,12 +1143,15 @@ impl Inner {
             .and_then(|n| u32::try_from(n).ok())
             .unwrap_or(WorkflowLimits::default().max_visits_per_node);
         let on_intervention = workflow.get("onIntervention").cloned();
+        let reserves_exhausted =
+            workflow.get("format").and_then(Value::as_str) == Some(WORKFLOW_FORMAT_0_2);
         let package = Arc::new(Package {
             bytes,
             actions,
             nodes,
             max_visits,
             on_intervention,
+            reserves_exhausted,
         });
         lock(&self.packages).insert(digest.to_string(), package.clone());
         Ok(package)

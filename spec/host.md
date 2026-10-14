@@ -120,7 +120,14 @@ process on its own.
   the run's package: against the schema each await-signal node waiting for `name`
   declares for the signal's outcome (`received` when it names none). W13 makes those
   schemas equal, so the check has one answer, and it holds even when the signal
-  arrives before the run reaches the node.
+  arrives before the run reaches the node. **0.2:** before that, when the run's
+  committed state is `waiting` at an await-signal node whose `signal` is `name` and
+  no event is pending, the signal's outcome must be one the node routes, as *consume*
+  decides (kernel.md §7.4: not `exhausted` in a 0.2 workflow). Otherwise it is refused
+  with `invalid-input` / `signal.outcome-unrouted`, details `{nodeId, signal, outcome,
+  outcomes}` (the outcomes the node accepts), before anything is appended. A signal
+  sent while the run does not wait for it is appended as before, and the kernel may
+  drop it later with the diagnostic of the same code.
 - `resolve(key, request_id, invocation_id, resolution)`: `append_event` with event ID
   `ids::event_for_resolution(request_id)`. **0.2:** a `complete` resolution's output
   is first checked against the schema the invocation's node declares for its outcome.
@@ -836,4 +843,5 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H26 | **0.2.** The sweep with one finished and one unfinished run of different artifacts, and with a finished run's lock held | The finished run's step files are removed and the unfinished run's kept; a held lock keeps them until the next sweep |
 | H27 | **0.2.** A run at an external step, worked by an engine, then claimed with and without the step's label, completed, failed and abandoned | The engine never claims it and `run_until_parked` returns there; only a claim naming the label takes it; a completion with an undeclared outcome, misfitting or oversize output records nothing; a completion routes the run; a retryable failure brings a new attempt; an abandoned `unsafe` step needs intervention and the old holder's report is `lease.lost` and kept as late evidence |
 | H29 | **0.2.** `onIntervention` on a run whose step gets stuck, is resolved with `retry` and gets stuck again; on a run that ends at a fail node; on a run that completes; with an action that fails; and `validate_workflow` with an unknown or `external` action and `params` rooted at `from` | Each entry into `needs-intervention` and the failure tell once, with `{run, node, status, reason, error}` and the evaluated params, and further ticks tell nobody again; a completed run tells nobody; the failing action's error is one `on-intervention.failed` event, consumed with no change; each bad `onIntervention` is `workflow.invalid` |
+| H30 | **0.2.** A signal for the node a run waits at with an outcome the node does not route, with `exhausted`, and with none; another signal name; then the same unrouted outcome sent before the run waits | Each unrouted one is `signal.outcome-unrouted` with the node's outcomes and appends nothing; the other name and a routed outcome are applied; the early signal is applied and dropped with the diagnostic `signal.outcome-unrouted` |
 | H28 | **0.2.** External attempts past their lease and past their deadline, with a repeatable and an `unsafe` effect | The sweep expires each; the repeatable step is ready again with the next attempt, the `unsafe` one needs intervention; renewals never pass the deadline |
