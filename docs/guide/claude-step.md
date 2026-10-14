@@ -57,6 +57,20 @@ spore validate .spore/workflows/coding-loop
 the database out of git. `<runspore>` is a checkout of this repository. `validate`
 prints `.spore/workflows/coding-loop is valid`.
 
+To try it without touching a real project, make a small one first, then run the three
+commands above in it:
+
+```sh
+mkdir try-coding-loop && cd try-coding-loop
+git init
+npm init -y
+npm pkg set scripts.test="node --test"
+git add . && git commit -m "Start"
+```
+
+`node --test` runs every `*.test.js` file and exits 1 when a test fails. The tasks on
+this page fit this project as they are.
+
 To use another test command, change the `test` action's `argv` and its `exitOutcomes`,
 the exit code that means red. For `cargo test`, which exits 101 on a failed test:
 
@@ -67,7 +81,7 @@ the exit code that means red. For `cargo test`, which exits 101 on a failed test
 ## Run it
 
 ```sh
-task='{"task": "Add a sum(a, b) function to math.js, with a test."}'
+task='{"task": "Add math.js exporting a sum(a, b) function, with a test in math.test.js."}'
 spore run coding-loop --key add-sum --input "$task"
 ```
 
@@ -132,11 +146,20 @@ left the run fails (`limit.visits-exceeded`).
 
 ## Stop it and go on
 
-Press Ctrl-C while `implement` or `test` is working. spore stops the step, records the
-try as stopped, and exits 130. Closing the terminal does the same. Nothing is lost:
+A bigger task gives you time to stop `implement` while it works. Start a second run with
+its own key:
 
 ```sh
-spore run coding-loop --key add-sum --input "$task"
+big='{"task": "Add stats.js exporting mean, median and mode of an array of numbers, each throwing on an empty array, with tests in stats.test.js. Then add cli.js, which prints all three for the numbers given as its arguments, with a test that runs it."}'
+spore run coding-loop --key add-stats --input "$big"
+```
+
+Press Ctrl-C while `implement` or `test` is working, a few seconds in or later. spore
+stops the step, records the try as stopped, and exits 130. Closing the terminal does the
+same. Nothing is lost:
+
+```sh
+spore run coding-loop --key add-stats --input "$big"
 ```
 
 goes on from the step that was stopped. A stopped `implement` resumes the same
