@@ -10,7 +10,7 @@
 
 set -eu
 
-RELEASE_KEY='ssh-ed25519 PENDING runspore-release'
+RELEASE_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGy3mjvtp10UZgB9Y8u3KNBOh66DHPo3bdbZEszh9b1k runspore-release'
 REPO='Web-tree/runspore'
 NAMESPACE='runspore-release'
 

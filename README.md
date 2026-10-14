@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh |
 `install.sh` downloads the newest release, checks that `SHA256SUMS` is signed by the release key below and that the archive matches it, checks the build-provenance attestation when `gh` is signed in, and puts `spore` in `~/.local/bin`. The release key:
 
 ```text
-ssh-ed25519 PENDING runspore-release
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGy3mjvtp10UZgB9Y8u3KNBOh66DHPo3bdbZEszh9b1k runspore-release
 ```
 
 When the line reads `PENDING`, no key has been made yet: there is no signed release and `install.sh` refuses to run, so build from source. Assets, formats and how to check them by hand: [spec/release.md](spec/release.md). To build from source:
