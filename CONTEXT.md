@@ -42,6 +42,10 @@ _Avoid_: idempotency token, request ID
 The process that moves runs forward: it asks the kernel for each next step, records the decision, and carries out the actions it can perform itself.
 _Avoid_: engine (the library inside it), runner (that performs one kind of action), daemon
 
+**Slot**:
+One of the steps a worker may run at once; the project's settings say how many (`worker.slots`). A step whose try is due but finds every slot taken is **queued** until one frees; once a worker claims it, it is **started**.
+_Avoid_: thread, executor, "scheduled" for a queued step (the kernel's word for both)
+
 **Driver**:
 Whoever keeps a run moving between steps by running `spore`: a session following the run, a separate process, or an outside agent that visits it. Several may act on one run at once; nothing has to run between their calls.
 _Avoid_: owner, controller, scheduler

@@ -90,6 +90,15 @@ fn run_stops_at_an_external_step_with_exit_6_and_status_shows_it() {
     assert!(text
         .stdout
         .contains("step       external ready for reviewer, attempt 1"));
+    // It waits for an actor, not for a worker's slot.
+    assert_eq!(status["running"]["state"], "queued", "{status}");
+    assert!(
+        text.stdout
+            .contains("running    review attempt 1 of 1, queued for an actor to claim it since "),
+        "{}",
+        text.stdout
+    );
+    assert!(!text.stdout.contains("slots "), "{}", text.stdout);
 }
 
 #[test]
