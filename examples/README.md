@@ -185,3 +185,9 @@ run_d3f771834c9dca1abe857c4307ef9b6c  completed           deploy-1
 
 The deploy ran once. Exit codes and the JSON output (`--json`) are listed in
 [spec/cli.md](../spec/cli.md).
+
+## coding-loop/
+
+The reference coding loop as a workflow folder: Claude implements through a plain
+`claude -p` step, `npm test` runs, and a person approves. It needs `claude` on `PATH`;
+[docs/guide/claude-step.md](../docs/guide/claude-step.md) walks through it.
