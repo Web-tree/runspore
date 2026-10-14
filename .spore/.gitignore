@@ -2,4 +2,3 @@ runspore.db
 runspore.db-*
 runspore.db.files/
 build-state/
-runspore-*.db*

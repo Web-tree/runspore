@@ -303,3 +303,25 @@ fn a_step_reaches_the_run_database_through_runspore_db() {
     assert_eq!(seen["runs"][0]["runId"], out["runId"]);
     assert!(!inner.join(".spore/runspore.db").exists());
 }
+
+/// A ticket step of the dogfood build runs `cargo test` with the build's database in
+/// `RUNSPORE_DB`. Every `spore` a test starts names its own database or clears the
+/// variable, so the other tests here, run by a step, pass and leave the run's database
+/// holding only the run that started them.
+#[test]
+fn tests_run_by_a_step_keep_off_the_run_database() {
+    let (_dir, root) = repo("step-tests");
+    ok(&spore(&root, &["init"]));
+    let tests = std::env::current_exe().unwrap();
+    let script = format!(
+        "'{}' --quiet --skip tests_run_by_a_step_keep_off",
+        tests.display()
+    );
+    workflow(&root.join(".spore/workflows/tests"), "tests", &script, None);
+
+    let out = ok(&spore(&root, &["--json", "run", "tests"]));
+    assert_eq!(out["status"], json!("completed"), "{out}");
+    let listed = ok(&spore(&root, &["--json", "list"]));
+    assert_eq!(listed["runs"].as_array().unwrap().len(), 1, "{listed}");
+    assert_eq!(listed["runs"][0]["runId"], out["runId"]);
+}

@@ -5,8 +5,10 @@ Input (stdin), one of:
     {"wave": n, "tickets": [{id, issue, title}], "ask"?: "steps/checkpoint-x.md"}
     {"checkpoint": "x", "changes": ["...", "skills: ..."], "ask": "steps/checkpoint-x.md"}
 
-With `changes`, each change first becomes a ticket: an issue in runspore, or in the
-skills repo when it starts with `skills:`.
+First it closes the issue of each checkpoint its run answered `go`: the step after a
+checkpoint closes it. Before it opens an issue, it creates the labels the build uses
+(safe to repeat). With `changes`, each change first becomes a ticket: an issue in
+runspore, or in the skills repo when it starts with `skills:`.
 
 Each open ticket gets one run of the `ticket` workflow, keyed `ticket:<issue>:1`,
 so starting again names the same run. A ticket step that can't recover is stuck:
@@ -25,18 +27,50 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from buildlib import (DB, POLL_S, ROOT, SPORE, gh_json, load_state, log,  # noqa: E402
-                      runs, save_state, sh, split_issue, spore, workflow)
+from buildlib import (POLL_S, ROOT, SPORE, gh_json, load_state, log, runs,  # noqa: E402
+                      save_state, sh, split_issue, spore, workflow)
 
 RUNSPORE, SKILLS = "Web-tree/runspore", "Max-Levitskiy/skills"
 STEPS = ROOT / ".spore/workflows/build-0-2"
 UPGRADE = """
 ## Try it on the newest spore
 
-The build runs on the spore it was last upgraded to. To try this checkpoint on
-spore from `main`, and move the build onto it: stop the build (Ctrl-C), answer,
-then run `work/build-0-2/bin/build --upgrade`. It prints how to go back.
+The build runs on the spore its worker runs. To try this checkpoint on spore from
+`main` and move the build onto it: stop the worker (Ctrl-C), `git pull`,
+`cargo install --locked --path crates/runspore-cli`, then `spore worker` again. It
+goes on with the same database and the same run.
 """
+LABELS = [
+    (RUNSPORE, "checkpoint", "--color", "f0b765", "--description", "Try the build and answer"),
+    (SKILLS, "ready-for-agent"),
+]
+
+
+def labels():
+    """Create the labels the build's issues carry; one that exists stays as it is."""
+    for repo, name, *flags in LABELS:
+        sh("gh", "label", "create", name, "--repo", repo, *flags, check=False)
+
+
+def close_answered():
+    """Close the issue of each checkpoint this run answered `go`, once per answer:
+    an answer on visit n of `checkpoint_x` is marked `<run>/<n>`."""
+    run = os.environ.get("RUNSPORE_RUN_ID")
+    if not run:
+        return
+    nodes = spore("status", run).get("nodes") or {}
+    cps = load_state("checkpoints")
+    for k, cp in sorted(cps.items()):
+        node = nodes.get(f"checkpoint_{k}") or {}
+        mark = f"{run}/{node.get('visit')}"
+        if node.get("outcome") != "go" or mark in cp.setdefault("closed", []):
+            continue
+        num = cp["url"].rstrip("/").split("/")[-1]
+        if gh_json("issue", "view", num, "--repo", RUNSPORE, "--json", "state")["state"] != "CLOSED":
+            sh("gh", "issue", "close", num, "--repo", RUNSPORE, "--comment", "Answered `go`.")
+            log(f"closed checkpoint {cp['url']}")
+        cp["closed"].append(mark)
+        save_state("checkpoints", cps)
 
 
 def create_issue(repo, title, body, marker, *flags):
@@ -90,7 +124,7 @@ def tick(tickets, all_runs, st):
         last = mine[-1][1] if mine else None
         if last is None:
             key = f"{base}1"
-            sh(SPORE, "--db", DB, "--json", "start", workflow("ticket"), "--key", key,
+            sh(SPORE, "--json", "start", workflow("ticket"), "--key", key,
                "--input", json.dumps({"ticket": t}))
             log(f"started {key}")
         elif last["status"] == "needs-intervention":
@@ -112,7 +146,7 @@ def gave_up(t, run, st):
     step = (pos.get("from") or {}).get("nodeId", "?")
     result = (status.get("nodes") or {}).get(step) or {}
     out = ((result.get("output") or {}).get("stdout") or "").strip()
-    cmd = f"spore --db {DB} signal {run['runId']} stuck --outcome"
+    cmd = f"spore signal {run['runId']} stuck --outcome"
     repo, num = split_issue(t["issue"])
     sh("gh", "issue", "comment", str(num), "--repo", repo, "--body",
        f"The ticket run's `{step}` step used up its loop limit: it was red too many times in "
@@ -132,7 +166,7 @@ def stuck(t, run, st):
         return
     error = inv.get("error") or {}
     node = (status.get("position") or {}).get("nodeId", "?")
-    cmd = f"spore --db {DB} resolve {run['runId']}"
+    cmd = f"spore resolve {run['runId']}"
     repo, num = split_issue(t["issue"])
     sh("gh", "issue", "comment", str(num), "--repo", repo, "--body",
        f"The ticket run's `{node}` step is stuck after try {inv.get('attempt')} of "
@@ -148,8 +182,6 @@ def stuck(t, run, st):
 def ask(k, step_md, tickets, feedback):
     """Open the checkpoint issue, or comment on it when it was already asked."""
     cps = load_state("checkpoints")
-    if load_state("answers").get(k) == "go" and k in cps:
-        return cps[k]["url"]  # a restarted run passing an answered checkpoint
     text = (STEPS / step_md).read_text()
     merged = "\n".join(f"- {t['id']}: {t['issue']}" for t in tickets)
     if k not in cps:
@@ -176,6 +208,9 @@ def ask(k, step_md, tickets, feedback):
 def main():
     inp = json.loads(sys.stdin.read())
     key = os.environ.get("RUNSPORE_EFFECT_KEY", "manual")
+    close_answered()
+    if inp.get("ask") or "changes" in inp:
+        labels()
     if "changes" in inp:
         k = inp["checkpoint"]
         tickets = feedback_tickets(k, inp["changes"], key)

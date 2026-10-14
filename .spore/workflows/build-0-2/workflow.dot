@@ -36,6 +36,7 @@ digraph "build-0-2" {
   feedback_e [label="Feedback E\ntickets from your changes", shape=box, style=dashed];
   feedback_f [label="Feedback F\ntickets from your changes", shape=box, style=dashed];
   feedback_g [label="Feedback G\ntickets from your changes", shape=box, style=dashed];
+  finish [label="Finish\ncloses checkpoint G", shape=box];
   done [kind="complete", label="0.2 shipped", shape=doublecircle];
 
   // the main path; the fast lane gets spore reading this folder first
@@ -63,7 +64,8 @@ digraph "build-0-2" {
   wave_10 -> checkpoint_f;
   checkpoint_f -> wave_11 [on="go"];
   wave_11 -> checkpoint_g;
-  checkpoint_g -> done [on="go"];
+  checkpoint_g -> finish [on="go"];
+  finish -> done;
 
   // a `changes` answer runs tickets made from your changes, then asks again
   checkpoint_0 -> feedback_0 [on="changes", style=dashed];
