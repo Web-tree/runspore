@@ -339,7 +339,8 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     let db = project::database(given, &cwd);
     // A start is read in full before the database is opened, so a bad one creates nothing.
     let request = match &cli.command {
-        Command::Start(args) | Command::Run(args) => Some(StartRequest::read(args, &db, &cwd)?),
+        Command::Start(args) => Some(StartRequest::read("start", args, &db, &cwd)?),
+        Command::Run(args) => Some(StartRequest::read("run", args, &db, &cwd)?),
         _ => None,
     };
     if let Some(request) = &request {
@@ -469,7 +470,8 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
                     outcome.clone(),
                     data.unwrap_or(Value::Null),
                 )
-                .await?;
+                .await
+                .map_err(|e| id_reused(e, "signal", &key.run, &message_id))?;
             let disposition = disposition(&receipt.disposition);
             done(
                 json!({"runId": key.run, "messageId": message_id, "disposition": disposition}),
@@ -514,7 +516,8 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             let request_id = id.clone().unwrap_or_else(|| generated("req"));
             let receipt = engine
                 .resolve(&key, &request_id, invocation_id, resolution)
-                .await?;
+                .await
+                .map_err(|e| id_reused(e, "resolve", &key.run, &request_id))?;
             let disposition = disposition(&receipt.disposition);
             done(
                 json!({"runId": key.run, "invocationId": invocation_id,
@@ -899,6 +902,9 @@ fn started(created: bool) -> &'static str {
 
 /// What `start` and `run` were asked to start.
 struct StartRequest {
+    /// `start` or `run`, and the workflow as given, to repeat them in a hint.
+    command: &'static str,
+    workflow: String,
     source: Source,
     input: Value,
     start_key: String,
@@ -908,7 +914,7 @@ struct StartRequest {
 }
 
 impl StartRequest {
-    fn read(args: &StartArgs, db: &Path, cwd: &Path) -> Result<Self, Fail> {
+    fn read(command: &'static str, args: &StartArgs, db: &Path, cwd: &Path) -> Result<Self, Fail> {
         let source = Source::read(&project::workflow(&args.workflow, cwd)?)?;
         let input = match (&args.input, &args.input_file) {
             (Some(text), _) => parse_json("--input", text)?,
@@ -927,6 +933,8 @@ impl StartRequest {
                 .map_err(|misfit| Fail::from(HostError::InputInvalid(misfit)))?;
         }
         Ok(Self {
+            command,
+            workflow: args.workflow.display().to_string(),
             source,
             input,
             start_key: args.key.clone().unwrap_or_else(|| generated("key")),
@@ -937,10 +945,119 @@ impl StartRequest {
 
     async fn start(&self, engine: &Engine) -> Result<StartOutcome, Fail> {
         let (input, start_key) = (self.input.clone(), &self.start_key);
-        engine
+        match engine
             .start_artifact(&self.source.artifact, input, start_key)
             .await
-            .map_err(|e| self.source.fail(e))
+        {
+            Err(HostError::Store(f))
+                if f.kind == StoreFailureKind::Conflict
+                    && (f.code == "request.digest-mismatch" || f.code == "run.exists") =>
+            {
+                Err(match self.key_reused(engine).await? {
+                    Some(fail) => fail,
+                    None => self.source.fail(HostError::Store(f)),
+                })
+            }
+            other => other.map_err(|e| self.source.fail(e)),
+        }
+    }
+
+    /// The start key names a run started with another input or from another version
+    /// of the workflow: `run.key-reused`, with that run, what differs and the commands
+    /// that go on with it (spec/cli.md, Keys used again). `None` when the key names no
+    /// such run.
+    async fn key_reused(&self, engine: &Engine) -> Result<Option<Fail>, Fail> {
+        let Some(key) = engine.find_run(&self.start_key).await? else {
+            return Ok(None);
+        };
+        let Some(view) = engine.get_run(&key).await? else {
+            return Ok(None);
+        };
+        let started = engine.list_events(&key, 0, 1).await?;
+        let input = started
+            .items
+            .first()
+            .and_then(|r| serde_json::from_slice::<Value>(&r.event.body).ok())
+            .map_or(Value::Null, |body| body["input"].clone());
+        let mut differs = Vec::new();
+        if input != self.input {
+            differs.push("input");
+        }
+        if view.package_digest != self.source.artifact.manifest.main {
+            differs.push("workflow");
+        }
+        let (run, start_key) = (&key.run, &self.start_key);
+        let mut commands = Vec::new();
+        let how = match differs[..] {
+            [] => return Ok(None),
+            ["input"] => {
+                commands.push(format!(
+                    "spore {} {} --key {} --input {}",
+                    self.command,
+                    quoted(&self.workflow),
+                    quoted(start_key),
+                    quoted(&input.to_string())
+                ));
+                format!("with another input: {input}")
+            }
+            ["workflow"] => "from another version of the workflow, which it keeps".into(),
+            _ => format!(
+                "with another input, {input}, and from another version of the workflow, \
+                 which it keeps"
+            ),
+        };
+        commands.push(format!("spore worker --run {run} --until-parked"));
+        let mut message = format!(
+            "start key {start_key} already names run {run}, started {how}.\n\
+             To go on with it: {}",
+            commands[0]
+        );
+        for command in &commands[1..] {
+            message += &format!("\n              or: {command}");
+        }
+        message += "\nTo start a new run instead, use another --key.";
+        let mut fail = Fail::usage("run.key-reused", message);
+        fail.details = Some(json!({
+            "runId": run, "startKey": start_key, "differs": differs,
+            "input": input, "commands": commands,
+        }));
+        Ok(Some(fail))
+    }
+}
+
+/// A `--id` of `signal` or `resolve` used on this run before, for another request:
+/// `<command>.id-reused` (spec/cli.md, Keys used again). Any other failure as it is.
+fn id_reused(e: HostError, command: &str, run: &str, id: &str) -> Fail {
+    let reused = matches!(&e, HostError::Store(f)
+        if f.kind == StoreFailureKind::Conflict && f.code == "request.digest-mismatch");
+    if !reused {
+        return e.into();
+    }
+    let other = match command {
+        "signal" => "a signal with another name, outcome or data",
+        _ => "another resolution",
+    };
+    let mut fail = Fail::usage(
+        &format!("{command}.id-reused"),
+        format!(
+            "ID {id} was already used on run {run} for {other}; a repeated ID must repeat \
+             the same request. Send it with a new --id, or without --id for a generated one"
+        ),
+    );
+    fail.details = Some(json!({"runId": run, "id": id}));
+    fail
+}
+
+/// `text` as one shell word: as it is when plain, else in single quotes.
+fn quoted(text: &str) -> String {
+    let plain = !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c));
+    if plain {
+        text.to_string()
+    } else {
+        format!("'{}'", text.replace('\'', r"'\''"))
     }
 }
 
