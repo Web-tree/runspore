@@ -1,5 +1,6 @@
-//! The `external` action kind (spec/host.md §2, Steps outside the worker): its fields,
-//! and the token that names a claimed attempt.
+//! Async actions (spec/host.md §2, Steps outside the worker; §3, Async commands): the
+//! `external` kind's fields, the `async` object an external action or an async command
+//! carries, and the token that names a claimed attempt.
 
 use std::fmt;
 use std::str::FromStr;
@@ -8,29 +9,99 @@ use runspore_types::digest::ids;
 use runspore_types::store::{AttemptRef, RunKey};
 use serde_json::Value;
 
+use crate::command::{self, Program};
+
 /// The kind of an action an actor outside the worker does.
 pub const KIND: &str = "external";
 /// `async.timeoutMs` when the action gives none: one hour.
 pub const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
+/// The one result channel this host offers: the store, through `step complete|fail`.
+pub const STORE_CHANNEL: &str = "store";
 
-/// The fields of an `external` action the host acts on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct External {
-    pub actor: Option<String>,
+/// The `async` object of an external action or an async command: the attempt's bounds
+/// and the programs that look after its holder.
+#[derive(Debug, Clone)]
+pub(crate) struct Async {
     pub timeout_ms: u64,
     pub lease_ms: Option<u64>,
+    pub probe: Option<Program>,
+    pub watch: Option<Program>,
 }
 
-impl External {
-    /// The lease a claim takes and a renewal extends by: `leaseMs`, or the whole
+impl Async {
+    /// The lease a holder takes and a renewal extends by: `leaseMs`, or the whole
     /// deadline when the holder is not expected to renew.
     pub fn lease_ms(&self) -> u64 {
         self.lease_ms.unwrap_or(self.timeout_ms)
     }
 }
 
+/// The fields of an `external` action the host acts on.
+#[derive(Debug, Clone)]
+pub(crate) struct External {
+    pub actor: Option<String>,
+    pub bounds: Async,
+}
+
 pub(crate) fn is_external(action: &Value) -> bool {
     action.get("kind").and_then(Value::as_str) == Some(KIND)
+}
+
+/// The `async` object of an action held outside the worker: an external action, whose
+/// `async` is optional, or a `command` that carries one. `None` for any other action.
+pub(crate) fn async_of(action: &Value) -> Result<Option<Async>, String> {
+    let kind = action.get("kind").and_then(Value::as_str);
+    match (kind, action.get("async")) {
+        (Some(KIND), spec) => parse_async(spec.unwrap_or(&Value::Null)).map(Some),
+        (Some("command"), Some(spec)) => parse_async(spec).map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// Reads an `async` object; null means every default.
+fn parse_async(spec: &Value) -> Result<Async, String> {
+    let null = Value::Null;
+    let spec = match spec {
+        Value::Null => &null,
+        Value::Object(_) => spec,
+        _ => return Err("`async` must be an object".into()),
+    };
+    let timeout_ms = millis(spec, "timeoutMs", "async.timeoutMs")?.unwrap_or(DEFAULT_TIMEOUT_MS);
+    let lease_ms = millis(spec, "leaseMs", "async.leaseMs")?;
+    if lease_ms.is_some_and(|lease| lease >= timeout_ms) {
+        return Err(format!(
+            "`async.leaseMs` must be smaller than `async.timeoutMs` ({timeout_ms})"
+        ));
+    }
+    let program = |name: &str| {
+        spec.get(name)
+            .map(|p| command::parse_program(&format!("async.{name}"), p))
+            .transpose()
+    };
+    let (probe, watch) = (program("probe")?, program("watch")?);
+    // Kept for `cancel`; checked here so a bad one fails at start.
+    program("stop")?;
+    if let Some(channels) = spec.get("channels") {
+        let listed: Option<Vec<&str>> = channels
+            .as_array()
+            .and_then(|list| list.iter().map(Value::as_str).collect());
+        match listed {
+            Some(list) if list.contains(&STORE_CHANNEL) => {}
+            Some(list) => {
+                return Err(format!(
+                    "`async.channels` lists {}; this host offers `{STORE_CHANNEL}`",
+                    list.join(", ")
+                ))
+            }
+            None => return Err("`async.channels` must be an array of strings".into()),
+        }
+    }
+    Ok(Async {
+        timeout_ms,
+        lease_ms,
+        probe,
+        watch,
+    })
 }
 
 /// `[a-z0-9][a-z0-9.-]{0,63}`: an actor label, or the code of a reported failure.
@@ -45,9 +116,10 @@ pub(crate) fn is_label(text: &str) -> bool {
             .all(|b| allowed(b) || *b == b'.' || *b == b'-')
 }
 
-/// A positive count of milliseconds written as a canonical decimal string.
-fn millis(async_spec: &Value, field: &str) -> Result<Option<u64>, String> {
-    let Some(value) = async_spec.get(field) else {
+/// The field `field` of `object`, a positive count of milliseconds written as a
+/// canonical decimal string; `name` is how a refusal names it.
+pub(crate) fn millis(object: &Value, field: &str, name: &str) -> Result<Option<u64>, String> {
+    let Some(value) = object.get(field) else {
         return Ok(None);
     };
     let text = value.as_str().unwrap_or_default();
@@ -59,7 +131,7 @@ fn millis(async_spec: &Value, field: &str) -> Result<Option<u64>, String> {
             Ok(Some(ms))
         }
         _ => Err(format!(
-            "`async.{field}` must be a positive decimal string of milliseconds"
+            "`{name}` must be a positive decimal string of milliseconds"
         )),
     }
 }
@@ -72,24 +144,8 @@ pub(crate) fn parse(action: &Value) -> Result<External, String> {
         Some(Value::String(actor)) if is_label(actor) => Some(actor.clone()),
         Some(_) => return Err("`actor` must match [a-z0-9][a-z0-9.-]{0,63}".into()),
     };
-    let null = Value::Null;
-    let async_spec = match action.get("async") {
-        None => &null,
-        Some(spec @ Value::Object(_)) => spec,
-        Some(_) => return Err("`async` must be an object".into()),
-    };
-    let timeout_ms = millis(async_spec, "timeoutMs")?.unwrap_or(DEFAULT_TIMEOUT_MS);
-    let lease_ms = millis(async_spec, "leaseMs")?;
-    if lease_ms.is_some_and(|lease| lease >= timeout_ms) {
-        return Err(format!(
-            "`async.leaseMs` must be smaller than `async.timeoutMs` ({timeout_ms})"
-        ));
-    }
-    Ok(External {
-        actor,
-        timeout_ms,
-        lease_ms,
-    })
+    let bounds = parse_async(action.get("async").unwrap_or(&Value::Null))?;
+    Ok(External { actor, bounds })
 }
 
 /// The credential of a claimed attempt: its run, invocation, attempt number, owner and
@@ -193,14 +249,18 @@ mod tests {
     fn the_fields_are_checked() {
         let defaults = parse(&json!({"kind": "external"})).unwrap();
         assert_eq!(
-            (defaults.timeout_ms, defaults.lease_ms),
+            (defaults.bounds.timeout_ms, defaults.bounds.lease_ms),
             (DEFAULT_TIMEOUT_MS, None)
         );
         let set = parse(&json!({"kind": "external", "actor": "reviewer",
                                 "async": {"timeoutMs": "60000", "leaseMs": "5000"}}))
         .unwrap();
         assert_eq!(
-            (set.actor.as_deref(), set.timeout_ms, set.lease_ms()),
+            (
+                set.actor.as_deref(),
+                set.bounds.timeout_ms,
+                set.bounds.lease_ms()
+            ),
             (Some("reviewer"), 60_000, 5_000)
         );
         for bad in [
@@ -213,6 +273,32 @@ mod tests {
             json!({"async": {"timeoutMs": "10", "leaseMs": "10"}}),
         ] {
             assert!(parse(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_async_object_names_its_programs_by_tag() {
+        let probe = json!({"command": {"argv": ["./probe", {"$get": ["step", "node"]}],
+                                       "timeoutMs": "500", "env": {"A": "1"}}});
+        let command = json!({"kind": "command", "argv": ["start"],
+                             "async": {"probe": probe, "channels": ["nats", "store"]}});
+        let bounds = async_of(&command).unwrap().expect("async");
+        assert_eq!(bounds.probe.expect("probe").timeout_ms, Some(500));
+        assert!(bounds.watch.is_none());
+        assert!(async_of(&json!({"kind": "command", "argv": ["x"]}))
+            .unwrap()
+            .is_none());
+        for bad in [
+            json!({"probe": {"component": {"ref": "./p.wasm", "export": "probe"}}}),
+            json!({"probe": {"command": {"argv": []}}}),
+            json!({"watch": {"command": {"argv": ["w"], "shell": true}}}),
+            json!({"watch": {"command": {"argv": ["w"], "timeoutMs": "0"}}}),
+            json!({"stop": {"argv": ["s"]}}),
+            json!({"channels": ["nats"]}),
+            json!({"channels": "store"}),
+        ] {
+            let action = json!({"kind": "command", "argv": ["start"], "async": bad});
+            assert!(async_of(&action).is_err(), "{action}");
         }
     }
 }

@@ -142,6 +142,39 @@ fn probe_watch_and_stop_argv_mappings_are_checked_too() {
     }
 }
 
+/// An async command's `async` has the shapes the host takes (spec/dot.md §4, host.md §3,
+/// Async commands): tagged programs, the `store` channel, a lease shorter than the
+/// deadline.
+#[test]
+fn an_async_command_takes_tagged_programs_and_the_store_channel() {
+    let mut action = command(json!(["start"]));
+    action["async"] = json!({"timeoutMs": "60000", "leaseMs": "5000", "channels": ["store"],
+                             "probe": {"command": {"argv": ["check"], "timeoutMs": "500"}},
+                             "watch": {"command": {"argv": ["wait"], "env": {"A": "1"}}}});
+    let checked = Folder::new(action.clone()).check();
+    assert!(checked.built.is_some(), "{}", checked.report.short());
+
+    for (field, value, code) in [
+        (
+            "probe",
+            json!({"component": {"ref": "./p.wasm", "export": "probe"}}),
+            "settings.unknown-key",
+        ),
+        ("watch", json!({"command": {"argv": []}}), "settings.empty"),
+        ("channels", json!(["nats"]), "settings.not-allowed"),
+        ("leaseMs", json!("60000"), "action.lease-too-long"),
+    ] {
+        let mut bad = action.clone();
+        bad["async"][field] = value;
+        let checked = Folder::new(bad).check();
+        assert!(
+            checked.report.codes().iter().any(|c| c == code),
+            "{field}: {:?}",
+            checked.report.codes()
+        );
+    }
+}
+
 #[test]
 fn a_mapped_program_is_not_looked_up_and_a_split_keeps_the_mappings() {
     let checked = Folder::new(command(json!([{"$get": ["params", "program"]}]))).check();

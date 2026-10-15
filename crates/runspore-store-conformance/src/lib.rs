@@ -298,6 +298,28 @@ pub fn process_record(host: &str, pgid: i32) -> ProcessRecord {
     }
 }
 
+/// A `hold_attempt` with `holder`, a lease and a deadline.
+pub fn hold(
+    attempt: &AttemptRef,
+    request_id: &str,
+    holder: Value,
+    lease_ms: u64,
+    deadline_ms: u64,
+) -> HoldAttempt {
+    let holder = canonical::encode(&holder).expect("holder");
+    HoldAttempt {
+        mutation: mutation(
+            "hold_attempt",
+            request_id,
+            json!([attempt, holder, lease_ms, deadline_ms]),
+        ),
+        attempt: attempt.clone(),
+        holder,
+        lease_duration_ms: lease_ms,
+        deadline_duration_ms: deadline_ms,
+    }
+}
+
 pub fn set_process(
     attempt: &AttemptRef,
     request_id: &str,
@@ -1689,6 +1711,139 @@ pub async fn s25_updated_at(factory: &dyn StoreFactory) {
     assert_eq!(updated().await, 1_900, "a release");
 }
 
+/// S26: `hold_attempt` hands a running attempt to a holder outside the worker: it keeps
+/// its reference, gains a holder and a deadline, and loses its process record.
+pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s26").await;
+    let params = json!({"tools": ["Read"]});
+    let (scheduled, invocation) = schedule_with(&w.key, "a", 0, Some(params.clone()));
+    w.commit("commit-1", vec![scheduled]).await;
+    let attempt = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim", &invocation, "w1", 100))
+        .await
+        .expect("claim")
+        .value
+        .attempt;
+    w.store()
+        .set_process(set_process(
+            &attempt,
+            "process",
+            Some(process_record("h", 7)),
+        ))
+        .await
+        .expect("process");
+
+    let large = json!("x".repeat(MAX_HOLDER_BYTES));
+    let refused = w
+        .store()
+        .hold_attempt(hold(&attempt, "hold-large", large, 500, 2_000))
+        .await;
+    assert_eq!(
+        failure(refused),
+        (StoreFailureKind::Quota, "holder.too-large".into())
+    );
+    assert_eq!(w.invocations().await[0].holder, None);
+
+    let mut stranger = attempt.clone();
+    stranger.owner = "w2".into();
+    let other = w
+        .store()
+        .hold_attempt(hold(&stranger, "hold-other", json!({"pid": 1}), 500, 2_000))
+        .await;
+    assert_eq!(
+        failure(other),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
+
+    w.clock.set(1_050);
+    let holder = json!({"pid": 9, "started": "123"});
+    let held = w
+        .store()
+        .hold_attempt(hold(&attempt, "hold", holder.clone(), 500, 2_000))
+        .await
+        .expect("hold");
+    assert_eq!(held.disposition, Disposition::Applied);
+    let encoded = canonical::encode(&holder).unwrap();
+    assert_eq!(
+        (
+            &held.value.holder,
+            held.value.lease_until_ms,
+            held.value.deadline_ms
+        ),
+        (&encoded, 1_550, 3_050)
+    );
+    let shown = &w.invocations().await[0];
+    assert_eq!(shown.attempt.as_ref(), Some(&attempt));
+    assert_eq!(
+        (
+            &shown.holder,
+            shown.deadline_ms,
+            shown.lease_until_ms,
+            &shown.process
+        ),
+        (&Some(encoded.clone()), Some(3_050), Some(1_550), &None)
+    );
+    assert_eq!(
+        canonical::parse(&shown.input).unwrap(),
+        json!({"node": "a"})
+    );
+    assert_eq!(shown.params, Some(canonical::to_vec(&params).unwrap()));
+
+    w.clock.set(1_100);
+    let replay = w
+        .store()
+        .hold_attempt(hold(&attempt, "hold", holder, 500, 2_000))
+        .await
+        .expect("replay");
+    assert_eq!(replay.disposition, Disposition::Duplicate);
+    assert_eq!(replay.value.lease_until_ms, 1_550);
+
+    w.clock.set(1_500);
+    let renewed = w
+        .store()
+        .heartbeat(heartbeat(&attempt, "renew", 5_000))
+        .await
+        .expect("renew");
+    assert_eq!(
+        renewed.value.lease_until_ms, 3_050,
+        "never past the deadline"
+    );
+    w.store()
+        .finish_attempt(finish(&attempt, "finish", 1))
+        .await
+        .expect("finish with the same reference");
+    let after = w
+        .store()
+        .hold_attempt(hold(&attempt, "hold-after", json!({"pid": 2}), 500, 2_000))
+        .await;
+    assert_eq!(
+        failure(after),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
+
+    // A lease that ran out before the start handed over.
+    let late = World::new(factory, "s26-late").await;
+    let invocation = late.scheduled(0).await;
+    let attempt = late
+        .store()
+        .claim_attempt(claim(&late.key, "claim", &invocation, "w1", 100))
+        .await
+        .expect("claim")
+        .value
+        .attempt;
+    late.clock.set(1_100);
+    let expired = late
+        .store()
+        .hold_attempt(hold(&attempt, "hold", json!({"pid": 3}), 500, 2_000))
+        .await;
+    assert_eq!(
+        failure(expired),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
+    assert_eq!(late.invocations().await[0].holder, None);
+}
+
 /// S23: the run keeps the parent it was created with; a repeat with another is a
 /// duplicate, and a run created without one shows none.
 pub async fn s23_parent(factory: &dyn StoreFactory) {
@@ -1740,7 +1895,8 @@ macro_rules! store_conformance_tests {
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
             s15_start_key_race s16_process_record s17_base_dir
             s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep
-            s22_params s23_parent s24_claimed_at s25_updated_at);
+            s22_params s23_parent s24_claimed_at s25_updated_at
+            s26_hold_attempt);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

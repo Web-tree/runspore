@@ -35,6 +35,13 @@ pub enum ActivityOutput {
     Unknown {
         error: ErrorInfo,
     },
+    /// An async command's start command started the work elsewhere: the attempt is
+    /// now held by the holder this handle names, and reports later (spec/host.md §3,
+    /// Async commands). Not a result: the engine records the handle with
+    /// `hold_attempt`.
+    Held {
+        holder: Value,
+    },
 }
 
 impl ActivityOutput {
@@ -88,6 +95,9 @@ pub struct ActivityContext {
     /// Where the attempt's process record goes. The engine stores it with
     /// `set_process`; by default it goes nowhere.
     pub process: RecordProcess,
+    /// The attempt's token, given to an async command's start command as
+    /// `RUNSPORE_TOKEN`; none outside an engine's attempt.
+    pub token: Option<String>,
     stop: watch::Receiver<bool>,
 }
 
@@ -142,6 +152,7 @@ impl ActivityContext {
             guard: crate::guard::own_executable(),
             stop_grace: Duration::from_millis(DEFAULT_STOP_GRACE_MS),
             process: Arc::new(|_| Box::pin(async { Ok(()) })),
+            token: None,
             stop,
         }
     }

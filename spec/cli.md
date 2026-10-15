@@ -17,6 +17,7 @@ marked **0.2** below are new since 0.1.
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
 | `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
 | `--stop-grace-ms` | 5000 | Time a stopped command's process group gets between SIGTERM and SIGKILL (host.md §3, `stop_grace_ms`); used by `worker`, `run` and `continue` |
+| `--max-watches` | 16 | **0.2.** Watches of held async steps one worker runs at once, apart from its slots (host.md §3, Async commands); used by `worker`, `run` and `continue` |
 
 ## Commands
 
@@ -31,7 +32,7 @@ marked **0.2** below are new since 0.1.
 | `start <workflow> [--input <json> \| --input-file <path>] [--key <startKey>] [--base-dir <dir>]` | Creates a run and returns its run ID. A missing key is generated; the same key always names the same run in this database. `--base-dir` (0.2) overrides the run's base folder. The input is checked against the workflow's `inputSchema` (0.2) |
 | `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
-| `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs) |
+| `status <runId> [--no-probe]` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs). It first probes a held async step; `--no-probe` reads the store only (§Steps outside the worker) |
 | `list [--unfinished]` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs); each with its workflow and what it needs. `--unfinished`: only the unfinished runs, newest first (§What a run needs) |
 | `continue [<runId>]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type (§What a run needs) |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics. **0.2:** in text, each with its time, its node, its outcome, the arrow the run took and the first line of its error or output (§JSON output) |
@@ -42,7 +43,7 @@ marked **0.2** below are new since 0.1.
 | `step renew <token>` | **0.2.** Extends the claimed attempt's lease, never past its deadline |
 | `step complete <token> --outcome <o> [--output <json>]` | **0.2.** Reports the step done with an outcome |
 | `step fail <token> --error <message> [--code <c>] [--retryable]` | **0.2.** Reports the step failed |
-| `step abandon <runId>` | **0.2.** Frees the run's held external step at once |
+| `step abandon <runId>` | **0.2.** Frees the run's held async step at once |
 | `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
@@ -156,6 +157,23 @@ do until an actor reports or the attempt expires. A worker still sweeps the step
 attempt: once its lease or deadline passes, it is expired and the action's effect
 decides (a repeatable step is ready again, an `unsafe` one needs intervention).
 
+**0.2: async commands.** A `command` with an `async` object (host.md §3, Async
+commands) runs a start command that starts the work elsewhere, prints a holder handle
+and exits; the attempt is then held outside the worker, like a claimed external step.
+The start command gets the attempt's token as `RUNSPORE_TOKEN`, so the work reports
+with `spore step complete`, `fail` and `renew` like an actor. `run` and `worker
+--until-parked` stop there with exit 6, unless the action declares a watch: then they
+run it and go on when it reports, and stop with exit 6 when it prints that its holder
+waits for a person, or when it ends without a result. `worker` runs at most
+`--max-watches` watches at once.
+
+An **async step** is an external step or a held async command. Its action's probe
+(host.md §3) runs on demand: `status` probes the run's held async step before it reads
+the run, `step claim <runId>` probes a held step of that run before it claims, and a
+worker's sweep probes each held async step at most every 30 s. Only a `dead` answer
+acts: it expires the attempt at once, and the action's effect decides. `status
+--no-probe` runs no probe and changes nothing, for a display that refreshes often.
+
 **`step claim [<runId>] [--actor <label>] [--holder <json>]`.** With `<runId>`, claims
 that run's ready external step; a run that has none exits 2 with `step.not-ready`.
 Without it, claims the oldest ready matching step in the database, like a task queue;
@@ -204,9 +222,12 @@ with a token that names no attempt of the run's external step exits 2 with
 abandoned, expired or reported, exits 2 with `lease.lost`; spore keeps what it said
 as late evidence, and the run does not move.
 
-**`step abandon <runId>`.** Expires the run's held external attempt at once, whatever
+A report whose attempt a watch has already finished is refused the same way: the
+first result from any channel wins.
+
+**`step abandon <runId>`.** Expires the run's held async attempt at once, whatever
 its lease, and fences its holder out: a later report from it is `lease.lost`. The
-action's effect then decides, as for any expiry. A run with no held external step
+action's effect then decides, as for any expiry. A run with no held async step
 exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
 
 The `step` commands but `step show` are writing commands (§Project folder).
@@ -259,7 +280,7 @@ someone is one of:
 | `signal` | It waits at an await-signal node, with no signal for it stored |
 | `stuck` | It needs intervention: a stuck step, or an unsafe step whose outcome is unknown |
 | `external-ready` | It is at an external step nobody holds (§Steps outside the worker) |
-| `held` | It is at an external step an actor holds |
+| `held` | It is at an async step that is held: an external step an actor holds, or an async command whose started work has not reported |
 
 **`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
 was created), one line each and not as a tree: the run, its workflow, its node, what
@@ -294,7 +315,7 @@ With `<runId>`, or the one unfinished run, it:
 2. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
    parked, printing its progress on stderr (§Progress). Like `run`, it works as a
    whole worker, so other runs of the database that fall due meanwhile move on too. On the way it sweeps attempts
-   as a worker does: a held external step whose lease or deadline has passed is
+   as a worker does: a held async step whose lease or deadline has passed is
    expired, and its action's effect decides. A held step is probed when its action has
    a probe this host runs (host.md §2); a `dead` answer expires it with reason
    `probe-dead`, and the run goes on.
@@ -308,7 +329,7 @@ With `<runId>`, or the one unfinished run, it:
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
-   | at a held external step | the step, the actor label, the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
+   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
 
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
@@ -653,7 +674,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 6 | **0.2.** The run is waiting on an external step: an actor must claim it or report it, or, for a held step, a person may abandon it |
+| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it |
 | 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
@@ -789,13 +810,14 @@ node returned (kernel.md §4).
 attempt has none. A running command shows its record; a command that ended has had its
 record cleared; an attempt whose worker died keeps its record.
 
-**0.2:** `step` describes the external step the run is at (§Steps outside the
-worker), or is null anywhere else: `{"kind": "external", "actor", "state", "attempt",
-"holder", "deadlineMs", "leaseUntilMs"}`. `actor` is the action's label or null.
-`state` is `ready` while nobody holds the step and `held` while a claimed attempt
-runs; `holder` is the handle given with `--holder` (or null), and the two times are
-those of the held attempt, null while ready. It never shows the step's input or the
-token.
+**0.2:** `step` describes the async step the run is at (§Steps outside the
+worker), or is null anywhere else: `{"kind", "actor", "state", "attempt", "holder",
+"deadlineMs", "leaseUntilMs"}`. `kind` is `external`, or `command` for an async
+command. `actor` is the action's label or null. `state` is `ready` while nobody holds
+an external step and `held` while a claimed attempt runs, or an async command's
+attempt is held; `holder` is the handle given with `--holder` or printed by the start
+command (or null), and the two times are those of the held attempt, null while ready.
+It never shows the step's input or the token.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.
 `artifactDigest` is the digest of the file it was started from, a workflow artifact or

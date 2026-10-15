@@ -79,7 +79,7 @@ The run whose step started another run, from inside that step: a build and the t
 _Avoid_: sub-workflow, nested run, caller
 
 **Unfinished run**:
-A run that has not completed, failed or been cancelled. A repository may have several at once. What it needs is one of: working, a signal, a person for a stuck step, an actor to claim its external step, the actor holding that step, or a release from quarantine. `spore continue` does the next thing it needs, or says what a person must type.
+A run that has not completed, failed or been cancelled. A repository may have several at once. What it needs is one of: working, a signal, a person for a stuck step, an actor to claim its external step, the actor holding that step or the work its async command started, or a release from quarantine. `spore continue` does the next thing it needs, or says what a person must type.
 _Avoid_: open run, active run, pending run
 
 **Step description**:

@@ -7,7 +7,8 @@ use super::{retry, Engine, PAGE};
 use crate::error::HostError;
 
 /// An attempt that takes a worker's slot: claimed by a worker, unfinished, with a lease
-/// that has not run out, at a step that is not external.
+/// that has not run out, at a step that is not external and not held by an async
+/// command's holder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldSlot {
     pub key: RunKey,
@@ -42,7 +43,11 @@ impl Engine {
                     if invocation.status != InvocationStatus::Running || !live {
                         continue;
                     }
-                    if inner.is_external(&run.key, &invocation.invocation_id).await {
+                    // A deadline marks an attempt held outside the worker: claimed by an
+                    // actor, or handed over by an async start command.
+                    if invocation.deadline_ms.is_some()
+                        || inner.is_external(&run.key, &invocation.invocation_id).await
+                    {
                         continue;
                     }
                     let Some(worker) = invocation.owner else {

@@ -81,6 +81,7 @@ process on its own.
 | `guard` | the host's own executable | **0.2.** The executable whose guard mode runs in front of every process (§3) |
 | `files_dir` | none | **0.2.** Folder of step files and work folders (§3, Step files and work folders). Required for a workflow artifact with `instructions` or `asset` entries |
 | `parent` | none | **0.2.** The run and node of the step this engine is started from, `{run_id, node_id}`; `start` records it as the parent of every run it creates. `spore` sets it from `RUNSPORE_RUN_ID` and `RUNSPORE_NODE_ID` (cli.md, `list`) |
+| `max_watches` | 16 | **0.2.** Watches the engine runs at once (§3, Async commands), apart from `max_concurrent_activities`. `spore` takes it from `--max-watches` |
 
 ### Client operations
 
@@ -165,7 +166,11 @@ One bounded pass. It never blocks on an activity.
    attempt for the next pass. `request.digest-mismatch` means another sweeper expired
    the attempt with the other mark; ignore. **0.2:** with `files_dir` set, the sweep
    also removes step files no unfinished run needs (§3, Step files and work folders),
-   at most once every 30 s per engine, starting with its first tick.
+   at most once every 30 s per engine, starting with its first tick. **0.2:** at the
+   same pace, starting with its first tick, it looks after every held async attempt
+   of the tenant, whoever started it (§3, Async commands): it probes the attempt when
+   its action declares a probe, and starts a watch when its action declares a watch
+   and this engine does not watch it yet.
 2. **Coordinate.** For each key of `scan_ready`, up to `turns_per_run` times:
    `load_turn`; fetch the package (cached by digest); call `reducer.transition` with
    the semantics the run's snapshot records, not the kernel's default, so a newer
@@ -210,7 +215,11 @@ never claims again.
 
 `run_until_parked(key)` ticks until that run is terminal, `waiting`,
 `needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or at
-an external step (Steps outside the worker, below).
+an async step (Steps outside the worker, below) that this engine does not watch, or
+whose watch has said that its holder waits for a person (§3, Async commands).
+
+**0.2:** shutdown stops every watch the engine runs with its process group; the
+attempts they watched stay held for the next worker.
 
 **0.2: progress.** `observe(observer)` gives the engine a callback it calls with each
 change of each run it commits from then on, in commit order: after every `applied`
@@ -286,11 +295,19 @@ attempts, fences, effect classes, retries and stuck steps apply unchanged.
     the holder must renew within it (`renew_step`); when absent, nobody renews and the
     deadline alone bounds the attempt, since a person working by hand cannot.
 
-  This host reads only these two fields of an external action's `async`; `probe`,
-  `watch`, `stop` and `channels` are kept in the package and not yet acted on.
+  - `probe` and `watch`: optional, the programs that look after the holder, as for an
+    async command (§3, Async commands): the host probes a held external step and
+    watches it the same way, with the holder handle given at the claim.
+  - `channels`: as for an async command.
+  - `stop`: kept in the package and not yet acted on.
 
 `validate_workflow` and `start` check these fields and refuse a bad one with
 `action.invalid`, like a runner's `validate`. An external action needs no runner.
+
+An **async step** is an external step, or an async command (§3) whose start command
+has handed over its holder handle. Both are held outside the worker until a result
+comes back through a result channel; the rules below that name an async step hold for
+both.
 
 **Dispatch.** `tick` never claims an invocation of an external action: dispatch reads
 the action's kind from the run's package first and leaves it pending for an actor.
@@ -298,14 +315,16 @@ The sweep treats its attempts like any other: once the lease or the deadline has
 passed, `expire_attempt` with reason `lease` (store §2), and the kernel retries a
 repeatable effect or parks an `unsafe` one in `needs-intervention` (kernel §7.3).
 
-**Waiting on a step.** A run is **at an external step** when it is `running`, has no
+**Waiting on a step.** A run is **at an async step** when it is `running`, has no
 pending event, and its outstanding invocation (kernel §3) is `scheduled` with an
-external action. The step is `ready` while that invocation is pending and `held` while
-an attempt of it runs. `run_until_parked` also returns there, since the worker has
-nothing to do until an actor reports or the attempt expires.
-`Engine::external_step(view)` describes it: the action's kind and actor, `ready` or
-`held`, the attempt number, and while held the holder handle, `deadlineMs` and
-`leaseUntilMs`. It never shows the input, the owner or the fence.
+external action, or with an async command whose attempt is held (its holder handle
+recorded by `hold_attempt`). An external step is `ready` while that invocation is
+pending and `held` while an attempt of it runs; an async command's step is only ever
+`held`. `run_until_parked` also returns there, since the worker has nothing to do until
+an actor or the work reports or the attempt expires, unless it watches the attempt.
+`Engine::async_step(view)` describes it: the action's kind (`external` or `command`)
+and actor, `ready` or `held`, the attempt number, and while held the holder handle,
+`deadlineMs` and `leaseUntilMs`. It never shows the input, the owner or the fence.
 
 **Describing a step (0.2).** `Engine::describe_step(view)` describes the step an
 unfinished run is at, an activity or an await-signal node, without claiming, probing
@@ -317,12 +336,21 @@ is. It is `None` for a finished run or any other node.
 
 **Client operations.** Each takes or returns a **token**: the claimed attempt's
 reference (run, invocation, attempt number, owner and fence) as one string. Only its
-bearer can renew, complete or fail the attempt.
+bearer can renew, complete or fail the attempt. An async command's start command gets
+its attempt's token as `RUNSPORE_TOKEN` (§3), so the work it starts reports the same
+way.
 
+- `probe_step(key)`: when the run is at a held async step whose action declares a
+  probe, runs the probe (§3, Async commands); a `dead` answer expires the attempt with
+  reason `probe-dead`. Returns the answer, or none when nothing was probed. `status`
+  calls it unless asked not to (cli.md).
 - `claim_step(run, actor, holder)`: claims a ready external step whose action's label
   equals `actor` (both absent counts as equal). With a run, that run's step; without
   one, the oldest matching ready step of the tenant: the first in `scan_due` order,
-  which is oldest `notBeforeMs` first. None is `Ok(None)`. The `holder` handle is
+  which is oldest `notBeforeMs` first. With a run whose external step is held, the
+  host first calls `probe_step`; after a `dead` answer it takes the run's next turns
+  (§2 `tick`, Coordinate), so a step the kernel makes ready again is claimed at once.
+  None is `Ok(None)`. The `holder` handle is
   canonical JSON of at most 4 KiB (`invalid-input` / `holder.invalid` otherwise). Before
   the claim, the host makes or checks the step's files and work folder as for any
   dispatch (§3, Step files and work folders), and quarantines the run instead when it
@@ -346,16 +374,17 @@ bearer can renew, complete or fail the attempt.
   error (code `step.failed` unless the actor names one of the pattern
   `[a-z0-9][a-z0-9.-]{0,63}`) and whether another try could help, which the kernel
   then honours up to `maxAttempts`.
-- `abandon_step(key)`: expires the run's held external attempt at once with reason
+- `abandon_step(key)`: expires the run's held async attempt at once with reason
   `abandoned` (store §2), whatever its lease; the effect class then decides. A run with
-  no held external step is `invalid-input` / `step.not-held`. It is a person's act,
+  no held async step is `invalid-input` / `step.not-held`. It is a person's act,
   never automatic: the old holder may still be at work.
 
-A token that does not name an attempt of the run's external step is
-`invalid-input` / `step.token-invalid`. A report whose attempt has already ended
-(abandoned, expired, or reported before) is refused with `stale` / `lease.lost`, and
-its result is kept with `record_late_evidence`: a stale report never moves the run, and
-nothing it says is lost.
+A token that does not name an attempt of an external step or an async command of its
+run is `invalid-input` / `step.token-invalid`. A report whose attempt has already ended
+(abandoned, expired, or reported before, through `complete_step`, `fail_step` or a
+watch) is refused with `stale` / `lease.lost`, and its result is kept with
+`record_late_evidence`: a stale report never moves the run, and nothing it says is
+lost. The first result from any channel wins.
 
 ### Telling a person (0.2)
 
@@ -408,8 +437,9 @@ Functions' top-level `Catch` do the same in their engines.
   (kernel.md §7.3), so it shows in the run's events and nowhere else.
 - **Checks.** `validate_workflow` and `start` refuse, with `workflow.invalid`, an
   `onIntervention` whose action the workflow does not define, an `external` action
-  (the worker runs `onIntervention`; nobody would claim it), and `params` that are not
-  a mapping over those roots.
+  (the worker runs `onIntervention`; nobody would claim it), an async command (its
+  result would come back to no attempt), and `params` that are not a mapping over
+  those roots.
 - **Known limit.** Telling is at most once: an engine that stops before the action
   ends (a crash, or a shutdown whose last tick commits the turn) does not run it
   again, and the next engine does not either. The run's status still says it needs a
@@ -607,7 +637,7 @@ stdout must be canonical-domain JSON of one of two shapes:
 wrong types, not JSON) is `Failure`, `command.malformed-output`, not retryable. A
 non-zero exit maps through the table above as in every mode, so `exitOutcomes` still
 applies to it; a crash that exits 1 is then `command.exit`, never an outcome. These are
-the shapes an async `watch` prints.
+the shapes an async `watch` prints (Async commands, below).
 
 **0.2: the `result` block.** Most programs print JSON of their own shape, not
 `{"outcome", "output"}`. With `"output": "json"`, a `result` block maps the outcome
@@ -667,10 +697,129 @@ no `argv` mappings, and no undeclared-outcome, `command.cwd-invalid` or
 `text` mode gave `{"exitCode": n, "stdout": "<utf-8, lossy>"}` and failed with
 `command.output-too-large` when stdout passed 64 KiB, like the other modes.
 
+### Async commands (0.2)
+
+A `command` with an `async` object is an **async command**. Its `argv` is a short
+**start command**: it starts the work somewhere else, prints a **holder handle** that
+names it, and exits. The work reports later, through a result channel. A job that must
+outlive the worker that started it is declared this way.
+
+```json
+{"kind": "command", "argv": ["./bin/start-review"], "effect": "idempotent",
+ "outcomes": ["ok", "changes"],
+ "async": {"timeoutMs": "3600000", "leaseMs": "120000", "channels": ["store"],
+           "probe": {"command": {"argv": ["./bin/probe-review"]}},
+           "watch": {"command": {"argv": ["review-tool", "wait"], "timeoutMs": "600000"}}}}
+```
+
+- `async` has the fields of an external action's (§2): `timeoutMs` (default
+  `"3600000"`), `leaseMs` (smaller than `timeoutMs`; the work must renew within it
+  with `renew_step`), `probe`, `watch`, `stop` and `channels`. `stop` is kept in the
+  package and not yet acted on.
+- `probe`, `watch` and `stop` are each tagged by implementation:
+  `{"command": {"argv", "cwd", "env", "timeoutMs"}}`. Only `argv` is required. `argv`,
+  `cwd` and `env` take the forms of a command's own (above): `argv` items are strings
+  or mappings over the same roots, evaluated for the try the program looks after, and
+  `cwd` from input reads that try's input. An `argv[0]` of the form `./<p>` names a
+  file bundled as the action's asset (dot.md §4) and runs the step files' copy; a bare
+  name is looked up on the `PATH` when the program runs. `timeoutMs`, a positive
+  decimal string, defaults to 10 s for a probe and to the time left before the
+  attempt's deadline for a watch. The tag leaves room for a `component` form; this host
+  offers none and refuses one, like any other shape, with `action.invalid`.
+- `channels`: the result channels the work can report through, in order of
+  preference, default `["store"]`. This host offers one, `store` (`complete_step` and
+  `fail_step`, §2), and refuses a list without it with `action.invalid`. A declared
+  watch is a channel of its own and is not listed.
+- The start's stdout is always its holder handle: `output`, `exitOutcomes` for exit 0
+  and a `result` block do not apply to it.
+
+**Start.** The worker claims the attempt as any command's, under its own lease, and
+runs the start command as a sync command: under the guard, with its process record, on
+the node's input, with the same variables, and also:
+
+| Variable | Value |
+| --- | --- |
+| `RUNSPORE_TOKEN` | The attempt's token (§2, Client operations): the work renews, completes or fails the step with it |
+| `RUNSPORE_RESULT_CHANNEL` | `store` |
+
+On exit 0, stdout is the holder handle: canonical-domain JSON of at most 4 KiB, which
+the host stores and never reads. The host then calls `hold_attempt` (store §2) with the
+handle, `leaseMs` (or `timeoutMs`) as the lease and `timeoutMs` as the deadline, both
+counted from then; the call clears the process record. From then on the worker holds
+nothing, takes no slot for the step, and sends no heartbeat. The attempt is **held**
+until the work reports, a probe answers `dead`, its lease or deadline passes, or a
+person abandons it (§2). A `hold_attempt` refused with `lease.lost` means the work has
+already reported, or the attempt has ended otherwise; the host records nothing more.
+
+Stdout on exit 0 that is not canonical-domain JSON is `Failure`,
+`command.malformed-output`; over 4 KiB, `command.output-too-large`; neither is
+retryable. Every other ending maps through the table above as for a sync command: a
+non-zero exit is a retryable `command.exit`, an exit code `exitOutcomes` lists ends the
+step at once with its outcome, a timeout or stop is `unknown`.
+
+On a normal ending the rest of the start command's process group is killed at once (The
+guard, below). The work must therefore leave that group: it runs in a session or
+process group of its own (`setsid`), with its standard output and error elsewhere than
+the start's, which the host reads to their end. A start command still running when its
+worker and its guard die is a leftover like any command's, and the next sweep stops its
+recorded group before the next try (The process record, below).
+
+The start command of a repeatable action (`pure`, `read-only` or `idempotent`) must be
+repeatable by `RUNSPORE_EFFECT_KEY`. A worker that dies after the start has exited and
+before `hold_attempt` leaves no handle in the store, and the next try runs the start
+again: it must find the job it already started under that key and print its handle
+instead of starting a second. A start that cannot do this belongs to an `unsafe`
+action, whose expired attempt waits for a person.
+
+**Probe.** The action's own check of a holder handle. It runs under the guard, without
+a process record, with the handle on stdin and the variables of the start command but
+`RUNSPORE_TOKEN`. It answers with exit 0 and stdout exactly one of
+`{"holder": "alive"}`, `{"holder": "dead"}` and `{"holder": "unknown"}`. Anything else,
+a non-zero exit, a timeout, a program that cannot be started, other output, reads as
+`unknown`, so a crashing probe never frees a step. Only `dead` acts: the host expires
+the attempt at once with reason `probe-dead` (store §2), and the action's effect
+decides, as for any expiry. `alive` and `unknown` leave the attempt to its lease and its
+deadline: `alive` past the deadline still loses. A probe must say `dead` only when it is
+certain: a process ID is checked with its start time, not the number alone.
+
+Probes run on demand, never on a timer of their own: in the sweep, at most every 30 s
+per engine (§2 `tick`); in `probe_step`, which `status` and `claim_step` call (§2); and
+in `continue` (cli.md). An action without a probe is never probed.
+
+**Watch.** The action's own wait on a holder handle: it ends when the job ends and may
+deliver its result. It runs under the guard, without a process record, with the handle
+on stdin and the probe's variables.
+
+- A worker runs at most one watch per held attempt and at most `max_watches` in all,
+  apart from its slots. It starts one at once when its own start command hands over a
+  handle, and in the sweep for the held attempts of the tenant it does not watch yet,
+  whoever started them; several workers may each watch one attempt.
+- While it runs, a watch may print a line `{"needs": "person", "message": "<text>"}`
+  (`message` optional): its holder waits for a person, and the job is alive. The line
+  is not a result. The engine keeps the latest message while the watch runs
+  (`Engine::holder_waits(key)`), and `run_until_parked` returns, so a driver that
+  follows the run can tell the person.
+- On exit 0, the rest of stdout, the `needs` lines left out, is one result in result
+  mode's shapes (Result mode, above): `{"outcome", "output"}` or `{"error",
+  "retryable"}`. It is recorded like a sync command's result: an outcome the action
+  does not declare is `command.undeclared-outcome`, not retryable, and the output is
+  checked against the node's `outputSchemas` (`output.invalid`, §2, One attempt). The
+  host then calls `finish_attempt` with the attempt's reference read from the store
+  (`list_invocations`), so a worker that took over the watch from a dead one reports
+  it. A result that loses (the work's own `complete_step` came first, or another
+  worker's watch) is kept with `record_late_evidence`; a later `complete_step` is
+  refused and kept the same way (§2).
+- Any other ending (a non-zero exit, a signal, a timeout, other output) means only that
+  the host lost sight of the job, never that the step failed: nothing is recorded, the
+  attempt stays held, and the next sweep starts a watch again.
+- The host stops a watch with its process group when the attempt stops being held (it
+  checks every `heartbeat_ms`) and when the engine shuts down.
+
 ### The guard (0.2)
 
 Every process the host starts for an attempt runs under a guard. In 0.2 that is a
-`command`'s `argv`.
+`command`'s `argv`, an async command's start command included, and an async action's
+probe and watch.
 
 - The guard is a hidden mode of the host's own executable (config `guard`), so there
   is nothing extra to install. It is never named in a workflow and no action opts out.
@@ -721,7 +870,9 @@ therefore never runs twice at once on one machine.
 - Once the command has ended and the guard has stopped its group, the host clears the
   record (`set_process` with null). A failure to clear is ignored. When the guard ended
   without reporting, the record is kept.
-- Only the processes that do a step's work are recorded.
+- Only the processes that do a step's work are recorded: a command's, and an async
+  command's start command, whose record `hold_attempt` clears when it hands over its
+  handle. A probe and a watch are not recorded.
 
 **The check before a lease expiry.** For a `Lease` item that carries a process record,
 the sweep settles the record before `expire_attempt`:
@@ -859,3 +1010,7 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H29 | **0.2.** `onIntervention` on a run whose step gets stuck, is resolved with `retry` and gets stuck again; on a run that ends at a fail node; on a run that completes; with an action that fails; and `validate_workflow` with an unknown or `external` action and `params` rooted at `from` | Each entry into `needs-intervention` and the failure tell once, with `{run, node, status, reason, error}` and the evaluated params, and further ticks tell nobody again; a completed run tells nobody; the failing action's error is one `on-intervention.failed` event, consumed with no change; each bad `onIntervention` is `workflow.invalid` |
 | H30 | **0.2.** A signal for the node a run waits at with an outcome the node does not route, with `exhausted`, and with none; another signal name; then the same unrouted outcome sent before the run waits | Each unrouted one is `signal.outcome-unrouted` with the node's outcomes and appends nothing; the other name and a routed outcome are applied; the early signal is applied and dropped with the diagnostic `signal.outcome-unrouted` |
 | H28 | **0.2.** External attempts past their lease and past their deadline, with a repeatable and an `unsafe` effect | The sweep expires each; the repeatable step is ready again with the next attempt, the `unsafe` one needs intervention; renewals never pass the deadline |
+| H31 | **0.2.** An async command whose start command detaches a job and prints its handle, the job reporting with `RUNSPORE_TOKEN`; one whose watch prints a `needs` line, then a result; one whose watch result does not fit its schema; then a `complete_step` after the watch's result; and a start that prints no JSON or over 4 KiB | The start's input, token and result channel reach it; the attempt is held with the handle and the async deadline, takes no slot, and `run_until_parked` returns there; the job's report completes the run; the `needs` message is kept and `run_until_parked` returns while the watch runs, then the watch's result completes the run; the misfit is `output.invalid`; the late report is `lease.lost` and kept as late evidence; the bad starts are `command.malformed-output` and `command.output-too-large` |
+| H32 | **0.2.** A held async step probed by the sweep, by `probe_step` and by `claim_step`, with a probe that answers `alive`, `dead`, `unknown`, crashes, times out and prints something else | Only `dead` expires the attempt, with reason `probe-dead`; a repeatable step then gets its next try and an `unsafe` one needs intervention; every other answer leaves it held |
+| H33 | **0.2.** SIGKILL the worker after `hold_attempt`, while the job its async start command detached runs | The job survives; its report reaches the run, which the next worker completes |
+| H34 | **0.2.** SIGKILL the worker and its guard together while an async start command runs | The next sweep stops the start command's recorded group before it expires the attempt; the next try starts only after the group is gone |

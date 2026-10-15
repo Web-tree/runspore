@@ -177,22 +177,64 @@ pub struct Async {
     #[serde(default)]
     #[schemars(with = "Positive")]
     pub lease_ms: Option<String>,
-    /// The program that tells whether the holder is still alive.
+    /// The program that tells whether the holder is still alive: it prints
+    /// `{"holder": "alive" | "dead" | "unknown"}`.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Value>")]
+    #[schemars(with = "Program")]
     pub probe: Option<Value>,
-    /// The program that waits for the holder's result.
+    /// The program that waits for the holder's result and prints it.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Value>")]
+    #[schemars(with = "Program")]
     pub watch: Option<Value>,
     /// The program that stops the holder when its run is cancelled.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Value>")]
+    #[schemars(with = "Program")]
     pub stop: Option<Value>,
     /// The result channels the action reports through, in order of preference.
+    /// Default `["store"]`.
     #[serde(default)]
-    #[schemars(with = "Vec<String>")]
+    #[schemars(with = "Vec<Channel>", length(min = 1))]
     pub channels: Option<Vec<String>>,
+}
+
+/// A program that looks after an async action's holder, named by how it is run.
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct Program {
+    /// Run as a command, with the holder handle on stdin.
+    command: ProgramCommand,
+}
+
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[allow(dead_code)]
+struct ProgramCommand {
+    /// The program and its arguments, as a command's `argv`. `./<path>` names a file
+    /// of the folder, bundled with the action; a bare name is looked up when it runs.
+    #[schemars(length(min = 1))]
+    argv: Vec<Word>,
+    /// The folder to run in, as a command's `cwd`.
+    #[serde(default)]
+    #[schemars(with = "Cwd")]
+    cwd: Option<Value>,
+    /// Extra environment variables.
+    #[serde(default)]
+    #[schemars(with = "BTreeMap<String, String>")]
+    env: Option<BTreeMap<String, String>>,
+    /// How long it may run, in milliseconds. Default "10000" for a probe; for a
+    /// watch, until the try's deadline.
+    #[serde(default)]
+    #[schemars(with = "Positive")]
+    timeout_ms: Option<String>,
+}
+
+/// A result channel: `store`, through `spore step complete` and `spore step fail`.
+#[derive(JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[allow(dead_code)]
+enum Channel {
+    Store,
 }
 
 /// Two mappings over the roots `stdout` (the parsed stdout), `input`, `params`, `run`

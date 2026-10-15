@@ -1104,6 +1104,38 @@ impl Store for SqliteStore {
         })
     }
 
+    async fn hold_attempt(&self, q: HoldAttempt) -> R<Receipt<AttemptHeld>> {
+        self.mutate("hold_attempt", Some("hold-attempt"), &q.attempt.key, &q.mutation, |c, now| {
+            match attempt_row(c, &q.attempt)? {
+                Some(a) if a.status == "running" && now < a.lease_until_ms => {}
+                _ => return Err(stale("lease.lost")),
+            }
+            if q.holder.len() > MAX_HOLDER_BYTES {
+                return Err(fail(StoreFailureKind::Quota, "holder.too-large", "holder.too-large"));
+            }
+            let deadline_ms = now.saturating_add(q.deadline_duration_ms);
+            let lease_until_ms = capped(now.saturating_add(q.lease_duration_ms), Some(deadline_ms));
+            c.execute(
+                "UPDATE attempts SET holder = ?4, deadline_ms = ?5, lease_until_ms = ?6, process = NULL
+                 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+                params![
+                    q.attempt.key.tenant,
+                    q.attempt.key.run,
+                    q.attempt.attempt_id,
+                    q.holder,
+                    i(deadline_ms),
+                    i(lease_until_ms)
+                ],
+            )
+            .map_err(db)?;
+            Ok(Outcome::Applied(AttemptHeld {
+                holder: q.holder.clone(),
+                lease_until_ms,
+                deadline_ms,
+            }))
+        })
+    }
+
     async fn set_process(&self, q: SetProcess) -> R<Receipt<ProcessSet>> {
         self.mutate("set_process", Some("set-process"), &q.attempt.key, &q.mutation, |c, now| {
             match attempt_row(c, &q.attempt)? {
@@ -1372,7 +1404,7 @@ impl Store for SqliteStore {
                 .prepare(
                     "SELECT i.invocation_id, i.node_id, i.action_id, i.status, i.attempt_number, i.not_before_ms,
                             a.lease_until_ms, a.owner, a.process, a.attempt_id, a.fence, a.holder, a.deadline_ms,
-                            a.claimed_at_ms
+                            a.claimed_at_ms, i.input, i.params
                      FROM invocations i LEFT JOIN attempts a ON a.tenant = i.tenant AND a.run_id = i.run_id
                        AND a.invocation_id = i.invocation_id AND a.attempt_number = i.attempt_number
                      WHERE i.tenant = ?1 AND i.run_id = ?2 ORDER BY i.invocation_id",
@@ -1411,6 +1443,8 @@ impl Store for SqliteStore {
                         holder: r.get(11)?,
                         deadline_ms: r.get::<_, Option<i64>>(12)?.map(|v| v as u64),
                         claimed_at_ms: r.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+                        input: r.get(14)?,
+                        params: r.get(15)?,
                     })
                 })
                 .and_then(Iterator::collect)

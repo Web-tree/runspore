@@ -55,6 +55,9 @@ pub struct Cli {
     pub grace_ms: Option<u64>,
     #[arg(long, global = true)]
     pub stop_grace_ms: Option<u64>,
+    /// Watches of held async steps one worker runs at once, apart from its slots.
+    #[arg(long, global = true)]
+    pub max_watches: Option<usize>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -118,8 +121,13 @@ pub enum Command {
         until_parked: bool,
     },
     /// Status, position and the arrow into it, result and the end node, quarantine
-    /// reason, outstanding invocation.
-    Status { run_id: String },
+    /// reason, outstanding invocation. Probes a held async step first.
+    Status {
+        run_id: String,
+        /// Read the store only: run no probe and change nothing.
+        #[arg(long)]
+        no_probe: bool,
+    },
     /// All runs with status, as a tree, each with its workflow and what it needs.
     List {
         /// Only the unfinished runs, newest first.
@@ -201,7 +209,7 @@ pub enum StepCommand {
         #[arg(long)]
         retryable: bool,
     },
-    /// Free the run's held external step at once.
+    /// Free the run's held async step at once.
     Abandon { run_id: String },
     /// Describe the step a run is at, the only unfinished one by default, without
     /// claiming or changing anything.
@@ -456,8 +464,12 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
                 exit: EXIT_INTERRUPTED,
             })
         }
-        Command::Status { run_id } => {
-            let view = existing(&engine, run_id).await?;
+        Command::Status { run_id, no_probe } => {
+            let mut view = existing(&engine, run_id).await?;
+            // A dead holder is expired before the run is read.
+            if !no_probe && engine.probe_step(&view.key).await?.is_some() {
+                view = existing(&engine, run_id).await?;
+            }
             let shown = Shown::read(&engine, &view).await?;
             let mut json = shown.json(&view);
             json["db"] = json!(db);
@@ -734,7 +746,7 @@ fn missing_database(command: &Command, db: &Path, cwd: &Path) -> Result<Output, 
         Command::List { .. } => done(json!({"db": db, "runs": []}), String::new()),
         Command::Continue { run_id: None } => Ok(nothing_to_continue(cwd)),
         Command::Step(StepCommand::Show { run_id: None }) => Err(none_unfinished("step show")),
-        Command::Status { run_id }
+        Command::Status { run_id, .. }
         | Command::Events { run_id }
         | Command::Continue {
             run_id: Some(run_id),
@@ -909,6 +921,7 @@ fn engine(
     config.poll_ms = cli.poll_ms.unwrap_or(config.poll_ms);
     config.shutdown_grace_ms = cli.grace_ms.unwrap_or(config.shutdown_grace_ms);
     config.stop_grace_ms = cli.stop_grace_ms.unwrap_or(config.stop_grace_ms);
+    config.max_watches = cli.max_watches.unwrap_or(config.max_watches);
     config.max_concurrent_activities = settings.slots.unwrap_or(config.max_concurrent_activities);
     Ok(Engine::new(
         Arc::new(store),
@@ -1241,7 +1254,7 @@ impl Shown {
             arrival: engine.arrival(view).await?,
             package: package(engine, view).await?,
             invocations: engine.list_invocations(&view.key).await?,
-            step: engine.external_step(view).await?,
+            step: engine.async_step(view).await?,
             last_result: last_result(engine, view).await?,
             children: read_tree(engine, runs, Some(&view.key.run)).await?,
             slots: engine.held_slots(now).await?,
@@ -1301,7 +1314,7 @@ async fn read_tree(
     let mut rows = Vec::new();
     for (run, depth) in view::tree(&runs, root) {
         let (node_id, since_ms) = whereabouts(engine, run).await?;
-        let step = engine.external_step(run).await?;
+        let step = engine.async_step(run).await?;
         let needs = view::needs(run, step.as_ref());
         let actor = step
             .filter(|_| matches!(needs, Some("external-ready" | "held")))

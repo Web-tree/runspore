@@ -48,6 +48,12 @@ pub(super) fn check(workflow: &Value) -> Result<(), HostError> {
              onIntervention, and nobody would claim it"
         )));
     }
+    if matches!(external::async_of(action), Ok(Some(_))) {
+        return Err(invalid(format!(
+            "onIntervention names action `{id}`, an async command: its result would \
+             come back to no attempt"
+        )));
+    }
     if let Some(params) = hook.get("params") {
         mapping::check(params, &PARAMS_ROOTS)
             .map_err(|e| invalid(format!("onIntervention.params: {e}")))?;
@@ -187,7 +193,8 @@ impl Inner {
     async fn notify(self: &Arc<Self>, notice: Notice, package: &Package) {
         let output = self.run_notice(&notice, package).await;
         let error = match output {
-            ActivityOutput::Success { .. } => return,
+            // `check` refuses an async command, so nothing is ever held here.
+            ActivityOutput::Success { .. } | ActivityOutput::Held { .. } => return,
             ActivityOutput::Failure { error, .. } | ActivityOutput::Unknown { error } => error,
         };
         let Ok(body) = evidence(&OnInterventionFailed {
