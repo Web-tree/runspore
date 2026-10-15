@@ -1,7 +1,8 @@
 //! `spore continue --wait` through the compiled binary (spec/cli.md, What a run needs):
 //! it follows a run past a held async step until the run needs a person or has ended. A
-//! report from elsewhere is picked up within one poll, a watch's `needs` line makes it
-//! return 6 with the watch's message, and an interrupt leaves the attempt held.
+//! report from elsewhere is picked up within one poll, a cancel from elsewhere ends it
+//! with 7, a watch's `needs` line makes it return 6 with the watch's message, and an
+//! interrupt leaves the attempt held.
 
 mod common;
 
@@ -160,6 +161,24 @@ fn a_report_from_elsewhere_is_picked_up_within_one_poll() {
     assert_eq!(done["status"], "completed", "{done}");
     assert_eq!(done["needs"], Value::Null, "{done}");
     assert_eq!(done["result"]["output"], json!({"ok": 1}), "{done}");
+}
+
+#[test]
+fn a_cancel_from_elsewhere_ends_it_with_7() {
+    let dir = external("wait-cancel");
+    let run = start(&dir);
+    let (code, ready) = json(&dir, &["continue", &run]);
+    assert_eq!(code, Some(6), "{ready}");
+    let (_, claim) = json(&dir, &["step", "claim", &run, "--actor", "reviewer"]);
+    assert!(claim["token"].is_string(), "{claim}");
+    let follower = dir.spawn(&args(&["--json", "continue", &run, "--wait"]));
+    std::thread::sleep(Duration::from_millis(500));
+
+    let (code, cancelled) = json(&dir, &["cancel", &run]);
+    assert_eq!(code, Some(0), "{cancelled}");
+    let (code, ended) = finish(follower);
+    assert_eq!(code, Some(7), "{ended}");
+    assert_eq!(ended["status"], "cancelled", "{ended}");
 }
 
 #[test]

@@ -407,7 +407,7 @@ exit 6 (host.md §2, `follow`):
 It returns, printing what is needed as `continue` does, only when the run has
 completed (exit 0), failed (1), waits for a signal (3), needs intervention (4), is
 quarantined (5), or is at a ready external step, at a held step whose holder waits for
-a person, or at a `capability-missing` step (6). `--json` prints the same object as
+a person, or at a `capability-missing` step (6), or was cancelled (7). `--json` prints the same object as
 `continue --json`. SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit
 130: it stops claiming, gives in-flight work its grace period, and stops a running
 watch with its process group. The held attempt stays held for the next driver.
