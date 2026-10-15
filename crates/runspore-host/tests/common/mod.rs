@@ -221,6 +221,9 @@ impl<H: Hook> Store for Hooked<H> {
     async fn heartbeat(&self, r: Heartbeat) -> StoreResult<Receipt<LeaseExtended>> {
         self.inner.heartbeat(r).await
     }
+    async fn hold_attempt(&self, r: HoldAttempt) -> StoreResult<Receipt<AttemptHeld>> {
+        self.inner.hold_attempt(r).await
+    }
     async fn set_process(&self, r: SetProcess) -> StoreResult<Receipt<ProcessSet>> {
         self.inner.set_process(r).await
     }

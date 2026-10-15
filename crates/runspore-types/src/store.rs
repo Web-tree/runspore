@@ -369,6 +369,31 @@ pub struct LeaseExtended {
     pub lease_until_ms: u64,
 }
 
+/// Hands a running attempt to a holder outside the worker: records its holder handle
+/// and its async bounds, and clears its process record. Same predicates as
+/// `Heartbeat`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoldAttempt {
+    pub mutation: Mutation,
+    pub attempt: AttemptRef,
+    /// Canonical JSON of at most [`MAX_HOLDER_BYTES`], kept and never read.
+    pub holder: Vec<u8>,
+    pub lease_duration_ms: u64,
+    /// Sets `deadlineMs = now + this`, which no renewal passes.
+    pub deadline_duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttemptHeld {
+    /// Canonical JSON of the holder handle.
+    pub holder: Vec<u8>,
+    #[serde(with = "u64_str")]
+    pub lease_until_ms: u64,
+    #[serde(with = "u64_str")]
+    pub deadline_ms: u64,
+}
+
 /// What an attempt keeps about the process group doing its work: the machine, its
 /// boot, the group, and the start time of the process that leads it, in the operating
 /// system's own unit. Written by the host before the program runs (`spec/host.md` §3).
@@ -575,6 +600,11 @@ pub struct InvocationView {
     /// When the latest attempt was claimed, by the store's clock; `None` before the
     /// first claim and for attempts claimed before the store recorded it.
     pub claimed_at_ms: Option<u64>,
+    /// The invocation's input as scheduled, canonical JSON: what every claim returns.
+    pub input: Vec<u8>,
+    /// The node's evaluated `params` as scheduled, canonical JSON; `None` for a node
+    /// without them.
+    pub params: Option<Vec<u8>>,
 }
 
 #[async_trait]
@@ -600,6 +630,7 @@ pub trait Store: Send + Sync {
 
     async fn claim_attempt(&self, request: ClaimAttempt) -> StoreResult<Receipt<Claim>>;
     async fn heartbeat(&self, request: Heartbeat) -> StoreResult<Receipt<LeaseExtended>>;
+    async fn hold_attempt(&self, request: HoldAttempt) -> StoreResult<Receipt<AttemptHeld>>;
     async fn set_process(&self, request: SetProcess) -> StoreResult<Receipt<ProcessSet>>;
     async fn finish_attempt(&self, request: FinishAttempt) -> StoreResult<Receipt<ResultAccepted>>;
     async fn expire_attempt(&self, request: ExpireAttempt) -> StoreResult<Receipt<ResultAccepted>>;
