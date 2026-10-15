@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.0](https://github.com/Web-tree/runspore/compare/v0.2.0...v0.2.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** events show each event's time, node, outcome and first line ([#171](https://github.com/Web-tree/runspore/issues/171)) ([867cde9](https://github.com/Web-tree/runspore/commit/867cde9004f7e9d55fc87272d5dfbe05b362e83f)), closes [#161](https://github.com/Web-tree/runspore/issues/161)
+* **FC-160:** checkpoint C feedback: `spore status` shows a step as `scheduled` both while its program runs… ([#170](https://github.com/Web-tree/runspore/issues/170)) ([7ef95cd](https://github.com/Web-tree/runspore/commit/7ef95cd0e600e1859c8aa8a0a662b0d7d149df5f)), closes [#160](https://github.com/Web-tree/runspore/issues/160)
+* **FC-162:** checkpoint C feedback: The features from checkpoint C feedback are documented only in spec/cl… ([#172](https://github.com/Web-tree/runspore/issues/172)) ([b55a0c8](https://github.com/Web-tree/runspore/commit/b55a0c867344ea6013c6daaf5a21c5c179b469b9))
+* **R20:** handshake: spore capabilities and capability-missing ([#175](https://github.com/Web-tree/runspore/issues/175)) ([d0a0654](https://github.com/Web-tree/runspore/commit/d0a0654015171523a4ed73915df2ef83425a67fc)), closes [#70](https://github.com/Web-tree/runspore/issues/70)
+* **R21:** async commands: start, holder handle, probe and watch ([#174](https://github.com/Web-tree/runspore/issues/174)) ([77b03be](https://github.com/Web-tree/runspore/commit/77b03bea0dd3246611e3cd07c9a7093b721a9696))
+* **R22:** spore continue, list --unfinished and step show ([#173](https://github.com/Web-tree/runspore/issues/173)) ([5b0d262](https://github.com/Web-tree/runspore/commit/5b0d2625de02b34eac0a61613b4905533be3e579))
+
+
+### Bug Fixes
+
+* **cli:** a start key, signal ID or resolve ID used again names its run and the ways on ([#166](https://github.com/Web-tree/runspore/issues/166)) ([efadf25](https://github.com/Web-tree/runspore/commit/efadf2502d45e1164c1d603d7e65299e6b8fe768)), closes [#158](https://github.com/Web-tree/runspore/issues/158)
+* **cli:** spore signal refuses an outcome the waiting node does not route ([#169](https://github.com/Web-tree/runspore/issues/169)) ([7ad85e8](https://github.com/Web-tree/runspore/commit/7ad85e82d41f2e43a2d757b7997e5427afc73113))
+* **deps:** update rust crate wit-bindgen to 0.63.0 ([#152](https://github.com/Web-tree/runspore/issues/152)) ([d239409](https://github.com/Web-tree/runspore/commit/d2394099b3e4c46f814591782f3baed0d5646b16))
+* **deps:** update the wasm-tools crates to 0.262.0 together ([#150](https://github.com/Web-tree/runspore/issues/150)) ([1256a16](https://github.com/Web-tree/runspore/commit/1256a168f9d00f10893733b1483064e28e3f59e2))
+* **release:** pin the release key ([#165](https://github.com/Web-tree/runspore/issues/165)) ([1f9aa81](https://github.com/Web-tree/runspore/commit/1f9aa814f5145014959e1cc89b58c111b0e1f380))
+
 ## [0.2.0](https://github.com/Web-tree/runspore/compare/v0.2.0...v0.2.0) (2026-10-14)
 
 
