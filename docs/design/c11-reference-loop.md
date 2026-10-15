@@ -107,6 +107,8 @@ The interactive form of `implement` changes only its action (C07 R6, C14):
 
 The red count and the visit counts live in the run's state, so a kill never changes them (C13). **SIGKILL of the Claude process alone.** Its `continue --wait` survives (C05) and keeps driving the run: nothing is cut off, the step finishes, and the orphan exits when the run needs a person. Coming back, you find the run further along than you left it, in whichever row of the table it stopped at. A second driver you start meanwhile is safe (C06 L1).
 
+**Corrected (U4, R27).** A session that dies without a graceful shutdown records nothing: its try keeps its lease, and the next driver runs the next try once the lease has run out. Only a driver stopped by SIGINT, SIGTERM or SIGHUP records its try as stopped. The spore side of this table is now normative in [spec/cli.md §Coming back after a kill](../../spec/cli.md), checked by H37 (`crates/runspore-cli/tests/coming_back.rs`); the interactive rows are the plugin's.
+
 ## Locked decisions
 
 ### L1. A step can read the result that brought the run to it (Max: "how would we do it in temporal or n8n?")
