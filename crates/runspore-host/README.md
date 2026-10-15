@@ -69,8 +69,9 @@ lease skips `finish_attempt`.
 | `append_event` (resolve) | `resolve/<requestId>`, event ID `ids::event_for_resolution` |
 | `release_run` | `release/<revision>/<quarantine at_ms>`: names the quarantine it lifts |
 | `commit_turn` | `ids::commit_request(revision + 1, eventId)` |
-| `expire_attempt` | `expire/<attemptId>` |
-| `finish_attempt` | `finish/<attemptId>` |
+| `expire_attempt` | `expire/<attemptId>`; after a dead probe `probe-dead/<attemptId>` |
+| `finish_attempt` | `finish/<attemptId>`; a watch's result `watch/<attemptId>/<result digest>` |
+| `hold_attempt` | `hold/<attemptId>` |
 | `claim_attempt`, `heartbeat`, `set_process`, `quarantine_run` | `<op>/<subject>/<engine nonce>/<counter>` |
 | `record_late_evidence` | `late/<attemptId>/<engine nonce>` |
 
@@ -90,7 +91,9 @@ unchanged on `unavailable` and, where the store may have committed, `unknown-com
   `main`, or sets `EngineConfig::guard` to an executable that does, such as the
   `runspore-guard` binary of this crate.
 - Before a command runs, its process record (host name, boot, process group, start
-  time) is stored with `set_process`; it is cleared once the group has been stopped.
+  time) is stored with `set_process`; it is cleared once the group has been stopped,
+  or by `hold_attempt` when an async command's start hands over its holder handle.
+  Probes and watches run under the guard without a record.
   Reading start times and group members needs Linux (`/proc`) or macOS (libproc);
   elsewhere a command cannot be recorded and fails with `command.spawn`.
 - The reducer is called inline on the tick's task; use a multi-thread runtime when a
