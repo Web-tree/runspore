@@ -156,28 +156,70 @@ def gave_up(t, run, st):
     st["asked"].append(mark)
 
 
+def old_rounds(cp):
+    """The rounds of a checkpoint asked before its rounds were saved, read back from its
+    issue: the wave's merges sit in its body under `## Merged in this wave`, and each later
+    ask left a comment, with the merges of a round of changes."""
+    if not cp.get("url"):
+        return []
+    num = cp["url"].rstrip("/").split("/")[-1]
+    i = gh_json("issue", "view", num, "--repo", RUNSPORE, "--json", "body,comments")
+    body = i.get("body") or ""
+    head = "## Merged in this wave\n\n"
+    rounds = []
+    if head in body:
+        rounds.append({"pass": 1, "feedback": False,
+                       "merged": body.split(head, 1)[1].split("\n\n", 1)[0].strip()})
+    changes, restart = "The tickets from your changes are merged:\n\n", "The build run was restarted"
+    again = [c.get("body") or "" for c in i.get("comments") or []]
+    again = [c for c in again if c.startswith((changes, restart))]
+    for n, c in enumerate(again[:len(cp["asked"]) - 1], start=2):
+        if c.startswith(changes):
+            merged = c.removeprefix(changes).split("\n\nTry it again", 1)[0].strip()
+            rounds.append({"pass": n, "feedback": True, "merged": merged})
+    return rounds
+
+
 def ask(k, step_md, tickets, feedback):
-    """Open the checkpoint issue, or comment on it when it was already asked."""
+    """Open the checkpoint issue, or reopen it when it was already asked. Either way its
+    text is the step file as it is now: a re-ask after an upgrade shows the new text.
+    `{pass}` in the step file becomes the number of this ask, so start keys it names are
+    new on every pass. The body keeps the merges of every round, the wave's first."""
     cps = load_state("checkpoints")
-    text = (STEPS / step_md).read_text()
+    effect = os.environ.get("RUNSPORE_EFFECT_KEY", "")
+    cp = cps.get(k, {"asked": []})
+    new_ask = effect not in cp["asked"]
+    rounds = cp["rounds"] if "rounds" in cp else old_rounds(cp)
     merged = "\n".join(f"- {t['id']}: {t['issue']}" for t in tickets)
+    if new_ask and (feedback or not rounds):
+        rounds = rounds + [{"pass": len(cp["asked"]) + 1, "feedback": feedback, "merged": merged}]
+    text = (STEPS / step_md).read_text().replace("{pass}", str(len(cp["asked"]) + new_ask))
+    title = text.splitlines()[0].lstrip("# ").strip()
+    body = text
+    for r in rounds:
+        head = (f"Merged from your changes, pass {r['pass']}" if r["feedback"]
+                else "Merged in this wave")
+        body += f"\n\n## {head}\n\n{r['merged']}"
+    body += "\n"
+    if k != "0":
+        body += UPGRADE
     if k not in cps:
-        title = text.splitlines()[0].lstrip("# ").strip()
-        body = f"{text}\n\n## Merged in this wave\n\n{merged}\n"
-        if k != "0":
-            body += UPGRADE
         url = create_issue(RUNSPORE, title, body, f"build-0-2 checkpoint {k}",
                            "--assignee", "@me", "--label", "checkpoint")
-        cps[k] = {"url": url, "asked": [os.environ.get("RUNSPORE_EFFECT_KEY", "")]}
+        cps[k] = {"url": url, "asked": [effect], "rounds": rounds}
         save_state("checkpoints", cps)
         log(f"checkpoint {url}")
-    elif os.environ.get("RUNSPORE_EFFECT_KEY", "") not in cps[k]["asked"]:
+    elif new_ask:
         num = cps[k]["url"].rstrip("/").split("/")[-1]
         sh("gh", "issue", "reopen", num, "--repo", RUNSPORE, check=False)
+        sh("gh", "issue", "edit", num, "--repo", RUNSPORE, "--title", title,
+           "--body", f"{body}\n\n<!-- build-0-2 checkpoint {k} -->")
         why = (f"The tickets from your changes are merged:\n\n{merged}\n\nTry it again and answer." if feedback
-               else "The build run was restarted and asks this checkpoint again. Nothing new was merged.")
+               else f"The build run asks this checkpoint again, after these merges:\n\n{merged}\n\n"
+                    "The text above is this checkpoint as it is now.")
         sh("gh", "issue", "comment", num, "--repo", RUNSPORE, "--body", why)
-        cps[k]["asked"].append(os.environ.get("RUNSPORE_EFFECT_KEY", ""))
+        cps[k]["asked"].append(effect)
+        cps[k]["rounds"] = rounds
         save_state("checkpoints", cps)
     return cps[k]["url"]
 

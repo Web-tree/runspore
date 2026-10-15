@@ -15,7 +15,7 @@ def git(*args): return subprocess.run(["git", *args], capture_output=True, text=
 repo = opt("--repo") or opt("-R")
 cmd = tuple(a[:2])
 if cmd == ("issue", "view"):
-    i = issue(repo, a[2]); print(json.dumps({"state": i["state"], "stateReason": i.get("reason", "COMPLETED") if i["state"] == "CLOSED" else None}))
+    i = issue(repo, a[2]); print(json.dumps({"state": i["state"], "body": i["body"], "comments": [{"body": c} for c in i["comments"]], "stateReason": i.get("reason", "COMPLETED") if i["state"] == "CLOSED" else None}))
 elif cmd == ("issue", "create"):
     n = newnum(repo); st["issues"][f"{repo}#{n}"] = {"state": "OPEN", "title": opt("--title"), "body": opt("--body"), "comments": [], "labels": [opt("--label")]}
     print(f"https://github.com/{repo}/issues/{n}")
@@ -24,6 +24,8 @@ elif cmd == ("issue", "comment"):
 elif cmd == ("issue", "close"):
     i = issue(repo, a[2]); i["state"] = "CLOSED"
     if opt("--comment"): i["comments"].append(opt("--comment"))
+elif cmd == ("issue", "edit"):
+    i = issue(repo, a[2]); i["title"] = opt("--title", i["title"]); i["body"] = opt("--body", i["body"])
 elif cmd == ("issue", "reopen"):
     issue(repo, a[2])["state"] = "OPEN"
 elif cmd == ("issue", "list"):

@@ -16,9 +16,11 @@
 # --retry` gets it merged; R12's checks stay red past the fix loop's limit, its run waits
 # at the stuck step, and `spore signal ... keep-going` gets it merged) and checkpoint A
 # asks; spore refuses answers that do not fit its schema; a `changes` answer, sent twice
-# with one message ID, builds two feedback tickets and asks again; `go` moves on to
-# checkpoint B and closes A's issue; a newer spore's worker goes on with the same database
-# and the same run, and its `go` on B closes B's issue and starts wave 4.
+# with one message ID, builds two feedback tickets and asks again, with the issue showing
+# the step's current text and every round's merges, also those of rounds asked by an older
+# run-wave; `go` moves on to checkpoint B and closes A's issue; a newer spore's worker goes
+# on with the same database and the same run, and its `go` on B closes B's issue and
+# starts wave 4.
 set -euo pipefail
 # Run from inside a step (a ticket's test, say), RUNSPORE_DB names the real build's
 # database. Set below to the scratch one, so nothing here reaches the caller's.
@@ -146,19 +148,35 @@ wait_for waiting checkpoint_a 1
 echo "ok: spore refused answers that do not fit checkpoint A's schema, and recorded nothing"
 
 changes='{"changes": ["Errors should name the settings key", "skills: the menu needs a hint line"]}'
+# The checkpoint's text changes before it is asked again (an upgrade does this).
+echo "Edited before the next ask, pass {pass}." >> .spore/workflows/build-0-2/steps/checkpoint-a.md
+# Asked, and asked again after a round of changes, by a run-wave from before rounds were
+# saved: the merges of both rounds are only in the issue, the second round's in a comment.
+python3 - "$E/state/checkpoints.json" "$FAKE_GH_STATE" <<'EOF'
+import json, sys
+cps, gh = sys.argv[1:]
+s = json.load(open(cps)); del s["a"]["rounds"]; s["a"]["asked"].append("old-ask-2"); json.dump(s, open(cps, "w"))
+g = json.load(open(gh))
+g["issues"]["Web-tree/runspore#" + s["a"]["url"].rsplit("/", 1)[1]]["comments"].append(
+    "The tickets from your changes are merged:\n\n- F-old: Web-tree/runspore#1\n\nTry it again and answer.")
+json.dump(g, open(gh, "w"))
+EOF
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null
 spore signal "$run" checkpoint-a --outcome changes --data "$changes" --id try-a-changes-1 > /dev/null  # a repeat
 wait_for waiting checkpoint_a 2
+check "'Edited before the next ask, pass 3.' in $(checkpoint A)['body'] and '<!-- build-0-2 checkpoint a -->' in $(checkpoint A)['body']"
+check "'## Merged in this wave' in $(checkpoint A)['body'] and '## Merged from your changes, pass 3' in $(checkpoint A)['body']"
+check "'## Merged from your changes, pass 2\\n\\n- F-old: Web-tree/runspore#1\\n' in $(checkpoint A)['body']"
 check "sum(1 for i in s['issues'].values() if i['title'].startswith('Checkpoint A feedback') and i['state'] == 'CLOSED') == 2"
 check "$(checkpoint A)['state'] == 'OPEN'"
 sleep 2
 wait_for waiting checkpoint_a 2
-echo "ok: changes built two feedback tickets, checkpoint A asked again; the repeat with the same --id was the same message"
+echo "ok: changes built two feedback tickets, checkpoint A asked again with its current text, pass number and every round's merges; the repeat with the same --id was the same message"
 
 spore signal "$run" checkpoint-a --outcome go > /dev/null
 wait_for waiting checkpoint_b 1
 check "$(checkpoint A)['state'] == 'CLOSED' and $(checkpoint A)['comments'][-1] == 'Answered \`go\`.'"
-check "len($(checkpoint A)['comments']) == 2"
+check "len($(checkpoint A)['comments']) == 3"
 echo "ok: go led to wave 3, which closed checkpoint A's issue, and to checkpoint B"
 
 # Upgrade: stop the worker, install a newer spore, start the worker again.
