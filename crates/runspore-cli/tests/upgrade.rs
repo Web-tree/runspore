@@ -122,10 +122,13 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
     );
     assert_eq!(before[1].1, "external");
 
-    // Its schema: what the file held before versions 5 to 10 were added.
+    // Its schema: what the file held before versions 5 to 11 were added.
     sql(&dir)
         .execute_batch(&format!(
-            "ALTER TABLE runs DROP COLUMN result_channels;
+            "ALTER TABLE runs DROP COLUMN cancel_reason;
+             ALTER TABLE runs DROP COLUMN cancel_at_ms;
+             ALTER TABLE runs DROP COLUMN cancel_request_id;
+             ALTER TABLE runs DROP COLUMN result_channels;
              ALTER TABLE attempts DROP COLUMN claimed_at_ms;
              ALTER TABLE runs DROP COLUMN parent_run_id;
              ALTER TABLE runs DROP COLUMN parent_node_id;
