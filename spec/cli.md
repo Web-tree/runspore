@@ -280,7 +280,7 @@ someone is one of:
 | `signal` | It waits at an await-signal node, with no signal for it stored |
 | `stuck` | It needs intervention: a stuck step, or an unsafe step whose outcome is unknown |
 | `external-ready` | It is at an external step nobody holds (§Steps outside the worker) |
-| `held` | It is at an external step an actor holds |
+| `held` | It is at an async step that is held: an external step an actor holds, or an async command whose started work has not reported |
 
 **`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
 was created), one line each and not as a tree: the run, its workflow, its node, what
@@ -315,7 +315,7 @@ With `<runId>`, or the one unfinished run, it:
 2. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
    parked, printing its progress on stderr (§Progress). Like `run`, it works as a
    whole worker, so other runs of the database that fall due meanwhile move on too. On the way it sweeps attempts
-   as a worker does: a held external step whose lease or deadline has passed is
+   as a worker does: a held async step whose lease or deadline has passed is
    expired, and its action's effect decides. A held step is probed when its action has
    a probe this host runs (host.md §2); a `dead` answer expires it with reason
    `probe-dead`, and the run goes on.
@@ -329,7 +329,7 @@ With `<runId>`, or the one unfinished run, it:
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
-   | at a held external step | the step, the actor label, the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
+   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
 
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
