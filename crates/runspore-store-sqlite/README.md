@@ -12,9 +12,9 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
   clock after `BEGIN IMMEDIATE` has taken the write lock.
 - `SQLITE_BUSY` after the timeout is `unavailable` / `store.busy`.
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
-  of the eight operations named in spec section 3.
+  of the nine operations named in spec section 3.
 
-## Schema (version 10, in `PRAGMA user_version`)
+## Schema (version 11, in `PRAGMA user_version`)
 
 An empty file is initialized from `src/schema.sql`, and `meta` records the crate
 version that wrote the schema (`writer`). A file written by an earlier 0.2 `spore` is
@@ -24,7 +24,8 @@ upgraded in place, in one transaction, and the writer is recorded again: version
 `attempts.holder` and `attempts.deadline_ms`, version 6 to 7 adds
 `invocations.params`, version 7 to 8 adds `runs.parent_run_id` and
 `runs.parent_node_id`, version 8 to 9 adds `attempts.claimed_at_ms`, version 9 to 10
-adds `runs.result_channels`. Two files are refused with kind
+adds `runs.result_channels`, version 10 to 11 adds `runs.cancel_reason`,
+`runs.cancel_at_ms` and `runs.cancel_request_id`. Two files are refused with kind
 `incompatible` before anything else is read or written: version 1, which `spore` 0.1
 wrote, as `schema.too-old`, and a newer version as `schema.too-new`; both messages
 name the version that wrote the file and the fix (spec/store.md §3).
@@ -34,7 +35,7 @@ name the version that wrote the file and the fix (spec/store.md §3).
 | `meta` | `key` | `writer` is the version of the `spore` that initialized or last upgraded the schema |
 | `packages` | `digest` | packages are content-addressed |
 | `artifacts` | `digest` | workflow artifacts are content-addressed |
-| `runs` | `(tenant, run_id)`; unique `(tenant, start_key)` | one run per start key; holds revision, applied and next sequence, last accepted time, fence counter, quarantine, base folder, the digest of the artifact it was started from or null, the run and node it was started from (`parent_run_id`, `parent_node_id`) or nulls, and the result channel picked for each async action as a JSON object (`result_channels`), null for none |
+| `runs` | `(tenant, run_id)`; unique `(tenant, start_key)` | one run per start key; holds revision, applied and next sequence, last accepted time, fence counter, quarantine, base folder, the digest of the artifact it was started from or null, the run and node it was started from (`parent_run_id`, `parent_node_id`) or nulls, and the result channel picked for each async action as a JSON object (`result_channels`), null for none, and the cancel record (`cancel_reason`, `cancel_at_ms`, `cancel_request_id`), `cancel_at_ms` null unless the run is cancelled; a cancel sets `status` to `cancelled` |
 | `events` | `(tenant, run_id, sequence)`; unique `(tenant, run_id, event_id)` | one event per ID per run (I2); one event per sequence; one `activity.result` per attempt, since its ID derives from the attempt ID |
 | `transitions` | `(tenant, run_id, revision)`; unique `(tenant, run_id, consumed_sequence)` | one commit per revision and per consumed event |
 | `commands` | `(tenant, run_id, command_id)` | a command ID exists once per run (I3) |
@@ -47,7 +48,8 @@ A receipt stores the operation name, request digest, and the canonical JSON
 (`canonical::encode`) of the returned value. A replay decodes those bytes, so it returns
 the same typed value. Two cases answer `duplicate` without writing a receipt: a
 `create_run` with identical values under another request ID, and an `append_event`
-whose event ID, kind and body digest already exist.
+whose event ID, kind and body digest already exist; and a `cancel_run` of a run that
+has already ended.
 
 Cursors are JSON arrays holding the sort key of the last item returned:
 `[tenant, run]` for `scan_ready`, `[run]` for `list_runs`, and
@@ -71,6 +73,6 @@ may share a file; SQLite's file locks serialize their writers.
 
 ## Tests
 
-`tests/conformance.rs` runs S01–S22 from `runspore-store-conformance`. S01, S03 and S15
+`tests/conformance.rs` runs S01–S34 from `runspore-store-conformance`. S01, S03 and S15
 race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01 and
-Q03–Q12. Q03 and Q11 run `examples/crash.rs` as a child process at a failpoint.
+Q03–Q16. Q03 and Q11 run `examples/crash.rs` as a child process at a failpoint.

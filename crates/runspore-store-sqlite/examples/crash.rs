@@ -3,14 +3,14 @@
 //! second run resubmits identical requests. Run it with `RUNSPORE_FAILPOINTS` set.
 
 use runspore_store_conformance::{
-    append, claim, commit, create_run, expire, finish, heartbeat, process_record, schedule,
+    append, cancel, claim, commit, create_run, expire, finish, heartbeat, process_record, schedule,
     set_process, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{Disposition, RunKey, Store, Turn, DEFAULT_TENANT};
 
 /// The operations in the order a scenario performs them.
-const STEPS: [&str; 8] = [
+const STEPS: [&str; 9] = [
     "create-run",
     "append-event",
     "commit-turn",
@@ -19,6 +19,7 @@ const STEPS: [&str; 8] = [
     "set-process",
     "finish-attempt",
     "expire-attempt",
+    "cancel-run",
 ];
 
 #[tokio::main(flavor = "current_thread")]
@@ -34,6 +35,7 @@ async fn main() {
             "set-process",
             "finish-attempt",
             "expire-attempt",
+            "cancel-run",
         ]
         .contains(s)
             || **s == op
@@ -82,6 +84,13 @@ async fn main() {
                     .claim_attempt(claim(&key, "claim", &schedule(&key, "a", 0).1, "w1", lease))
                     .await
                     .expect("claim")
+                    .disposition
+            }
+            "cancel-run" => {
+                store
+                    .cancel_run(cancel(&key, "cancel", Some("crash")))
+                    .await
+                    .expect("cancel")
                     .disposition
             }
             other => {

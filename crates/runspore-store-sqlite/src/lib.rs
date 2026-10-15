@@ -20,7 +20,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -49,6 +49,10 @@ const UPGRADE_7: &str = "ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
 const UPGRADE_8: &str = "ALTER TABLE attempts ADD COLUMN claimed_at_ms INTEGER;";
 /// Upgrades a version 9 database to version 10: the run's result channels.
 const UPGRADE_9: &str = "ALTER TABLE runs ADD COLUMN result_channels TEXT;";
+/// Upgrades a version 10 database to version 11: the run's cancel record.
+const UPGRADE_10: &str = "ALTER TABLE runs ADD COLUMN cancel_reason TEXT;
+    ALTER TABLE runs ADD COLUMN cancel_at_ms INTEGER;
+    ALTER TABLE runs ADD COLUMN cancel_request_id TEXT;";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -221,12 +225,15 @@ struct RunRow {
     last_ms: u64,
     fence: u64,
     quarantined: bool,
+    status: String,
+    cancelled: bool,
 }
 
 fn run_row(c: &Connection, key: &RunKey) -> R<Option<RunRow>> {
     c.query_row(
         "SELECT start_key, package_digest, started_digest, revision, applied_sequence,
-                next_sequence, last_accepted_ms, fence, quarantine_code IS NOT NULL
+                next_sequence, last_accepted_ms, fence, quarantine_code IS NOT NULL,
+                status, cancel_at_ms IS NOT NULL
          FROM runs WHERE tenant = ?1 AND run_id = ?2",
         params![key.tenant, key.run],
         |r| {
@@ -240,6 +247,8 @@ fn run_row(c: &Connection, key: &RunKey) -> R<Option<RunRow>> {
                 last_ms: r.get::<_, i64>(6)? as u64,
                 fence: r.get::<_, i64>(7)? as u64,
                 quarantined: r.get(8)?,
+                status: r.get(9)?,
+                cancelled: r.get(10)?,
             })
         },
     )
@@ -340,6 +349,48 @@ fn settle(
     })
 }
 
+/// Expires every running attempt of the run as `expire_attempt` does with reason
+/// `cancelled`; returns each with its holder handle.
+fn cancel_attempts(c: &Connection, key: &RunKey, now: u64) -> R<Vec<CancelledAttempt>> {
+    let mut stmt = c
+        .prepare(
+            "SELECT invocation_id, attempt_id, owner, fence, attempt_number, holder FROM attempts
+             WHERE tenant = ?1 AND run_id = ?2 AND status = 'running' ORDER BY attempt_id",
+        )
+        .map_err(db)?;
+    let running: Vec<(CancelledAttempt, u32)> = stmt
+        .query_map(params![key.tenant, key.run], |r| {
+            let attempt = AttemptRef {
+                key: key.clone(),
+                invocation_id: r.get(0)?,
+                attempt_id: r.get(1)?,
+                owner: r.get(2)?,
+                fence: r.get::<_, i64>(3)? as u64,
+            };
+            Ok((
+                CancelledAttempt {
+                    attempt,
+                    holder: r.get(5)?,
+                },
+                r.get(4)?,
+            ))
+        })
+        .and_then(Iterator::collect)
+        .map_err(db)?;
+    let audit = Evidence::from_canonical(encode(
+        &json!({"reason": ExpireReason::Cancelled.as_str()}),
+    )?);
+    let mut expired = Vec::with_capacity(running.len());
+    for (cancelled, number) in running {
+        let a = &cancelled.attempt;
+        let body = encode(&ActivityResult::expired(&a.invocation_id, number))?;
+        insert_audit(c, a, "attempt.expired", &audit, now)?;
+        settle(c, a, "expired", &body, now)?;
+        expired.push(cancelled);
+    }
+    Ok(expired)
+}
+
 fn cursor_value(cursor: Option<String>) -> R<Option<Value>> {
     cursor
         .map(|c| serde_json::from_str(&c).map_err(|_| conflict("cursor.invalid")))
@@ -363,7 +414,8 @@ fn cursor_u64(value: &Value, index: usize) -> R<i64> {
 const RUN_VIEW: &str = "SELECT tenant, run_id, start_key, package_digest, status, revision,
     applied_sequence, next_sequence, snapshot, snapshot_digest, quarantine_code,
     quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms, base_dir,
-    artifact_digest, parent_run_id, parent_node_id, result_channels FROM runs";
+    artifact_digest, parent_run_id, parent_node_id, result_channels, cancel_reason,
+    cancel_at_ms, cancel_request_id FROM runs";
 
 fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
     let code: Option<String> = r.get(10)?;
@@ -398,6 +450,14 @@ fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
                 rusqlite::Error::FromSqlConversionFailure(19, rusqlite::types::Type::Text, e.into())
             })?,
             None => BTreeMap::new(),
+        },
+        cancel: match r.get::<_, Option<i64>>(21)? {
+            Some(at_ms) => Some(RunCancel {
+                reason: r.get(20)?,
+                at_ms: at_ms as u64,
+                request_id: r.get(22)?,
+            }),
+            None => None,
         },
     })
 }
@@ -450,6 +510,7 @@ impl SqliteStore {
                 (7, UPGRADE_7),
                 (8, UPGRADE_8),
                 (9, UPGRADE_9),
+                (10, UPGRADE_10),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -560,6 +621,9 @@ impl SqliteStore {
 
 fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
     let run = existing_run(c, &q.key)?;
+    if run.cancelled {
+        return Err(stale("run.cancelled"));
+    }
     if run.quarantined {
         return Err(stale("run.quarantined"));
     }
@@ -746,6 +810,9 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
         ));
     };
     let run = existing_run(c, &q.key)?;
+    if run.cancelled {
+        return Err(stale("run.cancelled"));
+    }
     if run.quarantined {
         return Err(stale("run.quarantined"));
     }
@@ -1019,7 +1086,10 @@ impl Store for SqliteStore {
             else {
                 return Ok(None);
             };
-            if view.quarantine.is_some() || view.applied_sequence + 1 == view.next_sequence {
+            if view.quarantine.is_some()
+                || view.cancel.is_some()
+                || view.applied_sequence + 1 == view.next_sequence
+            {
                 return Ok(None);
             }
             let event = list_events(c, key, view.applied_sequence, 1)?
@@ -1251,7 +1321,11 @@ impl Store for SqliteStore {
 
     async fn quarantine_run(&self, q: QuarantineRun) -> R<Receipt<QuarantineChanged>> {
         self.mutate("quarantine_run", None, &q.key, &q.mutation, |c, now| {
-            if existing_run(c, &q.key)?.revision != q.expected_revision {
+            let run = existing_run(c, &q.key)?;
+            if run.cancelled {
+                return Err(stale("run.cancelled"));
+            }
+            if run.revision != q.expected_revision {
                 return Err(stale("revision.mismatch"));
             }
             set_quarantine(c, &q.key, Some((&q.code, &q.details)), now).map(Outcome::Applied)
@@ -1261,6 +1335,41 @@ impl Store for SqliteStore {
     async fn release_run(&self, q: ReleaseRun) -> R<Receipt<QuarantineChanged>> {
         self.mutate("release_run", None, &q.key, &q.mutation, |c, now| {
             set_quarantine(c, &q.key, None, now).map(Outcome::Applied)
+        })
+    }
+
+    async fn cancel_run(&self, q: CancelRun) -> R<Receipt<RunCancelled>> {
+        self.mutate("cancel_run", Some("cancel-run"), &q.key, &q.mutation, |c, now| {
+            let run = existing_run(c, &q.key)?;
+            if matches!(run.status.as_str(), "completed" | "failed" | STATUS_CANCELLED) {
+                let cancel = c
+                    .query_row(
+                        &format!("{RUN_VIEW} WHERE tenant = ?1 AND run_id = ?2"),
+                        params![q.key.tenant, q.key.run],
+                        run_view,
+                    )
+                    .map_err(db)?
+                    .cancel;
+                return Ok(Outcome::Same(RunCancelled { status: run.status, cancel, expired: Vec::new() }));
+            }
+            let expired = cancel_attempts(c, &q.key, now)?;
+            c.execute(
+                "UPDATE runs SET status = ?3, cancel_reason = ?4, cancel_at_ms = ?5, cancel_request_id = ?6,
+                        quarantine_code = NULL, quarantine_details = NULL, quarantine_at_ms = NULL,
+                        updated_at_ms = ?5
+                 WHERE tenant = ?1 AND run_id = ?2",
+                params![q.key.tenant, q.key.run, STATUS_CANCELLED, q.reason, i(now), q.mutation.request_id],
+            )
+            .map_err(db)?;
+            Ok(Outcome::Applied(RunCancelled {
+                status: STATUS_CANCELLED.to_string(),
+                cancel: Some(RunCancel {
+                    reason: q.reason.clone(),
+                    at_ms: now,
+                    request_id: q.mutation.request_id.clone(),
+                }),
+                expired,
+            }))
         })
     }
 
@@ -1275,6 +1384,7 @@ impl Store for SqliteStore {
                 .prepare(
                     "SELECT tenant, run_id FROM runs
                      WHERE applied_sequence + 1 < next_sequence AND quarantine_code IS NULL
+                       AND cancel_at_ms IS NULL
                        AND (tenant, run_id) > (?1, ?2) ORDER BY tenant, run_id LIMIT ?3",
                 )
                 .map_err(db)?;
@@ -1304,6 +1414,8 @@ impl Store for SqliteStore {
                     .prepare(
                         "SELECT tenant, run_id, invocation_id, attempt_id, owner, fence, lease_until_ms, process FROM attempts
                          WHERE status = 'running' AND lease_until_ms <= ?1
+                           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.tenant = attempts.tenant
+                                AND r.run_id = attempts.run_id AND r.cancel_at_ms IS NOT NULL)
                            AND (lease_until_ms, attempt_id, tenant, run_id) > (?2, ?3, ?4, ?5)
                          ORDER BY lease_until_ms, attempt_id, tenant, run_id LIMIT ?6",
                     )
@@ -1332,6 +1444,7 @@ impl Store for SqliteStore {
                         "SELECT i.tenant, i.run_id, i.invocation_id, i.not_before_ms FROM invocations i
                          JOIN runs r ON r.tenant = i.tenant AND r.run_id = i.run_id
                          WHERE i.status = 'pending' AND i.not_before_ms <= ?1 AND r.quarantine_code IS NULL
+                           AND r.cancel_at_ms IS NULL
                            AND (i.not_before_ms, i.invocation_id, i.tenant, i.run_id) > (?2, ?3, ?4, ?5)
                          ORDER BY i.not_before_ms, i.invocation_id, i.tenant, i.run_id LIMIT ?6",
                     )

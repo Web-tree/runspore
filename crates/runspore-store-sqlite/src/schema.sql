@@ -34,6 +34,9 @@ CREATE TABLE runs (
     parent_run_id TEXT,
     parent_node_id TEXT,
     result_channels TEXT,
+    cancel_reason TEXT,
+    cancel_at_ms INTEGER,
+    cancel_request_id TEXT,
     PRIMARY KEY (tenant, run_id),
     UNIQUE (tenant, start_key)
 );
