@@ -39,6 +39,7 @@ marked **0.2** below are new since 0.1.
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
 | `release <runId>` | Lifts a quarantine |
+| `cancel <runId> [--reason <text>] [--id <requestId>]` | **0.2.** Ends an unfinished run as `cancelled`, stops its running command and runs its held step's stop (§Cancelling a run) |
 | `step claim [<runId>] [--actor <label>] [--holder <json>]` | **0.2.** Claims a ready external step and prints what the actor needs (§Steps outside the worker) |
 | `step renew <token>` | **0.2.** Extends the claimed attempt's lease, never past its deadline |
 | `step complete <token> --outcome <o> [--output <json>]` | **0.2.** Reports the step done with an outcome |
@@ -311,8 +312,8 @@ depth 0; its text lists them under `children`.
 
 ## What a run needs (0.2)
 
-An **unfinished run** is one that has not completed or failed. What it needs from
-someone is one of:
+An **unfinished run** is one that has not completed, failed or been cancelled
+(§Cancelling a run). What it needs from someone is one of:
 
 | `needs` | When |
 | --- | --- |
@@ -367,6 +368,7 @@ With `<runId>`, or the one unfinished run, it:
    | --- | --- | --- |
    | completed | the end node | 0 |
    | failed | the error | 1 |
+   | cancelled | the reason, when one was given | 7 |
    | waiting for a signal | the node and the signal, `spore step show <runId>`, and one `spore signal` per outcome the node routes, as `status` gives them | 3 |
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
@@ -406,6 +408,48 @@ run that is finished, or not at an activity or await-signal node, exits 2 with
 `step.none`. When the step files cannot be made, `step show` exits 10 with the code a
 dispatch would quarantine with (`artifact.unreadable`, `host.files-unwritable`) and
 leaves the run as it is; only a dispatch or a claim quarantines.
+
+## Cancelling a run (0.2)
+
+`spore cancel <runId> [--reason <text>] [--id <requestId>]` ends an unfinished run on
+purpose: its status becomes `cancelled`, its history is kept, and a step in progress
+is told to stop. It is one store operation (store.md §2 `cancel_run`), recorded on the
+run beside its kernel state, as a quarantine is; it is not an event of the run, and the
+workflow runs no steps of its own on the way out (Temporal's terminate, not its
+cancel). A quarantined run can be cancelled; the cancel clears the quarantine.
+
+- **A running command.** The store fences out its attempt. The worker running it is
+  refused at its next heartbeat and stops the command's process group with the stop
+  sequence, so the command is gone within `--heartbeat-ms` and `--stop-grace-ms` of the
+  cancel, whichever process the worker is.
+- **A held async step.** Its attempt is expired with reason `cancelled`, so the holder's
+  later `step renew`, `complete` or `fail` exits 2 with `lease.lost` and what it says
+  is kept. When the action declares `async.stop`, `spore cancel` then runs it once,
+  under the guard, with the holder handle on stdin, the step's files and
+  `RUNSPORE_DB` (host.md §3, Async commands), and waits for it, at most its timeout
+  (10 s by default). Its output is kept as late evidence; a stop that fails is ignored.
+- **Pending events**, a signal sent before the cancel or after it, stay unconsumed.
+
+`--id` names the request; a missing one is generated. A repeat with the same ID is a
+`duplicate` and runs no stop again; the same ID with another reason exits 2 with
+`cancel.id-reused`, as for `signal` (§Keys used again). Cancelling a run that has
+already completed, failed or been cancelled succeeds and changes nothing, disposition
+`duplicate`. A run that does not exist exits 2 with `run.not-found`.
+
+It exits 0 once the run is `cancelled`, or when it had already ended, and prints
+`{"runId", "requestId", "disposition", "status", "cancel", "stops"}`: `status` is the
+run's status afterwards, `cancel` its `{"reason", "at"}` as in `status`, null for a run
+that ended otherwise, and `stops` one `{"invocationId", "attempt", "exit"}` per stop
+that ran, `exit` null when it did not exit by itself. Text: `run <runId> cancelled
+(request ID <id>)`, a line per stop, or `run <runId> had already <status>; nothing
+changed`.
+
+`run`, `worker --until-parked` and `continue` working a run that is cancelled
+meanwhile stop once their in-flight attempts of it have stopped, print its `status`,
+and exit 7; `continue` on a cancelled run works nothing and exits 7. A cancelled run
+is not unfinished: `list --unfinished` and `continue` leave it out, `list` shows it at
+no node with `needs` null, and `step show` on it exits 2 with `step.none`. `events`
+lists the cancel record after the run's events (§JSON output).
 
 ## Validation (0.2)
 
@@ -704,7 +748,8 @@ In JSON mode the error's `details` are `{runId, startKey, differs, input, comman
 
 `signal --id` with an ID the run already took for a signal with another name, outcome
 or data is `signal.id-reused`; `resolve --id` with an ID it took for another
-resolution is `resolve.id-reused`. The message names the run and the ID and says to
+resolution is `resolve.id-reused`; **0.2:** `cancel --id` with an ID it took for a
+cancel with another reason is `cancel.id-reused`. The message names the run and the ID and says to
 send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
 ## Exit codes
@@ -718,6 +763,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
 | 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities) |
+| 7 | **0.2.** For `run`, `worker --until-parked` and `continue`: the run was cancelled, before the command or while it worked (§Cancelling a run) |
 | 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
@@ -745,13 +791,13 @@ Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
  "running": null,
  "slots": {"limit": 4, "held": []},
  "streaks": {"test": {"outcome": "red", "count": 2, "limit": 3}},
- "step": null, "result": null, "end": null, "quarantine": null}
+ "step": null, "result": null, "end": null, "quarantine": null, "cancel": null}
 ```
 
 `position.from` is the arrow the run took into its position: the node whose result
 routed there and the outcome it routed on, the same arrow a mapping reads as `from`
 (kernel.md §4). It is `null` at the start node's first activation. `end` is `null`
-unless the run is `completed` or `failed`; then it is `{"nodeId", "from"}`: the node
+unless the run is `completed` or `failed` (a `cancelled` run has none); then it is `{"nodeId", "from"}`: the node
 the run ended at and the arrow into it, for example
 `{"nodeId": "done", "from": {"nodeId": "approve", "outcome": "approved"}}`. The node is
 the complete or fail node the run reached, or the node named by the error that ended
@@ -839,6 +885,13 @@ its stream tails show there too.
 
 **0.2:** `status` carries `parent` and `children` (§Runs that start runs).
 
+**0.2:** a cancelled run shows `status: "cancelled"` and `cancel: {"reason", "at"}`:
+the reason `cancel` was given (or null) and when the run was cancelled, a decimal
+string of milliseconds. `position`, `invocation`, `streaks` and `nodes` stay as the run
+had them when it was cancelled; `waiting`, `intervention`, `running`, `step`, `result`
+and `end` are null. Text mode shows `cancelled  <time> UTC: <reason>`. `cancel` is null
+for every other run.
+
 **0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
 the absolute path of the database the command used (§Project folder). `list` prints
 `{"db", "runs": [...]}`.
@@ -896,6 +949,11 @@ status the run came to when the event changed it (`waiting for <signal>`,
 shows the same arrows again with fresh times; a run that hangs shows an old last
 event. The node and the arrows are found by replaying the run's consumed events
 through the kernel, as `status` finds `position.from`; the JSON is unchanged.
+
+**0.2:** a cancelled run's cancel is a store record, not an event. `events` lists it
+after the run's events: the text ends with a line `   -  <time>  run.cancelled
+store  <reason>  <requestId>`, and the JSON carries `cancel: {"reason", "at",
+"requestId"}` beside `events`, null for a run that is not cancelled.
 
 ## Interrupts
 

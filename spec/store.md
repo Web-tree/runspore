@@ -33,8 +33,9 @@ audit record of an expiry, the run's base folder, the artifact table with
 that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
 attempt, an invocation's node `params` in every claim, the run's parent, the run's
-`updatedAtMs`, `hold_attempt`, the result channel picked for each async action, and
-scenarios S15 to S27; everything else is as in 0.1.
+`updatedAtMs`, `hold_attempt`, the result channel picked for each async action,
+`cancel_run` and the run's cancel record, and scenarios S15 to S34; everything else is
+as in 0.1.
 
 ## 2. Operations
 
@@ -101,8 +102,9 @@ event) and `acceptedAtMs = max(now, previous event's acceptedAtMs)`.
 
 ### load_turn
 
-A coherent read. Returns `None` if the run does not exist, is quarantined, or has no
-pending event (`appliedSequence + 1 == nextSequence`). Otherwise the run's revision,
+A coherent read. Returns `None` if the run does not exist, is quarantined, (0.2) is
+cancelled, or has no pending event (`appliedSequence + 1 == nextSequence`). Otherwise
+the run's revision,
 applied sequence, package digest, snapshot, and the event at `appliedSequence + 1`.
 
 ### get_package
@@ -116,8 +118,9 @@ request ID and no receipt.
 
 ### commit_turn
 
-Predicates, in order: the run exists (`not-found` / `run.not-found`); it is not
-quarantined (`stale` / `run.quarantined`); `expectedRevision` equals the revision
+Predicates, in order: the run exists (`not-found` / `run.not-found`); (0.2) it is not
+cancelled (`stale` / `run.cancelled`); it is not quarantined (`stale` /
+`run.quarantined`); `expectedRevision` equals the revision
 (`stale` / `revision.mismatch`); the event at `appliedSequence + 1` has `eventId` and
 `eventSequence` (`stale` / `event.mismatch`); `snapshotDigest ==
 digest::state(snapshot)` (`conflict` / `snapshot.digest-mismatch`); the snapshot is at
@@ -151,8 +154,9 @@ request aborted.
 
 ### claim_attempt
 
-Predicates: the invocation exists (`not-found` / `invocation.not-found`); the run is
-not quarantined (`stale` / `run.quarantined`); the invocation is `pending` (`conflict`
+Predicates: the invocation exists (`not-found` / `invocation.not-found`); (0.2) the run
+is not cancelled (`stale` / `run.cancelled`); the run is not quarantined (`stale` /
+`run.quarantined`); the invocation is `pending` (`conflict`
 / `invocation.not-claimable`); now ≥ `notBeforeMs` (`conflict` / `invocation.not-due`).
 
 Writes: the run's fence counter + 1; an attempt with ID `ids::attempt(invocationId,
@@ -269,7 +273,49 @@ event. This is where a result that lost to expiry is kept.
 Records `{code, details, at}` on the run. While quarantined the run is invisible to
 `load_turn` and `scan_ready`, and `commit_turn` and `claim_attempt` refuse it.
 Accepting events continues. `release_run` clears it. Both return the resulting flag
-and are idempotent on an already matching state.
+and are idempotent on an already matching state. **0.2:** a cancelled run is not
+quarantined: `quarantine_run` on it is `stale` / `run.cancelled`, checked before the
+revision.
+
+### cancel_run (0.2)
+
+`cancel_run(key, reason)` ends an unfinished run on purpose, at once and in one
+transaction: Temporal's *terminate*, not its *cancel*. The workflow gets no say and the
+kernel is not called; the run keeps its events, invocations and snapshot. `reason` is
+a string a person gave, or null. The request ID is the caller's, so a repeat is a
+`duplicate`.
+
+Predicate: the run exists (`not-found` / `run.not-found`).
+
+A run that has already ended, `completed`, `failed` or `cancelled`, is left as it is:
+the operation writes nothing, no receipt included (as §1 rule 6), and returns the
+run's status and, for a cancelled run, its cancel record, disposition `duplicate`.
+
+Otherwise it writes, atomically:
+
+- the run's **cancel record**, `{reason, atMs, requestId}`, with `atMs` now. It lives
+  beside the kernel state, as a quarantine does: the snapshot keeps the state it had,
+  and the run's status becomes `cancelled`. A cancel is not a kernel event: no event
+  is appended for it, and pending events stay unconsumed, as evidence;
+- a quarantine, if the run has one, cleared;
+- each `running` attempt of the run expired as `expire_attempt` expires it with reason
+  `cancelled`: the attempt `expired`, its invocation `settled`, the `expired` result
+  appended, and the audit record `{"reason": "cancelled"}`. That holds for an attempt a
+  worker runs and for one held outside the worker, whose holder is fenced out;
+- the run's `updatedAtMs`, now.
+
+It returns `{status, cancel, expired}`: the run's status, `cancelled` or the one it had
+ended with; its cancel record, or null for a run that ended otherwise; and, for an
+applied cancel, each attempt it expired, as `{attempt, holder}`: its full reference and
+its holder handle (canonical JSON or null), so the caller can run the action's stop
+(host §2), and `[]` otherwise. A replay returns the same value.
+
+After it, the run is invisible to `load_turn`, `scan_ready` and `scan_due`;
+`commit_turn`, `claim_attempt` and `quarantine_run` are `stale` / `run.cancelled`; the
+expired attempts' `heartbeat`, `hold_attempt`, `set_process` and `finish_attempt` are
+`stale` / `lease.lost`, and `record_late_evidence` keeps what they say. Events are
+still accepted, as for a quarantined run, and never consumed. `release_run` finds no
+quarantine. Read views show status `cancelled` and the cancel record.
 
 ### Scans and views
 
@@ -298,7 +344,9 @@ and are idempotent on an already matching state.
   **0.2:** an invocation shows its input and its `params` as scheduled, the values
   every claim returns, so a host can probe or watch an attempt it did not claim (host
   §3, Async commands). **0.2:** a run shows its `resultChannels`, `{}` when it has
-  none.
+  none. **0.2:** a cancelled run shows status `cancelled` and its cancel record
+  `{reason, atMs, requestId}`; any other run shows null. A cancel sets `updatedAtMs`.
+- **0.2:** `scan_ready` and both kinds of `scan_due` item leave cancelled runs out.
 
 ## 3. SQLite adapter
 
@@ -326,7 +374,8 @@ and are idempotent on an already matching state.
   invocation's `params`, null for invocations scheduled before; version 7 to 8 adds the
   run's parent, null for runs created before; version 8 to 9 adds when an attempt was
   claimed, null for attempts claimed before; version 9 to 10 adds the run's result
-  channels, `{}` for runs created before. The refusal happens before any
+  channels, `{}` for runs created before; version 10 to 11 adds the run's cancel
+  record, null for runs created before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
 
   This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
@@ -349,7 +398,7 @@ and are idempotent on an already matching state.
 Around the transaction commit of each mutating operation:
 `store.<op>.before-commit` and `store.<op>.after-commit`, with `<op>` one of
 `create-run`, `append-event`, `commit-turn`, `claim-attempt`, `heartbeat`,
-`set-process` (0.2), `finish-attempt`, `expire-attempt`. **0.2:** `store.upgrade.after-step`
+`set-process` (0.2), `finish-attempt`, `expire-attempt`, `cancel-run` (0.2). **0.2:** `store.upgrade.after-step`
 after each upgrade step of an open, before the transaction commits. Use
 `runspore_types::failpoint::hit`.
 
@@ -387,6 +436,13 @@ Written once, generic over a store factory and a manual clock, in
 | S25 | A run created, committed, claimed, renewed, given a result, committed again, claimed and abandoned, given a signal, quarantined and released, each at a later time (0.2) | `get_run` shows `updatedAtMs` at the time of each change; the renewal leaves it |
 | S26 | `hold_attempt` on a running attempt with a process record; again with its request ID; with another owner, after its lease and after it finished; with a holder over 4 KiB (0.2) | The attempt keeps its reference and shows the holder, the deadline, the nearer lease and no process record in `list_invocations`, with the invocation's input and params; a renewal stops at the deadline and `finish_attempt` with the same reference is applied; the replay is `duplicate`; the others are `lease.lost`, and the large holder `holder.too-large`, writing nothing |
 | S27 | `create_run` with result channels, repeated with others, and without any (0.2) | `get_run` and `list_runs` show the first channels; the repeat is `duplicate`; a run created without any shows `{}` |
+| S28 | `cancel_run` on a run waiting for a signal, with a reason; then with its request ID again, and with another (0.2) | `applied`; `get_run` shows status `cancelled`, the snapshot it had and the cancel record; the run is gone from `load_turn` and `scan_ready`; a signal is still accepted and stays pending; `commit_turn` and `quarantine_run` are `run.cancelled`; the repeat is `duplicate` with the same value, the other request `duplicate` and writes no receipt |
+| S29 | `cancel_run` on a run whose step is stuck (status `needs-intervention`) (0.2) | `applied`, status `cancelled`; a resolution is accepted and never consumed |
+| S30 | `cancel_run` on a quarantined run (0.2) | `applied`; the quarantine is cleared and status is `cancelled`; `release_run` finds nothing to release |
+| S31 | `cancel_run` while a worker's attempt runs, with a process record (0.2) | The attempt is expired, its invocation `settled`, one `expired` result appended, with an `attempt.expired` audit record of reason `cancelled`; the value lists the attempt with a null holder; the worker's `heartbeat`, `set_process` and `finish_attempt` are `lease.lost`, its result is kept as late evidence; nothing of the run is in `scan_due`, and a pending invocation of it is not claimable (`run.cancelled`) |
+| S32 | `cancel_run` while an attempt is held with a holder handle and a deadline (0.2) | The value lists the attempt's reference and its holder; the holder's `heartbeat`, `hold_attempt` and `finish_attempt` are `lease.lost`; the attempt is no `Lease` item of `scan_due` once its deadline passes |
+| S33 | Two `cancel_run` calls with two request IDs, from two instances at once (0.2) | Both succeed; exactly one is `applied` and writes a receipt; the run has one cancel record and every running attempt one `expired` result |
+| S34 | `cancel_run` on a completed run, a failed run, and a run that does not exist (0.2) | The ended runs are `duplicate`, keep their status and get no cancel record and no receipt; the missing run is `run.not-found` |
 
 SQLite-specific, in the adapter crate:
 
@@ -407,3 +463,4 @@ SQLite-specific, in the adapter crate:
 | Q13 | Open a version 7 file (0.2) | Upgraded to the current version; its runs are kept with no parent; a new run records its parent |
 | Q14 | Open a version 8 file (0.2) | Upgraded to the current version; its attempts are kept with no claim time; a new claim records its time |
 | Q15 | Open a version 9 file (0.2) | Upgraded to the current version; its runs are kept with result channels `{}`; a new run records its own |
+| Q16 | Open a version 10 file (0.2) | Upgraded to the current version; its runs are kept with no cancel record; one of them can then be cancelled |
