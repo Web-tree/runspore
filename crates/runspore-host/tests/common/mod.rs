@@ -245,6 +245,9 @@ impl<H: Hook> Store for Hooked<H> {
     async fn release_run(&self, r: ReleaseRun) -> StoreResult<Receipt<QuarantineChanged>> {
         self.inner.release_run(r).await
     }
+    async fn cancel_run(&self, r: CancelRun) -> StoreResult<Receipt<RunCancelled>> {
+        self.inner.cancel_run(r).await
+    }
     async fn scan_ready(&self, c: Option<String>, l: u32) -> StoreResult<Page<RunKey>> {
         self.inner.scan_ready(c, l).await
     }

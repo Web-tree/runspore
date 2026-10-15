@@ -1,5 +1,6 @@
-//! An async action's probe and watch (spec/host.md §3, Async commands): the action's
-//! own check of a holder handle, and its own wait on it.
+//! An async action's probe, watch and stop (spec/host.md §3, Async commands): the
+//! action's own check of a holder handle, its own wait on it, and its own way to end
+//! the work behind it.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,6 +13,8 @@ use crate::command::{self, Program};
 
 /// How long a probe may run when its program gives no `timeoutMs`.
 pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a stop may run when its program gives no `timeoutMs`.
+pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What a probe says of a holder. Only `Dead` frees the step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +68,23 @@ pub(crate) async fn probe(
         Some("alive") => Answer::Alive,
         Some("dead") => Answer::Dead,
         _ => Answer::Unknown,
+    }
+}
+
+/// Runs the stop on `handle`. Returns its exit code, `None` when it did not exit by
+/// itself (a timeout or a signal) or could not be started, and its stdout.
+pub(crate) async fn stop(
+    ctx: &ActivityContext,
+    program: &Program,
+    input: &Value,
+    handle: &[u8],
+) -> (Option<i32>, Vec<u8>) {
+    let timeout = program
+        .timeout_ms
+        .map_or(STOP_TIMEOUT, Duration::from_millis);
+    match command::run_program(ctx, program, input, handle.to_vec(), timeout, |_| false).await {
+        Some(ran) => (Some(ran.code), ran.stdout),
+        None => (None, Vec::new()),
     }
 }
 

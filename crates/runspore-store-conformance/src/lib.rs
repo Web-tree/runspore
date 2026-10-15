@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S22 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S34 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::collections::BTreeMap;
@@ -351,6 +351,15 @@ pub fn release(key: &RunKey, request_id: &str) -> ReleaseRun {
     }
 }
 
+/// A `cancel_run` of the run `key` with `reason`.
+pub fn cancel(key: &RunKey, request_id: &str, reason: Option<&str>) -> CancelRun {
+    CancelRun {
+        mutation: mutation("cancel_run", request_id, json!([key, reason])),
+        key: key.clone(),
+        reason: reason.map(str::to_string),
+    }
+}
+
 /// A store with one created run whose `start` event is pending.
 pub struct World {
     pub fixture: Fixture,
@@ -426,6 +435,13 @@ impl World {
             .await
             .expect("scan_due")
             .items
+    }
+    /// Commits the pending event with `commands`, leaving the run at `status`.
+    pub async fn commit_at(&self, request_id: &str, status: &str, commands: Vec<Command>) {
+        let turn = self.turn().await;
+        let mut request = commit(&turn, request_id, 0, commands);
+        request.status = status.to_string();
+        self.store().commit_turn(request).await.expect("commit");
     }
     pub async fn ready(&self) -> Vec<RunKey> {
         self.store()
@@ -1923,6 +1939,377 @@ pub async fn s27_result_channels(factory: &dyn StoreFactory) {
     assert!(run.result_channels.is_empty());
 }
 
+/// How many `expired` results the events hold.
+fn expired_results(events: &[StoredEvent]) -> usize {
+    events
+        .iter()
+        .filter(|e| e.kind == "activity.result")
+        .filter(|e| {
+            canonical::decode::<ActivityResult>(&e.body)
+                .is_ok_and(|r| r.status == AttemptStatus::Expired)
+        })
+        .count()
+}
+
+/// The pending event at `sequence` as a turn on `revision`.
+async fn turn_at(w: &World, revision: u64, sequence: u64) -> Turn {
+    let page = w
+        .store()
+        .list_events(&w.key, sequence - 1, 1)
+        .await
+        .unwrap();
+    let record = page.items.into_iter().next().expect("event");
+    assert_eq!(record.consumed_revision, None, "the event stays pending");
+    Turn {
+        key: w.key.clone(),
+        revision,
+        applied_sequence: sequence - 1,
+        package_digest: String::new(),
+        snapshot: None,
+        snapshot_digest: None,
+        next_event: record.event,
+    }
+}
+
+/// S28: a run waiting for a signal is cancelled; a repeat is a duplicate.
+pub async fn s28_cancel_waiting(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s28").await;
+    w.commit_at("commit-1", "waiting", vec![]).await;
+    let before = w.run().await;
+    w.clock.set(2_000);
+    let cancelled = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel", Some("not needed")))
+        .await
+        .unwrap();
+    assert_eq!(cancelled.disposition, Disposition::Applied);
+    let record = RunCancel {
+        reason: Some("not needed".into()),
+        at_ms: 2_000,
+        request_id: "cancel".into(),
+    };
+    assert_eq!(
+        cancelled.value,
+        RunCancelled {
+            status: STATUS_CANCELLED.into(),
+            cancel: Some(record.clone()),
+            expired: Vec::new(),
+        }
+    );
+    let run = w.run().await;
+    assert_eq!(run.status, STATUS_CANCELLED);
+    assert_eq!(run.cancel, Some(record));
+    assert_eq!(run.updated_at_ms, 2_000);
+    assert!(run.ended());
+    assert_eq!(
+        (run.snapshot, run.revision),
+        (before.snapshot, before.revision),
+        "the kernel state is kept"
+    );
+
+    let signal = w
+        .store()
+        .append_event(append(&w.key, "a-1", "sig:1", json!(1)))
+        .await
+        .unwrap();
+    assert_eq!(signal.disposition, Disposition::Applied);
+    assert!(w.store().load_turn(&w.key).await.unwrap().is_none());
+    assert!(w.ready().await.is_empty());
+    let turn = turn_at(&w, 1, 2).await;
+    let r = w
+        .store()
+        .commit_turn(commit(&turn, "commit-2", 0, vec![]))
+        .await;
+    assert_eq!(
+        failure(r),
+        (StoreFailureKind::Stale, "run.cancelled".into())
+    );
+    let r = w.store().quarantine_run(quarantine(&w.key, "q", 1)).await;
+    assert_eq!(
+        failure(r),
+        (StoreFailureKind::Stale, "run.cancelled".into())
+    );
+
+    w.clock.set(3_000);
+    let again = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel", Some("not needed")))
+        .await
+        .unwrap();
+    assert_eq!(again.disposition, Disposition::Duplicate);
+    assert_eq!(again.value, cancelled.value);
+    let other = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel-2", None))
+        .await
+        .unwrap();
+    assert_eq!(other.disposition, Disposition::Duplicate);
+    assert_eq!(other.value.cancel, cancelled.value.cancel);
+    assert!(other.value.expired.is_empty());
+    assert!(w
+        .store()
+        .get_receipt(&w.key, "cancel-2")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+/// S29: a run whose step is stuck is cancelled; a resolution is never consumed.
+pub async fn s29_cancel_stuck(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s29").await;
+    w.commit_at("commit-1", "needs-intervention", vec![]).await;
+    let cancelled = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel", None))
+        .await
+        .unwrap();
+    assert_eq!(cancelled.disposition, Disposition::Applied);
+    assert_eq!(cancelled.value.cancel.expect("record").reason, None);
+    assert_eq!(w.run().await.status, STATUS_CANCELLED);
+    w.store()
+        .append_event(append(&w.key, "resolve", "res:1", json!({"retry": true})))
+        .await
+        .unwrap();
+    assert!(w.store().load_turn(&w.key).await.unwrap().is_none());
+    assert!(w.ready().await.is_empty());
+    turn_at(&w, 1, 2).await;
+}
+
+/// S30: a quarantined run is cancelled; the quarantine is cleared.
+pub async fn s30_cancel_quarantined(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s30").await;
+    w.scheduled(0).await;
+    w.store()
+        .quarantine_run(quarantine(&w.key, "q", 1))
+        .await
+        .unwrap();
+    let cancelled = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel", Some("broken")))
+        .await
+        .unwrap();
+    assert_eq!(cancelled.disposition, Disposition::Applied);
+    let run = w.run().await;
+    assert_eq!(run.status, STATUS_CANCELLED);
+    assert!(run.quarantine.is_none());
+    let released = w.store().release_run(release(&w.key, "r")).await.unwrap();
+    assert!(!released.value.quarantined);
+    assert_eq!(w.run().await.status, STATUS_CANCELLED);
+    assert!(w.due().await.is_empty());
+}
+
+/// S31: a run is cancelled while a worker runs its attempt; the worker is fenced out.
+pub async fn s31_cancel_running(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s31").await;
+    let (first, invocation) = schedule(&w.key, "a", 0);
+    let (second, waiting) = schedule(&w.key, "b", 0);
+    w.commit("commit-1", vec![first, second]).await;
+    let attempt = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim", &invocation, "w1", 10_000))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    let record = Some(process_record("here", 7));
+    w.store()
+        .set_process(set_process(&attempt, "process", record))
+        .await
+        .unwrap();
+    let before = w.events().await.len();
+    let cancelled = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        cancelled.value.expired,
+        vec![CancelledAttempt {
+            attempt: attempt.clone(),
+            holder: None
+        }]
+    );
+    let events = w.events().await;
+    assert_eq!(events.len(), before + 1, "one result, no cancel event");
+    assert_eq!(expired_results(&events), 1);
+    let shown = w.invocations().await;
+    let a = shown
+        .iter()
+        .find(|i| i.invocation_id == invocation)
+        .unwrap();
+    assert_eq!(a.status, InvocationStatus::Settled);
+
+    for r in [
+        failure(w.store().heartbeat(heartbeat(&attempt, "hb", 100)).await),
+        failure(
+            w.store()
+                .set_process(set_process(&attempt, "p-2", None))
+                .await,
+        ),
+        failure(
+            w.store()
+                .finish_attempt(finish(&attempt, "finish", 1))
+                .await,
+        ),
+    ] {
+        assert_eq!(r, (StoreFailureKind::Stale, "lease.lost".into()));
+    }
+    let kept = w
+        .store()
+        .record_late_evidence(RecordLateEvidence {
+            mutation: mutation("record_late_evidence", "late", json!([attempt])),
+            attempt: attempt.clone(),
+            evidence: success(&attempt, 1),
+        })
+        .await
+        .unwrap();
+    assert_eq!(kept.disposition, Disposition::Applied);
+    w.clock.set(100_000);
+    assert!(w.due().await.is_empty(), "nothing of the run is due");
+    let r = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-b", &waiting, "w1", 100))
+        .await;
+    assert_eq!(
+        failure(r),
+        (StoreFailureKind::Stale, "run.cancelled".into())
+    );
+}
+
+/// S32: a run is cancelled while its attempt is held outside the worker.
+pub async fn s32_cancel_held(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s32").await;
+    let invocation = w.scheduled(0).await;
+    let holder = json!({"pane": 3});
+    let claimed = claim_held(
+        &w.key,
+        "claim",
+        &invocation,
+        1_000,
+        Some(holder.clone()),
+        5_000,
+    );
+    let attempt = w
+        .store()
+        .claim_attempt(claimed)
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    let cancelled = w
+        .store()
+        .cancel_run(cancel(&w.key, "cancel", Some("stop")))
+        .await
+        .unwrap();
+    assert_eq!(
+        cancelled.value.expired,
+        vec![CancelledAttempt {
+            attempt: attempt.clone(),
+            holder: Some(canonical::encode(&holder).unwrap())
+        }]
+    );
+    for r in [
+        failure(w.store().heartbeat(heartbeat(&attempt, "renew", 100)).await),
+        failure(
+            w.store()
+                .hold_attempt(hold(&attempt, "hold", json!(1), 100, 1_000))
+                .await,
+        ),
+        failure(
+            w.store()
+                .finish_attempt(finish(&attempt, "finish", 1))
+                .await,
+        ),
+    ] {
+        assert_eq!(r, (StoreFailureKind::Stale, "lease.lost".into()));
+    }
+    w.clock.set(10_000);
+    assert!(
+        w.due().await.is_empty(),
+        "past its deadline, nothing to sweep"
+    );
+    assert_eq!(expired_results(&w.events().await), 1);
+}
+
+/// S33: two cancels with two request IDs from two instances at once; one applies.
+pub async fn s33_cancel_race(factory: &dyn StoreFactory) {
+    for n in 0..RACES {
+        let w = World::new(factory, &format!("s33-{n}")).await;
+        let invocation = w.scheduled(0).await;
+        w.store()
+            .claim_attempt(claim(&w.key, "claim", &invocation, "w1", 10_000))
+            .await
+            .unwrap();
+        let (a, b) = (w.fixture.store.clone(), w.fixture.second(w.clock.clone()));
+        let (ka, kb) = (w.key.clone(), w.key.clone());
+        let (ra, rb) = race(
+            async move { a.cancel_run(cancel(&ka, "cancel-a", Some("a"))).await },
+            async move { b.cancel_run(cancel(&kb, "cancel-b", Some("b"))).await },
+        )
+        .await;
+        let (ra, rb) = (ra.unwrap(), rb.unwrap());
+        let applied: Vec<_> = [&ra, &rb]
+            .into_iter()
+            .filter(|r| r.disposition == Disposition::Applied)
+            .collect();
+        assert_eq!(applied.len(), 1, "exactly one cancel applies");
+        let winner = applied[0];
+        let record = w.run().await.cancel.expect("one cancel record");
+        assert_eq!(Some(&record), winner.value.cancel.as_ref());
+        assert_eq!(winner.value.expired.len(), 1);
+        assert_eq!(expired_results(&w.events().await), 1);
+        let loser = if winner.request_id == "cancel-a" {
+            "cancel-b"
+        } else {
+            "cancel-a"
+        };
+        assert!(w
+            .store()
+            .get_receipt(&w.key, loser)
+            .await
+            .unwrap()
+            .is_none());
+    }
+}
+
+/// S34: a cancel of a run that has ended changes nothing; a missing run is not found.
+pub async fn s34_cancel_ended(factory: &dyn StoreFactory) {
+    for status in ["completed", "failed"] {
+        let w = World::new(factory, &format!("s34-{status}")).await;
+        w.commit_at("commit-1", status, vec![]).await;
+        let before = w.run().await;
+        w.clock.set(5_000);
+        let r = w
+            .store()
+            .cancel_run(cancel(&w.key, "cancel", None))
+            .await
+            .unwrap();
+        assert_eq!(r.disposition, Disposition::Duplicate);
+        assert_eq!(
+            r.value,
+            RunCancelled {
+                status: status.into(),
+                cancel: None,
+                expired: Vec::new()
+            }
+        );
+        assert_eq!(w.run().await, before, "{status}: unchanged");
+        assert!(w
+            .store()
+            .get_receipt(&w.key, "cancel")
+            .await
+            .unwrap()
+            .is_none());
+    }
+    let w = World::new(factory, "s34").await;
+    let missing = RunKey::new(DEFAULT_TENANT, "s34-missing");
+    let r = w.store().cancel_run(cancel(&missing, "cancel", None)).await;
+    assert_eq!(
+        failure(r),
+        (StoreFailureKind::NotFound, "run.not-found".into())
+    );
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1935,7 +2322,9 @@ macro_rules! store_conformance_tests {
             s15_start_key_race s16_process_record s17_base_dir
             s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep
             s22_params s23_parent s24_claimed_at s25_updated_at
-            s26_hold_attempt s27_result_channels);
+            s26_hold_attempt s27_result_channels s28_cancel_waiting s29_cancel_stuck
+            s30_cancel_quarantined s31_cancel_running s32_cancel_held s33_cancel_race
+            s34_cancel_ended);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

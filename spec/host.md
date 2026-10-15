@@ -152,6 +152,23 @@ process on its own.
   no input to check: only `start` checks one.
 - `release(key)`: `release_run`, with a request ID derived from the quarantine it
   lifts, so repeating it is a duplicate.
+- **0.2.** `cancel(key, request_id, reason)`: ends an unfinished run as `cancelled`
+  (store.md §2 `cancel_run`), with request ID `cancel/<request_id>`; the same request
+  ID with another reason is `conflict` / `request.digest-mismatch`. The store expires
+  every running attempt of the run with reason `cancelled`, so:
+  - a worker running a command of the run gets `lease.lost` at its next heartbeat and
+    stops the command's group as on any lost lease (One attempt, below): the command
+    stops within `heartbeat_ms` plus `stop_grace_ms`, and what it reports is kept as
+    late evidence;
+  - for each expired attempt that was held outside the worker (it has a deadline)
+    and whose action declares `async.stop`, the host then runs that stop once (§3,
+    Async commands) and keeps its output with `record_late_evidence`; its failure is
+    ignored. The stop runs only when the cancel is `applied`: a replay, a second
+    cancel, and a cancel of a run that has already ended run nothing.
+
+  Returns the run's status, its cancel record, the disposition, and for each stop that
+  ran, the invocation, the attempt number and how the stop exited. A cancelled run
+  parks `run_until_parked` (below). A run that does not exist is `run.not-found`.
 - Read-through views: `get_run`, `get_package`, `get_artifact` (0.2), `list_runs`,
   `list_events`, `list_invocations`.
 
@@ -221,7 +238,8 @@ process exits. The same sequence is available as `shutdown()`; after it the engi
 never claims again.
 
 `run_until_parked(key)` ticks until that run is terminal, `waiting`,
-`needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or at
+`needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or
+cancelled, by any process, once its in-flight attempts have stopped. **0.2:** or at
 an async step (Steps outside the worker, below) that this engine does not watch, or
 whose watch has said that its holder waits for a person (§3, Async commands).
 
@@ -307,7 +325,8 @@ attempts, fences, effect classes, retries and stuck steps apply unchanged.
     watches it the same way, with the holder handle given at the claim.
   - `channels`: the result channels the actor may report through, in order of
     preference, default `["store"]`, as for an async command (The handshake, below).
-  - `stop`: kept in the package and not yet acted on.
+  - `stop`: optional, the program that tells the holder to stop when the run is
+    cancelled (`cancel`, above), run as for an async command (§3, Async commands).
 
   This host refuses the `component` form of `probe`, `watch` and `stop` (The
   handshake).
@@ -786,8 +805,8 @@ outlive the worker that started it is declared this way.
 
 - `async` has the fields of an external action's (§2): `timeoutMs` (default
   `"3600000"`), `leaseMs` (smaller than `timeoutMs`; the work must renew within it
-  with `renew_step`), `probe`, `watch`, `stop` and `channels`. `stop` is kept in the
-  package and not yet acted on.
+  with `renew_step`), `probe`, `watch`, `stop` and `channels`. `stop` runs when the
+  run is cancelled (Stop, below).
 - `probe`, `watch` and `stop` are each tagged by implementation:
   `{"command": {"argv", "cwd", "env", "timeoutMs"}}`. Only `argv` is required. `argv`,
   `cwd` and `env` take the forms of a command's own (above): `argv` items are strings
@@ -795,8 +814,8 @@ outlive the worker that started it is declared this way.
   `cwd` from input reads that try's input. An `argv[0]` of the form `./<p>` names a
   file bundled as the action's asset (dot.md §4) and runs the step files' copy; a bare
   name is looked up on the `PATH` when the program runs. `timeoutMs`, a positive
-  decimal string, defaults to 10 s for a probe and to the time left before the
-  attempt's deadline for a watch. The tag leaves room for a `component` form; this host
+  decimal string, defaults to 10 s for a probe and a stop and to the time left before
+  the attempt's deadline for a watch. The tag leaves room for a `component` form; this host
   offers none and refuses one with `action.component-unsupported` (§2, The
   handshake); any other shape is `action.invalid`.
 - `channels`: the result channels the work can report through, in order of
@@ -888,11 +907,23 @@ on stdin and the probe's variables.
 - The host stops a watch with its process group when the attempt stops being held (it
   checks every `heartbeat_ms`) and when the engine shuts down.
 
+**Stop.** The action's own way to end the work behind a holder handle, run once when
+the run is cancelled (§2, `cancel`), after the store has expired the attempt with
+reason `cancelled`, so the holder is already fenced out. It runs under the guard and
+the stop sequence, without a process record, with the handle on stdin (`null` for a
+claim that gave none) and the probe's variables: the try's input and params, the step
+files and work folder, and `RUNSPORE_DB`. Its default timeout is 10 s. Its exit code and
+stdout are kept as late evidence of the attempt, `{"stop": {"exit", "stdout"}}`
+(`exit` null when it timed out, was killed, or could not be started; `stdout` as text,
+its last 16 KiB). Whatever it does, the run stays cancelled: a stop that fails, hangs or
+cannot be started is ignored. It is best effort, as Temporal's terminate is: a host
+that dies between the cancel and the stop does not run it later.
+
 ### The guard (0.2)
 
 Every process the host starts for an attempt runs under a guard. In 0.2 that is a
 `command`'s `argv`, an async command's start command included, and an async action's
-probe and watch.
+probe, watch and stop.
 
 - The guard is a hidden mode of the host's own executable (config `guard`), so there
   is nothing extra to install. It is never named in a workflow and no action opts out.
@@ -1087,4 +1118,5 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H32 | **0.2.** A held async step probed by the sweep, by `probe_step` and by `claim_step`, with a probe that answers `alive`, `dead`, `unknown`, crashes, times out and prints something else | Only `dead` expires the attempt, with reason `probe-dead`; a repeatable step then gets its next try and an `unsafe` one needs intervention; every other answer leaves it held |
 | H33 | **0.2.** SIGKILL the worker after `hold_attempt`, while the job its async start command detached runs | The job survives; its report reaches the run, which the next worker completes |
 | H34 | **0.2.** SIGKILL the worker and its guard together while an async start command runs | The next sweep stops the start command's recorded group before it expires the attempt; the next try starts only after the group is gone |
+| H36 | **0.2.** `cancel` while a worker's command runs; while an async command is held, with a stop that writes its stdin to a file, and with one that exits non-zero; while an external step is held; on a completed run; twice with one request ID | The command's group is gone within `heartbeat_ms` + `stop_grace_ms` + 1 s and `run_until_parked` returns the run `cancelled`; the stop ran once with the holder handle on stdin and `RUNSPORE_DB`, and its output is late evidence; the failing stop leaves the run cancelled; the holder's later `complete_step` is `lease.lost` and kept; the completed run is unchanged; the repeat runs no stop |
 | H35 | **0.2.** The handshake: `validate_workflow` and `start` with an action of an unregistered kind, an action of a kind the host does not run async carrying `async`, a `component` probe, and result channels the host does not offer; a run started with an external action listing `["nats", "store"]`; a run started by an engine that registers a runner and served by one that does not | Each is refused with its code, a message naming the action and the fix, and no run; the run records `store` and a claim returns it; the second engine claims nothing, the invocation stays pending with no attempt, `async_step` reports `capability-missing` with what to restore, and `run_until_parked` returns; an engine with the runner then completes the run |

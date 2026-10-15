@@ -516,6 +516,50 @@ pub struct QuarantineChanged {
     pub quarantined: bool,
 }
 
+// --- cancel -----------------------------------------------------------------
+
+/// `RunView::status` of a cancelled run (spec/store.md §2 `cancel_run`).
+pub const STATUS_CANCELLED: &str = "cancelled";
+
+/// Ends an unfinished run on purpose: records the cancel beside the kernel state,
+/// clears a quarantine, and expires every running attempt with reason `cancelled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CancelRun {
+    pub mutation: Mutation,
+    pub key: RunKey,
+    /// Why, as a person gave it.
+    pub reason: Option<String>,
+}
+
+/// The cancel recorded on a cancelled run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCancel {
+    pub reason: Option<String>,
+    #[serde(with = "u64_str")]
+    pub at_ms: u64,
+    pub request_id: String,
+}
+
+/// A running attempt `cancel_run` expired, with its holder handle as canonical JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelledAttempt {
+    pub attempt: AttemptRef,
+    pub holder: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCancelled {
+    /// `cancelled`, or the status the run had already ended with.
+    pub status: String,
+    /// The run's cancel record; `None` for a run that ended otherwise.
+    pub cancel: Option<RunCancel>,
+    /// The attempts this cancel expired; empty when it changed nothing.
+    pub expired: Vec<CancelledAttempt>,
+}
+
 // --- scans and views --------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -563,6 +607,18 @@ pub struct RunView {
     pub parent: Option<RunParent>,
     /// The result channels recorded at `create_run`, by action ID.
     pub result_channels: BTreeMap<String, String>,
+    /// The cancel of a cancelled run.
+    pub cancel: Option<RunCancel>,
+}
+
+impl RunView {
+    /// Whether the run has ended: completed, failed or cancelled.
+    pub fn ended(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "completed" | "failed" | STATUS_CANCELLED
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -622,7 +678,7 @@ pub trait Store: Send + Sync {
     async fn create_run(&self, request: CreateRun) -> StoreResult<Receipt<RunCreated>>;
     async fn append_event(&self, request: AppendEvent) -> StoreResult<Receipt<EventAccepted>>;
 
-    /// `None` when the run has no pending event or is quarantined.
+    /// `None` when the run has no pending event, is quarantined or is cancelled.
     async fn load_turn(&self, key: &RunKey) -> StoreResult<Option<Turn>>;
     async fn get_package(&self, digest: &str) -> StoreResult<Option<Vec<u8>>>;
     /// The workflow artifact bytes stored under `digest`.
@@ -652,8 +708,11 @@ pub trait Store: Send + Sync {
         request: QuarantineRun,
     ) -> StoreResult<Receipt<QuarantineChanged>>;
     async fn release_run(&self, request: ReleaseRun) -> StoreResult<Receipt<QuarantineChanged>>;
+    /// Ends an unfinished run as `cancelled`; on a run that has ended, changes nothing.
+    async fn cancel_run(&self, request: CancelRun) -> StoreResult<Receipt<RunCancelled>>;
 
-    /// Runs with a pending event that are not quarantined, in a stable order.
+    /// Runs with a pending event that are neither quarantined nor cancelled, in a stable
+    /// order.
     async fn scan_ready(&self, cursor: Option<String>, limit: u32) -> StoreResult<Page<RunKey>>;
     /// Expired leases and claimable invocations, in a stable order.
     async fn scan_due(&self, cursor: Option<String>, limit: u32) -> StoreResult<Page<DueItem>>;

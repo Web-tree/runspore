@@ -34,11 +34,13 @@ use crate::guard;
 use crate::process::{self, Leftover};
 use crate::progress::{self, Change, Happened, Progress};
 
+mod cancel;
 mod held;
 mod intervention;
 mod slots;
 mod steps;
 
+pub use cancel::{Cancelled, Stopped};
 pub use slots::HeldSlot;
 pub use steps::{AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState};
 
@@ -495,7 +497,7 @@ fn activity_result(
 }
 
 fn parked(view: &RunView) -> bool {
-    if view.quarantine.is_some() {
+    if view.quarantine.is_some() || view.ended() {
         return true;
     }
     let pending = view.applied_sequence + 1 < view.next_sequence;
@@ -1877,9 +1879,7 @@ impl Inner {
                         .await
                         .ok()?;
                     for run in &page.items {
-                        let finished = serde_json::from_value::<RunStatus>(json!(run.status))
-                            .is_ok_and(RunStatus::is_terminal);
-                        if let (false, Some(artifact)) = (finished, &run.artifact_digest) {
+                        if let (false, Some(artifact)) = (run.ended(), &run.artifact_digest) {
                             unpinned.remove(artifact);
                         }
                     }
