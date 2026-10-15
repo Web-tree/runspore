@@ -10,7 +10,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
     validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner, Observer,
-    StartOutcome, StepClaim, StepReport,
+    StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING, FILES_UNWRITABLE,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
@@ -23,7 +23,7 @@ use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
-use crate::view::{Shown, Tree};
+use crate::view::{Row, Shown, Tree};
 use crate::{project, view};
 
 pub const FORMAT: &str = "runspore.cli/0.2";
@@ -120,8 +120,15 @@ pub enum Command {
     /// Status, position and the arrow into it, result and the end node, quarantine
     /// reason, outstanding invocation.
     Status { run_id: String },
-    /// All runs with status.
-    List,
+    /// All runs with status, as a tree, each with its workflow and what it needs.
+    List {
+        /// Only the unfinished runs, newest first.
+        #[arg(long)]
+        unfinished: bool,
+    },
+    /// Do the next thing a run needs, then print what a person must type: the run's,
+    /// or the only unfinished one.
+    Continue { run_id: Option<String> },
     /// The run's events in order, with the revision that consumed each.
     Events { run_id: String },
     /// Deliver a signal. Repeating a message ID is a no-op.
@@ -196,6 +203,9 @@ pub enum StepCommand {
     },
     /// Free the run's held external step at once.
     Abandon { run_id: String },
+    /// Describe the step a run is at, the only unfinished one by default, without
+    /// claiming or changing anything.
+    Show { run_id: Option<String> },
 }
 
 #[derive(Args)]
@@ -376,17 +386,20 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             ..
         } => return inspect_artifact(path),
         Command::Status { .. }
-        | Command::List
+        | Command::List { .. }
         | Command::Events { .. }
         | Command::Inspect { .. }
+        | Command::Step(StepCommand::Show { .. })
+        | Command::Continue { .. }
             if !db.exists() =>
         {
-            return missing_database(&cli.command, &db);
+            return missing_database(&cli.command, &db, &cwd);
         }
         Command::Status { .. }
-        | Command::List
+        | Command::List { .. }
         | Command::Events { .. }
-        | Command::Inspect { .. } => {}
+        | Command::Inspect { .. }
+        | Command::Step(StepCommand::Show { .. }) => {}
         _ => project::before_write(&db)?,
     }
     let base_dir = match &request {
@@ -395,7 +408,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     };
     let parent = request.as_ref().and_then(|r| r.parent.clone());
     let engine = engine(cli, &db, base_dir, parent)?;
-    if let Command::Run(_) | Command::Worker { .. } = &cli.command {
+    if let Command::Run(_) | Command::Worker { .. } | Command::Continue { .. } = &cli.command {
         engine.observe(progress(cli.json));
     }
     if let Some(request) = &request {
@@ -450,7 +463,8 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             json["db"] = json!(db);
             done(json, shown.text(&view))
         }
-        Command::List => list(&engine, &db).await,
+        Command::List { unfinished } => list(&engine, &db, *unfinished).await,
+        Command::Continue { run_id } => continue_run(&engine, &db, &cwd, run_id.as_deref()).await,
         Command::Events { run_id } => events(&engine, run_id).await,
         Command::Signal {
             run_id,
@@ -527,6 +541,9 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
                        "requestId": request_id, "disposition": disposition}),
                 format!("resolution {disposition} (request ID {request_id})"),
             )
+        }
+        Command::Step(StepCommand::Show { run_id }) => {
+            step_show(&engine, &db, run_id.as_deref()).await
         }
         Command::Step(command) => step(&engine, command).await,
         Command::Release { run_id } => {
@@ -710,13 +727,21 @@ fn explain(code: Option<&str>) -> Result<Output, Fail> {
     )
 }
 
-/// A read-only command on a database that does not exist sees no runs, and leaves no
-/// file behind.
-fn missing_database(command: &Command, db: &Path) -> Result<Output, Fail> {
+/// A read-only command, or `continue`, on a database that does not exist sees no runs,
+/// and leaves no file behind.
+fn missing_database(command: &Command, db: &Path, cwd: &Path) -> Result<Output, Fail> {
     match command {
-        Command::List => done(json!({"db": db, "runs": []}), String::new()),
+        Command::List { .. } => done(json!({"db": db, "runs": []}), String::new()),
+        Command::Continue { run_id: None } => Ok(nothing_to_continue(cwd)),
+        Command::Step(StepCommand::Show { run_id: None }) => Err(none_unfinished("step show")),
         Command::Status { run_id }
         | Command::Events { run_id }
+        | Command::Continue {
+            run_id: Some(run_id),
+        }
+        | Command::Step(StepCommand::Show {
+            run_id: Some(run_id),
+        })
         | Command::Inspect {
             run: Some(run_id), ..
         } => Err(Fail::usage(
@@ -1079,36 +1104,133 @@ fn parent_step() -> Option<RunParent> {
 /// `run_until_parked`, or on SIGINT/SIGTERM/SIGHUP `Engine::shutdown`, which applies the
 /// results of the attempts it drains and leaves the rest of the run to the next worker.
 async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output, Fail> {
+    let (view, interrupted) = work(engine, key).await?;
+    let shown = Shown::read(engine, &view).await?;
+    Ok(parked(&view, &shown, db, interrupted))
+}
+
+/// Works the run until it parks; with `true` when an interrupt stopped it first.
+async fn work(engine: &Engine, key: &RunKey) -> Result<(RunView, bool), Fail> {
     let mut stop = Interrupts::install()?;
     let parked = tokio::select! {
         view = engine.run_until_parked(key) => Some(view?),
         () = stop.wait() => None,
     };
-    let (view, interrupted) = match parked {
-        Some(view) => (view, false),
+    match parked {
+        Some(view) => Ok((view, false)),
         None => {
             engine.shutdown().await;
-            (existing(engine, &key.run).await?, true)
+            Ok((existing(engine, &key.run).await?, true))
         }
-    };
-    let shown = Shown::read(engine, &view).await?;
+    }
+}
+
+/// The run's `status` and the exit code of a parked run, as `run` prints them.
+fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output {
     let exit = if interrupted {
         EXIT_INTERRUPTED
     } else {
-        view::exit_for(&view, shown.step.as_ref())
+        view::exit_for(view, shown.step.as_ref())
     };
-    let mut json = shown.json(&view);
+    let mut json = shown.json(view);
     json["db"] = json!(db);
     if interrupted {
         json["interrupted"] = json!(true);
     }
-    Ok(Output {
-        text: shown.text(&view),
+    Output {
+        text: shown.text(view),
         json,
         raw: None,
         stderr: String::new(),
         exit,
-    })
+    }
+}
+
+/// `spore continue [<runId>]` (spec/cli.md, What a run needs): with nothing unfinished
+/// the workflows to start; with several, the runs and exit 2; with one, the run worked
+/// until it parks, unless it is quarantined or finished, then what a person must type.
+async fn continue_run(
+    engine: &Engine,
+    db: &Path,
+    cwd: &Path,
+    run: Option<&str>,
+) -> Result<Output, Fail> {
+    let view = match run {
+        Some(run) => existing(engine, run).await?,
+        None => match only_unfinished(engine, db, "continue").await? {
+            Some(view) => view,
+            None => return Ok(nothing_to_continue(cwd)),
+        },
+    };
+    let (view, interrupted) = match view::needs(&view, None) {
+        Some("quarantined") | None => (view, false),
+        Some(_) => work(engine, &view.key).await?,
+    };
+    let shown = Shown::read(engine, &view).await?;
+    let mut out = parked(&view, &shown, db, interrupted);
+    if !interrupted {
+        let next = shown.next(&view);
+        out.json["needs"] = json!(next.needs);
+        out.json["commands"] = json!(next.commands);
+        out.text = next.text;
+    }
+    Ok(out)
+}
+
+/// `continue` with no unfinished run: the workflows of the project folder to start.
+fn nothing_to_continue(cwd: &Path) -> Output {
+    let workflows = project::workflows(cwd);
+    let mut text = "nothing to continue".to_string();
+    if workflows.is_empty() {
+        text += "; no workflows in a project folder (.spore/workflows/) here";
+    } else {
+        text += "; workflows to start with spore start <name>:";
+        for (name, folder) in &workflows {
+            text += &format!("\n  {name}  {}", folder.display());
+        }
+    }
+    let workflows: Vec<Value> = workflows
+        .iter()
+        .map(|(name, folder)| json!({"name": name, "folder": folder}))
+        .collect();
+    Output {
+        json: json!({"runs": [], "workflows": workflows}),
+        text,
+        raw: None,
+        stderr: String::new(),
+        exit: 0,
+    }
+}
+
+/// The one unfinished run; `None` when there is none. Several are `run.several`, exit
+/// 2, listed as `list --unfinished` lists them, so that `command` is given one.
+async fn only_unfinished(
+    engine: &Engine,
+    db: &Path,
+    command: &str,
+) -> Result<Option<RunView>, Fail> {
+    let tree = unfinished(engine).await?;
+    match tree.rows.len() {
+        0 => Ok(None),
+        1 => Ok(Some(tree.runs[tree.rows[0].index].clone())),
+        n => {
+            let message = format!("{n} runs are unfinished; name one: spore {command} <runId>");
+            let mut fail = Fail::usage("run.several", message.clone());
+            fail.report = Some(format!(
+                "{}\nspore: run.several: {message}\n",
+                tree.text(0, now_ms())
+            ));
+            fail.details = Some(json!({"db": db, "runs": tree.json()}));
+            Err(fail)
+        }
+    }
+}
+
+fn none_unfinished(command: &str) -> Fail {
+    Fail::usage(
+        "run.none-unfinished",
+        format!("no run is unfinished; name one: spore {command} <runId>"),
+    )
 }
 
 impl Shown {
@@ -1175,12 +1297,53 @@ async fn read_tree(
         .enumerate()
         .map(|(i, r)| (r.key.run.as_str(), i))
         .collect();
+    let mut names = HashMap::new();
     let mut rows = Vec::new();
     for (run, depth) in view::tree(&runs, root) {
-        let (node, since) = whereabouts(engine, run).await?;
-        rows.push((index[run.key.run.as_str()], depth, node, since));
+        let (node_id, since_ms) = whereabouts(engine, run).await?;
+        let step = engine.external_step(run).await?;
+        let needs = view::needs(run, step.as_ref());
+        let actor = step
+            .filter(|_| matches!(needs, Some("external-ready" | "held")))
+            .and_then(|s| s.actor);
+        if !names.contains_key(&run.package_digest) {
+            let name = package(engine, run)
+                .await?
+                .and_then(|p| p["name"].as_str().map(String::from));
+            names.insert(run.package_digest.clone(), name);
+        }
+        rows.push(Row {
+            index: index[run.key.run.as_str()],
+            depth,
+            node_id,
+            since_ms,
+            workflow: names[&run.package_digest].clone(),
+            needs,
+            actor,
+        });
     }
-    Ok(Tree { runs, rows })
+    Ok(Tree {
+        runs,
+        rows,
+        flat: false,
+    })
+}
+
+/// The unfinished runs alone, newest first, not as a tree (spec/cli.md, What a run
+/// needs).
+async fn unfinished(engine: &Engine) -> Result<Tree, Fail> {
+    let mut tree = read_tree(engine, all_runs(engine).await?, None).await?;
+    tree.rows.retain(|row| row.needs.is_some());
+    let runs = &tree.runs;
+    tree.rows.sort_by(|a, b| {
+        let (a, b) = (&runs[a.index], &runs[b.index]);
+        (b.created_at_ms, &b.key.run).cmp(&(a.created_at_ms, &a.key.run))
+    });
+    for row in &mut tree.rows {
+        row.depth = 0;
+    }
+    tree.flat = true;
+    Ok(tree)
 }
 
 /// The node an unfinished run is at and since when it has stood there; `None`s for a
@@ -1207,6 +1370,82 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// `spore step show [<runId>]`: the step description, without claiming, probing or
+/// recording anything (spec/cli.md, What a run needs).
+async fn step_show(engine: &Engine, db: &Path, run: Option<&str>) -> Result<Output, Fail> {
+    let view = match run {
+        Some(run) => existing(engine, run).await?,
+        None => only_unfinished(engine, db, "step show")
+            .await?
+            .ok_or_else(|| none_unfinished("step show"))?,
+    };
+    let step = match engine.describe_step(&view).await {
+        Ok(Some(step)) => step,
+        Ok(None) => {
+            return Err(Fail::usage(
+                "step.none",
+                format!(
+                    "run {} is {} and at no activity or await-signal node",
+                    view.key.run, view.status
+                ),
+            ))
+        }
+        // The step files could not be made; the run is left as it is.
+        Err(HostError::Invalid { code, message })
+            if [ARTIFACT_UNREADABLE, FILES_UNWRITABLE, FILES_DIR_MISSING]
+                .contains(&code.as_str()) =>
+        {
+            return Err(Fail::internal(&code, message));
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let path = |p: &Option<PathBuf>| p.as_ref().map(|p| p.display().to_string());
+    let from = step
+        .from
+        .as_ref()
+        .map(|a| json!({"nodeId": a.node_id, "outcome": a.outcome}));
+    let json = json!({
+        "runId": step.key.run, "nodeId": step.node_id, "nodeKind": step.node_kind,
+        "activationId": step.activation_id, "actionId": step.action_id,
+        "signal": step.signal, "outcomes": step.outcomes,
+        "outputSchemas": step.output_schemas,
+        "files": path(&step.files), "instructions": path(&step.instructions),
+        "from": from,
+    });
+    let mut text = format!(
+        "step       {} ({}, {}) of run {}\n",
+        step.node_id, step.node_kind, step.activation_id, step.key.run
+    );
+    if let Some(arrow) = &step.from {
+        text += &format!("from       {} on {}\n", arrow.node_id, arrow.outcome);
+    }
+    match (&step.action_id, &step.signal) {
+        (Some(action), _) => text += &format!("action     {action}\n"),
+        (None, Some(signal)) => text += &format!("signal     {signal}\n"),
+        (None, None) => {}
+    }
+    for (i, outcome) in step.outcomes.iter().enumerate() {
+        let label = if i == 0 { "outcomes" } else { "" };
+        text += &match step.output_schemas.get(outcome) {
+            Some(schema) => format!("{label:<10} {outcome}, with data that fits {schema}\n"),
+            None => format!("{label:<10} {outcome}\n"),
+        };
+    }
+    if let Some(files) = &step.files {
+        text += &format!("files      {}\n", files.display());
+    }
+    if let Some(instructions) = &step.instructions {
+        let content = std::fs::read_to_string(instructions).map_err(|e| {
+            Fail::internal(
+                "file.unreadable",
+                format!("{}: {e}", instructions.display()),
+            )
+        })?;
+        text += &format!("\ninstructions ({}):\n\n{content}", instructions.display());
+    }
+    done(json, text)
 }
 
 /// `spore step …` (spec/cli.md, Steps outside the worker).
@@ -1287,6 +1526,7 @@ async fn step(engine: &Engine, command: &StepCommand) -> Result<Output, Fail> {
             let key = existing(engine, run_id).await?.key;
             reported(engine.abandon_step(&key).await?)
         }
+        StepCommand::Show { .. } => unreachable!("handled by step_show"),
     }
 }
 
@@ -1375,8 +1615,12 @@ async fn all_runs(engine: &Engine) -> Result<Vec<RunView>, Fail> {
     }
 }
 
-async fn list(engine: &Engine, db: &Path) -> Result<Output, Fail> {
-    let tree = read_tree(engine, all_runs(engine).await?, None).await?;
+async fn list(engine: &Engine, db: &Path, unfinished_only: bool) -> Result<Output, Fail> {
+    let tree = if unfinished_only {
+        unfinished(engine).await?
+    } else {
+        read_tree(engine, all_runs(engine).await?, None).await?
+    };
     done(
         json!({"db": db, "runs": tree.json()}),
         tree.text(0, now_ms()),

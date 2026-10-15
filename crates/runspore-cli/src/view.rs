@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use runspore_host::progress::{Change, Happened, Progress};
-use runspore_host::{Arrival, Arrow, ExternalStep, HeldSlot};
+use runspore_host::{Arrival, Arrow, ExternalStep, HeldSlot, StepState};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
 use serde_json::{json, Value};
@@ -131,40 +131,219 @@ impl Shown {
     }
 }
 
+/// What `continue` prints once it has worked a run: what the run needs, the commands a
+/// person types next, and both as text (spec/cli.md, What a run needs).
+pub struct Next {
+    pub needs: Option<&'static str>,
+    pub commands: Vec<String>,
+    pub text: String,
+}
+
+impl Shown {
+    pub fn next(&self, view: &RunView) -> Next {
+        let s = status_json(view, self);
+        let run = &view.key.run;
+        let needs = needs(view, self.step.as_ref());
+        let listed = |detail: &Value| -> Vec<String> {
+            let commands = detail["commands"].as_array().into_iter().flatten();
+            commands
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        };
+        let text = |value: &Value| value.as_str().unwrap_or("-").to_string();
+        let node = text(&s["position"]["nodeId"]);
+        let error = |error: &Value| match error["code"].as_str() {
+            Some(code) => format!(": {code}: {}", text(&error["message"])),
+            None => String::new(),
+        };
+        let (head, commands) = match needs {
+            None if view.status == "completed" => {
+                let at = s["end"]["nodeId"]
+                    .as_str()
+                    .map_or_else(String::new, |n| format!(" at {n}"));
+                (format!("run {run} completed{at}"), Vec::new())
+            }
+            None => {
+                let at = s["end"]["nodeId"]
+                    .as_str()
+                    .map_or_else(String::new, |n| format!(" at {n}"));
+                let why = error(&s["result"]["error"]);
+                (format!("run {run} failed{at}{why}"), Vec::new())
+            }
+            Some("quarantined") => {
+                let why = view
+                    .quarantine
+                    .as_ref()
+                    .map_or_else(String::new, |q| format!(": {}: {}", q.code, q.details));
+                let release = format!("spore release {run}");
+                (format!("run {run} is quarantined{why}"), vec![release])
+            }
+            Some("signal") => {
+                let waiting = &s["waiting"];
+                let mut commands = vec![format!("spore step show {run}")];
+                commands.extend(listed(waiting));
+                let signal = text(&waiting["signal"]);
+                (
+                    format!("run {run} waits at {node} for signal {signal}"),
+                    commands,
+                )
+            }
+            Some("stuck") => {
+                let intervention = &s["intervention"];
+                let at = text(&intervention["nodeId"]);
+                let why = match error(&intervention["error"]) {
+                    why if !why.is_empty() => why,
+                    _ => ": the outcome of its last attempt is unknown".to_string(),
+                };
+                (
+                    format!("run {run} needs a person at {at}{why}"),
+                    listed(intervention),
+                )
+            }
+            Some("external-ready") => {
+                let actor = self.step.as_ref().and_then(|s| s.actor.as_deref());
+                let (who, flag) = match actor {
+                    Some(actor) => (format!("actor {actor}"), format!(" --actor {actor}")),
+                    None => ("an actor".to_string(), String::new()),
+                };
+                (
+                    format!("run {run} waits at {node} for {who} to claim the step"),
+                    vec![format!("spore step claim {run}{flag}")],
+                )
+            }
+            Some("held") => {
+                let step = self.step.as_ref();
+                let who = step.and_then(|s| s.actor.as_deref()).unwrap_or("an actor");
+                let mut head = format!("run {run} at {node} is held by {who}");
+                if let Some(step) = step {
+                    head += &format!(", attempt {}", step.attempt);
+                    if let Some(holder) = &step.holder {
+                        head += &format!(", holder {holder}");
+                    }
+                    if let Some(deadline) = step.deadline_ms {
+                        head += &format!(", deadline {}", utc_text(deadline));
+                    }
+                }
+                (head, vec![format!("spore step abandon {run}")])
+            }
+            Some(_) => (
+                format!("run {run} is working at {node}"),
+                vec![format!("spore continue {run}")],
+            ),
+        };
+        let mut text = head + "\n";
+        for command in &commands {
+            text += &format!("  {command}\n");
+        }
+        Next {
+            needs,
+            commands,
+            text,
+        }
+    }
+}
+
 /// Runs as a tree, parents first, each unfinished one with its node and since when it
-/// has stood there (spec/cli.md, `list`).
+/// has stood there (spec/cli.md, `list`); or, `flat`, the unfinished runs alone, newest
+/// first (spec/cli.md, What a run needs).
 pub struct Tree {
     pub runs: Vec<RunView>,
-    /// Index into `runs`, depth, node, since.
-    pub rows: Vec<(usize, usize, Option<String>, Option<u64>)>,
+    pub rows: Vec<Row>,
+    pub flat: bool,
+}
+
+/// One run of a `list` or `status` tree: how deep it sits under the runs that started
+/// it, while it is unfinished its node and since when it has been there, its workflow,
+/// what it needs and the actor of its external step.
+pub struct Row {
+    /// Index into `runs`.
+    pub index: usize,
+    pub depth: usize,
+    pub node_id: Option<String>,
+    pub since_ms: Option<u64>,
+    pub workflow: Option<String>,
+    pub needs: Option<&'static str>,
+    pub actor: Option<String>,
 }
 
 impl Tree {
-    fn each(&self) -> impl Iterator<Item = TreeRun<'_>> {
-        self.rows.iter().map(|(i, depth, node, since)| TreeRun {
-            view: &self.runs[*i],
-            depth: *depth,
-            node_id: node.clone(),
-            since_ms: *since,
-        })
+    fn each(&self) -> impl Iterator<Item = (&RunView, &Row)> {
+        self.rows.iter().map(|row| (&self.runs[row.index], row))
     }
 
     pub fn json(&self) -> Value {
-        Value::Array(self.each().map(|r| tree_json(&r)).collect())
+        Value::Array(self.each().map(|(v, r)| tree_json(v, r)).collect())
     }
 
     /// One line per run, `indent` levels in, with times up to `now_ms`.
     pub fn text(&self, indent: usize, now_ms: u64) -> String {
+        if self.flat {
+            return self.flat_text(now_ms);
+        }
         let width = self
             .each()
-            .map(|r| 2 * (r.depth + indent) + r.view.key.run.len())
+            .map(|(v, r)| 2 * (r.depth + indent) + v.key.run.len())
             .max()
             .unwrap_or(0);
         let lines: Vec<String> = self
             .each()
-            .map(|r| tree_text(&r, indent, width, now_ms))
+            .map(|(v, r)| tree_text(v, r, indent, width, now_ms))
             .collect();
         lines.join("\n")
+    }
+
+    /// One line per unfinished run: the run, its workflow, its node, what it needs, how
+    /// long ago it last changed, its start key and the actor of its external step.
+    fn flat_text(&self, now_ms: u64) -> String {
+        let width = |f: &dyn Fn(&RunView, &Row) -> usize| {
+            self.each().map(|(v, r)| f(v, r)).max().unwrap_or(0)
+        };
+        let runs = width(&|v, _| v.key.run.len());
+        let workflows = width(&|_, r| r.workflow.as_deref().map_or(1, str::len));
+        let nodes = width(&|_, r| r.node_id.as_deref().map_or(1, str::len));
+        let lines: Vec<String> = self
+            .each()
+            .map(|(v, r)| {
+                let since = r.since_ms.map_or_else(
+                    || "-".to_string(),
+                    |s| duration_text(now_ms.saturating_sub(s)),
+                );
+                let actor = r
+                    .actor
+                    .as_deref()
+                    .map_or_else(String::new, |a| format!("  actor {a}"));
+                format!(
+                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}",
+                    v.key.run,
+                    r.workflow.as_deref().unwrap_or("-"),
+                    r.node_id.as_deref().unwrap_or("-"),
+                    r.needs.unwrap_or("-"),
+                    v.start_key
+                )
+            })
+            .collect();
+        lines.join("\n")
+    }
+}
+
+/// What an unfinished run needs from someone (spec/cli.md, What a run needs); `None`
+/// once it has finished. `step` is the external step it is at, if any.
+pub fn needs(view: &RunView, step: Option<&ExternalStep>) -> Option<&'static str> {
+    if view.quarantine.is_some() {
+        return Some("quarantined");
+    }
+    let pending = view.applied_sequence + 1 < view.next_sequence;
+    match view.status.as_str() {
+        "completed" | "failed" => None,
+        _ if pending => Some("working"),
+        "waiting" => Some("signal"),
+        "needs-intervention" => Some("stuck"),
+        _ => Some(match step.map(|s| s.state) {
+            Some(StepState::Ready) => "external-ready",
+            Some(StepState::Held) => "held",
+            None => "working",
+        }),
     }
 }
 
@@ -669,15 +848,6 @@ fn duration_text(ms: u64) -> String {
     }
 }
 
-/// One run of a `list` or `status` tree: how deep it sits under the runs that started
-/// it, and, while it is unfinished, its node and since when it has been there.
-struct TreeRun<'a> {
-    pub view: &'a RunView,
-    pub depth: usize,
-    pub node_id: Option<String>,
-    pub since_ms: Option<u64>,
-}
-
 /// `runs` as a tree, parents first, each with its depth. Under `root`, the runs it
 /// started and theirs, the direct children at depth 0; without it, every run, a run
 /// whose parent is not among `runs` at the top. Siblings keep the order of `runs`.
@@ -728,21 +898,21 @@ pub fn tree<'a>(runs: &'a [RunView], root: Option<&str>) -> Vec<(&'a RunView, us
     out
 }
 
-fn tree_json(run: &TreeRun<'_>) -> Value {
-    let v = run.view;
+fn tree_json(v: &RunView, run: &Row) -> Value {
     json!({
         "runId": v.key.run, "startKey": v.start_key, "status": v.status,
         "revision": v.revision.to_string(), "quarantined": v.quarantine.is_some(),
         "parent": parent_json(v), "depth": run.depth, "nodeId": run.node_id,
         "sinceMs": run.since_ms.map(|s| s.to_string()),
+        "workflow": run.workflow, "needs": run.needs,
+        "since": v.updated_at_ms.to_string(), "actor": run.actor,
     })
 }
 
 /// One line: the run indented under its parent, its status, node, time at the node,
 /// start key, and the parent's node that started it. `indent` levels go before every
 /// run; `width` is the width of the column of indented run IDs.
-fn tree_text(run: &TreeRun<'_>, indent: usize, width: usize, now_ms: u64) -> String {
-    let v = run.view;
+fn tree_text(v: &RunView, run: &Row, indent: usize, width: usize, now_ms: u64) -> String {
     let quarantined = if v.quarantine.is_some() {
         " quarantined"
     } else {

@@ -1618,6 +1618,77 @@ pub async fn s24_claimed_at(factory: &dyn StoreFactory) {
     assert_eq!(w.invocations().await[0].claimed_at_ms, Some(1_400));
 }
 
+/// S25: a run's `updatedAtMs` is the store time of its latest change: its creation, an
+/// appended event, a commit, a claim, a result, an expiry, a quarantine and a release
+/// each set it; a renewal does not.
+pub async fn s25_updated_at(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s25").await;
+    let updated = || async { w.run().await.updated_at_ms };
+    assert_eq!(updated().await, 1_000);
+
+    w.clock.set(1_100);
+    let invocation = w.scheduled(0).await;
+    assert_eq!(updated().await, 1_100, "a commit");
+    w.clock.set(1_200);
+    let first = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-1", &invocation, "w", 1_000))
+        .await
+        .expect("claim")
+        .value;
+    assert_eq!(updated().await, 1_200, "a claim");
+    w.clock.set(1_250);
+    w.store()
+        .heartbeat(heartbeat(&first.attempt, "renew-1", 1_000))
+        .await
+        .expect("heartbeat");
+    assert_eq!(updated().await, 1_200, "a renewal changes nothing");
+    w.clock.set(1_300);
+    w.store()
+        .finish_attempt(finish(&first.attempt, "finish-1", 1))
+        .await
+        .expect("finish");
+    assert_eq!(updated().await, 1_300, "a result");
+
+    w.clock.set(1_400);
+    w.commit("commit-2", vec![retry(&w.key, "a", 2, 0)]).await;
+    w.clock.set(1_500);
+    let second = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim-2", &invocation, "w", 1_000))
+        .await
+        .expect("claim")
+        .value;
+    w.clock.set(1_600);
+    w.store()
+        .expire_attempt(expire_for(
+            &second.attempt,
+            "abandon-2",
+            ExpireReason::Abandoned,
+        ))
+        .await
+        .expect("expire");
+    assert_eq!(updated().await, 1_600, "an expiry");
+    w.clock.set(1_700);
+    w.store()
+        .append_event(append(&w.key, "signal-1", "sig:1", json!(1)))
+        .await
+        .expect("append");
+    assert_eq!(updated().await, 1_700, "an event");
+    w.clock.set(1_800);
+    w.store()
+        .quarantine_run(quarantine(&w.key, "q-1", 2))
+        .await
+        .expect("quarantine");
+    assert_eq!(updated().await, 1_800, "a quarantine");
+    w.clock.set(1_900);
+    w.store()
+        .release_run(release(&w.key, "r-1"))
+        .await
+        .expect("release");
+    assert_eq!(updated().await, 1_900, "a release");
+}
+
 /// S23: the run keeps the parent it was created with; a repeat with another is a
 /// duplicate, and a run created without one shows none.
 pub async fn s23_parent(factory: &dyn StoreFactory) {
@@ -1669,7 +1740,7 @@ macro_rules! store_conformance_tests {
             s11_quarantine s12_finish_expire_race s13_create_run_repeat s14_append_limits
             s15_start_key_race s16_process_record s17_base_dir
             s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep
-            s22_params s23_parent s24_claimed_at);
+            s22_params s23_parent s24_claimed_at s25_updated_at);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

@@ -32,8 +32,8 @@ audit record of an expiry, the run's base folder, the artifact table with
 `get_artifact` and the run's artifact digest, the schema guard that names the version
 that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
-attempt, an invocation's node `params` in every claim, the run's parent, and scenarios
-S15 to S23; everything else is as in 0.1.
+attempt, an invocation's node `params` in every claim, the run's parent, the run's
+`updatedAtMs`, and scenarios S15 to S25; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -265,7 +265,10 @@ and are idempotent on an already matching state.
   nulls before its first claim, so a host can act on an attempt it did not claim. The
   reference is a credential: a host never prints the fence (host §2, Steps outside the worker).
   **0.2:** a run shows its parent, or null. **0.2:** an invocation shows its latest
-  attempt's `claimedAtMs`, or null before its first claim.
+  attempt's `claimedAtMs`, or null before its first claim. **0.2:** a run shows
+  `updatedAtMs`, the store time of its latest change: its creation, an appended event
+  (a signal, a resolution, a result or an expiry), a commit, a claim, a quarantine and
+  a release each set it to now; a renewal and `set_process` leave it.
 
 ## 3. SQLite adapter
 
@@ -350,6 +353,7 @@ Written once, generic over a store factory and a manual clock, in
 | S22 | One commit schedules an invocation with `params` and one without; the first is retried (0.2) | Each claim of the first, the retry's included, returns its `params`; the claim of the second returns null |
 | S23 | `create_run` with a parent, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first parent; the repeat is `duplicate`; a run created without one shows null |
 | S24 | An invocation before its claim, after it, after a replay of the claim, and after a retry's claim at a later time (0.2) | `list_invocations` shows `claimedAtMs` null, then the claim's time, the same time after the replay, then the retry's time |
+| S25 | A run created, committed, claimed, renewed, given a result, committed again, claimed and abandoned, given a signal, quarantined and released, each at a later time (0.2) | `get_run` shows `updatedAtMs` at the time of each change; the renewal leaves it |
 
 SQLite-specific, in the adapter crate:
 
