@@ -131,3 +131,52 @@ fn json_prints_one_object_per_change_and_one_result_on_stdout() {
     );
     assert_eq!(lines[4]["signal"], "approval");
 }
+
+/// Each `events` line without its sequence, its time and its ID; stream tails left out.
+fn events(stdout: &str) -> Vec<&str> {
+    stdout
+        .lines()
+        .filter(|line| !line.starts_with("      "))
+        .map(|line| {
+            let rest = line.trim_start().splitn(3, "  ").nth(2).unwrap();
+            rest.rsplit_once("  ").unwrap().0
+        })
+        .collect()
+}
+
+#[test]
+fn events_show_the_time_node_outcome_and_where_the_run_went() {
+    let dir = Dir::new("progress-events");
+    dir.folder("flow", &flow());
+    let out = dir.run(&args(&["run", "flow", "--key", "k"]));
+    assert_eq!(out.code(), Some(3), "{}{}", out.stdout, out.stderr);
+    let run = dir.run(&["--json", "list"]).json()["runs"][0]["runId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let signal = dir.run(&["signal", &run, "approval", "--outcome", "go"]);
+    assert_eq!(signal.code(), Some(0), "{}", signal.stderr);
+    let out = dir.run(&args(&["worker", "--run", &run, "--until-parked"]));
+    assert_eq!(out.code(), Some(0), "{}{}", out.stdout, out.stderr);
+
+    let out = dir.run(&["events", &run]);
+    assert_eq!(out.code(), Some(0), "{}", out.stderr);
+    assert_eq!(
+        events(&out.stdout),
+        [
+            "run.started            rev 1      build",
+            "activity.result        rev 2      build  failure: command.exit: exit code 1  \
+             activity.retry-scheduled",
+            "activity.result        rev 3      build  ok -> gate: {\"exitCode\":0,\"stderr\":\"\",\
+             \"stdout\":\"\",\"truncated\":false}; waiting for approval",
+            "signal.received        rev 4      gate   go -> done; completed",
+        ],
+        "{}",
+        out.stdout
+    );
+    let time = out.stdout.trim_start().split("  ").nth(1).unwrap();
+    assert!(
+        time.len() == 20 && time.ends_with('Z') && time.as_bytes()[10] == b'T',
+        "{time}"
+    );
+}

@@ -7,11 +7,14 @@
 //! as it commits; a reader of the store can find the same ones by replaying a run's
 //! events. This module only reads; it decides nothing.
 
+use std::collections::HashMap;
+
 use runspore_types::model::{
-    event_kind, ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, Node, RunResult,
-    RunStatus, State, Workflow,
+    event_kind, ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, InvocationResolved,
+    Node, OnInterventionFailed, Resolution, RunResult, RunStatus, SignalReceived, State, Workflow,
 };
 use runspore_types::store::RunKey;
+use serde_json::Value;
 
 use crate::arrival::taken;
 
@@ -84,6 +87,127 @@ impl Change {
 /// The first line of `text`, without the line break.
 pub fn first_line(text: &str) -> String {
     text.lines().next().unwrap_or_default().to_string()
+}
+
+/// What one consumed event was about, for a person reading a run's events
+/// (`spec/cli.md`, `events`), as Temporal's history shows each event's attributes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Happened {
+    /// The node the event was for: the start node of `run.started`, the step of the
+    /// invocation a result or a resolution names, the node a taken signal routed, the
+    /// step an `onIntervention` action told about. `None` for a buffered signal.
+    pub node_id: Option<String>,
+    /// The outcome the event carried: a result's outcome, or its status when it has
+    /// none (`failure`, `unknown`, `expired`); a signal's outcome; a resolution's
+    /// action, or its outcome when it completes.
+    pub outcome: Option<String>,
+    /// The first line of the event's error as `code: message`, or else of its output or
+    /// data as JSON, cut to [`DETAIL_CHARS`] characters.
+    pub detail: Option<String>,
+    /// What the transition that consumed the event changed.
+    pub changes: Vec<Change>,
+}
+
+/// The most characters [`Happened::detail`] keeps of a line.
+pub const DETAIL_CHARS: usize = 100;
+
+/// What the event of `kind` with `payload` was about; `before` and `after` are the
+/// snapshots around the transition that consumed it, and `nodes` the step of every
+/// invocation the run had until then, by invocation ID.
+pub fn happened(
+    workflow: &Workflow,
+    before: Option<&State>,
+    after: &State,
+    kind: &str,
+    payload: &[u8],
+    nodes: &HashMap<String, String>,
+) -> Happened {
+    let step = |id: &str| nodes.get(id).cloned();
+    let error = |e: &ErrorInfo| format!("{}: {}", e.code, first_line(&e.message));
+    let (node_id, outcome, detail) = match kind {
+        event_kind::RUN_STARTED => (Some(workflow.start.clone()), None, None),
+        event_kind::ACTIVITY_RESULT => match serde_json::from_slice::<ActivityResult>(payload) {
+            Ok(r) => {
+                let outcome = match r.status {
+                    AttemptStatus::Success => r.outcome.unwrap_or_else(|| "ok".to_string()),
+                    other => status(other).to_string(),
+                };
+                let detail = r.error.as_ref().map(error).or_else(|| data(&r.output));
+                (step(&r.invocation_id), Some(outcome), detail)
+            }
+            Err(_) => (None, None, None),
+        },
+        event_kind::SIGNAL_RECEIVED => match serde_json::from_slice::<SignalReceived>(payload) {
+            Ok(s) => {
+                let taken = before
+                    .filter(|b| b.status == RunStatus::Waiting)
+                    .and_then(|b| b.position.as_ref())
+                    .filter(|p| {
+                        matches!(workflow.nodes.get(&p.node_id),
+                                 Some(Node::AwaitSignal { signal, .. }) if *signal == s.name)
+                    })
+                    .map(|p| p.node_id.clone());
+                let outcome = s.outcome.unwrap_or_else(|| "received".to_string());
+                (taken, Some(outcome), data(&s.data))
+            }
+            Err(_) => (None, None, None),
+        },
+        event_kind::INVOCATION_RESOLVED => {
+            match serde_json::from_slice::<InvocationResolved>(payload) {
+                Ok(r) => {
+                    let (outcome, detail) = match &r.resolution {
+                        Resolution::Complete { outcome, output } => {
+                            (format!("complete {outcome}"), data(output))
+                        }
+                        Resolution::Retry => ("retry".to_string(), None),
+                        Resolution::Fail { error: e } => ("fail".to_string(), Some(error(e))),
+                    };
+                    (step(&r.invocation_id), Some(outcome), detail)
+                }
+                Err(_) => (None, None, None),
+            }
+        }
+        event_kind::ON_INTERVENTION_FAILED => {
+            match serde_json::from_slice::<OnInterventionFailed>(payload) {
+                Ok(f) => {
+                    let node = before.and_then(|b| {
+                        b.invocation
+                            .as_ref()
+                            .map(|i| i.node_id.clone())
+                            .or_else(|| b.position.as_ref().map(|p| p.node_id.clone()))
+                    });
+                    let detail = format!("onIntervention {}: {}", f.action, error(&f.error));
+                    (node, None, Some(detail))
+                }
+                Err(_) => (None, None, None),
+            }
+        }
+        _ => (None, None, None),
+    };
+    Happened {
+        node_id,
+        outcome,
+        detail: detail.map(|d| cut(&d)),
+        changes: changes(workflow, before, after, kind, payload),
+    }
+}
+
+/// The first line of an output or of signal data: the text itself, or else its JSON.
+/// `None` when there is none.
+fn data(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) => Some(first_line(text)).filter(|t| !t.is_empty()),
+        other => Some(other.to_string()),
+    }
+}
+
+/// `text` cut to [`DETAIL_CHARS`] characters, ending `…` when it was longer.
+fn cut(text: &str) -> String {
+    match text.char_indices().nth(DETAIL_CHARS) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_string(),
+    }
 }
 
 /// The changes of one committed transition from `before` (`None` for a run's first)
@@ -303,9 +427,18 @@ mod tests {
 
     /// Applies `events` with the native kernel; the changes of each transition.
     fn replay(workflow: &Value, events: &[(&str, Value)]) -> Vec<Vec<Change>> {
+        history(workflow, events)
+            .into_iter()
+            .map(|h| h.changes)
+            .collect()
+    }
+
+    /// Applies `events` with the native kernel; what each was about.
+    fn history(workflow: &Value, events: &[(&str, Value)]) -> Vec<Happened> {
         let graph = canonical::to_vec(workflow).unwrap();
         let parsed: Workflow = canonical::decode(&graph).unwrap();
         let mut before: Option<State> = None;
+        let mut nodes = HashMap::new();
         let mut snapshot: Option<Vec<u8>> = None;
         let started = json!({"tenant": "default", "runId": RUN, "input": null});
         let all = std::iter::once((event_kind::RUN_STARTED, started)).chain(events.iter().cloned());
@@ -333,7 +466,17 @@ mod tests {
             })
             .unwrap();
             let after: State = canonical::decode(&decision.snapshot).unwrap();
-            seen.push(changes(&parsed, before.as_ref(), &after, kind, &payload));
+            seen.push(happened(
+                &parsed,
+                before.as_ref(),
+                &after,
+                kind,
+                &payload,
+                &nodes,
+            ));
+            if let Some(i) = &after.invocation {
+                nodes.insert(i.invocation_id.clone(), i.node_id.clone());
+            }
             before = Some(after);
             snapshot = Some(decision.snapshot);
         }
@@ -474,6 +617,67 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// The node, outcome and detail of each event, without its changes.
+    fn said(happened: &Happened) -> (Option<&str>, Option<&str>, Option<&str>) {
+        (
+            happened.node_id.as_deref(),
+            happened.outcome.as_deref(),
+            happened.detail.as_deref(),
+        )
+    }
+
+    #[test]
+    fn each_event_names_its_node_its_outcome_and_its_first_line() {
+        let mut long = success("test", 2, 1, "red");
+        long.1["output"] = json!("x".repeat(DETAIL_CHARS + 5) + "\nsecond");
+        let seen = history(
+            &flow(),
+            &[
+                failure("build", 1, 1, true),
+                success("build", 1, 2, "ok"),
+                success("test", 1, 1, "red"),
+                success("build", 2, 1, "ok"),
+                long,
+                failure("build", 1, 2, true),
+                signal("go"),
+            ],
+        );
+        let said: Vec<_> = seen.iter().map(said).collect();
+        let cut = "x".repeat(DETAIL_CHARS) + "…";
+        assert_eq!(
+            said,
+            vec![
+                (Some("build"), None, None),
+                (
+                    Some("build"),
+                    Some("failure"),
+                    Some("command.exit: exit code 1")
+                ),
+                (Some("build"), Some("ok"), None),
+                (Some("test"), Some("red"), None),
+                (Some("build"), Some("ok"), None),
+                (Some("test"), Some("red"), Some(cut.as_str())),
+                // A stale result still names its step.
+                (
+                    Some("build"),
+                    Some("failure"),
+                    Some("command.exit: exit code 1")
+                ),
+                (Some("gate"), Some("go"), None),
+            ]
+        );
+        assert_eq!(
+            seen[5].changes,
+            vec![outcome("test", "red", "exhausted", "gate"), waiting()]
+        );
+    }
+
+    #[test]
+    fn a_buffered_signal_names_no_node() {
+        let seen = history(&flow(), &[signal("go")]);
+        assert_eq!(said(&seen[1]), (None, Some("go"), None));
     }
 
     #[test]
