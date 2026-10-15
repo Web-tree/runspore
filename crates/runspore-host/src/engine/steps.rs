@@ -68,6 +68,9 @@ pub struct AsyncStep {
     pub lease_until_ms: Option<u64>,
     /// While `capability-missing`: what this host lacks and what to restore.
     pub missing: Option<String>,
+    /// While held: the message of the latest `needs` line a watch this engine runs
+    /// printed, when the holder waits for a person (empty when the line had none).
+    pub waits: Option<String>,
 }
 
 /// What an actor gets from a claim: everything needed to do the step.
@@ -237,6 +240,7 @@ impl Engine {
             deadline_ms: None,
             lease_until_ms: None,
             missing: None,
+            waits: None,
         };
         // An async command is held only once its start has handed over: a pending one
         // waits for a worker, and a running one without a deadline is still starting
@@ -251,7 +255,14 @@ impl Engine {
             InvocationStatus::Pending => {}
             InvocationStatus::Running if !is_external && held_by_worker => return Ok(None),
             InvocationStatus::Running => {
-                step.state = StepState::Held;
+                // A held attempt this host can no longer look after the way the run
+                // recorded is left untouched as well.
+                step.state = match missing {
+                    Some(_) => StepState::CapabilityMissing,
+                    None => StepState::Held,
+                };
+                step.missing = missing;
+                step.waits = self.holder_waits(&view.key);
                 step.holder = invocation
                     .holder
                     .as_deref()
@@ -345,6 +356,20 @@ impl Engine {
                 step.state != StepState::Held
                     || !self.watches(&view.key, &step.invocation_id, step.attempt)
             }
+        })
+    }
+
+    /// Whether the run, `running` with no pending event, is at an async step that needs
+    /// someone: a ready external step, a step this host falls short of, or a held step
+    /// whose watch says that the holder waits for a person.
+    pub(super) async fn needs_someone(&self, view: &RunView) -> Result<bool, HostError> {
+        let pending = view.applied_sequence + 1 < view.next_sequence;
+        if pending || view.quarantine.is_some() || view.status != "running" {
+            return Ok(false);
+        }
+        Ok(match self.async_step(view).await? {
+            None => false,
+            Some(step) => step.state != StepState::Held || step.waits.is_some(),
         })
     }
 

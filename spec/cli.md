@@ -34,7 +34,7 @@ marked **0.2** below are new since 0.1.
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId> [--no-probe]` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs). It first probes a held async step; `--no-probe` reads the store only (§Steps outside the worker) |
 | `list [--unfinished]` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs); each with its workflow and what it needs. `--unfinished`: only the unfinished runs, newest first (§What a run needs) |
-| `continue [<runId>]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type (§What a run needs) |
+| `continue [<runId>] [--wait]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type. With `--wait`, follows the run past held async steps until it needs a person or has ended (§What a run needs) |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics. **0.2:** in text, each with its time, its node, its outcome, the arrow the run took and the first line of its error or output (§JSON output) |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
@@ -373,7 +373,7 @@ With `<runId>`, or the one unfinished run, it:
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
-   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
+   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, the message when its watch said that the holder waits for a person, and `spore step abandon <runId>` | 6 |
    | at a `capability-missing` step | the step and what this `spore` lacks and what to restore, as `status` gives it in `step.missing`; no command | 6 |
 
 A run that is finished already is shown as above, and nothing is worked. The JSON is
@@ -381,6 +381,36 @@ the `status` object `run` prints, with `needs` (null when finished) and `command
 commands of the table in the order given; `commands` is empty for a finished run. The
 commands name the run and nothing else, as in `status`. `continue` takes `run`'s
 interrupts: SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit 130.
+
+**`continue [<runId>] --wait`.** Follows the run until it needs a person or has
+ended, so a driver can start it in the background and act when it returns. It chooses
+the run, and treats a quarantined or finished run, as `continue` does, and it works
+the run the same way, except at a held async step, where `continue` would stop with
+exit 6 (host.md §2, `follow`):
+
+- **The step's action declares a watch.** It runs the watch, as `run` does, and goes
+  on when the watch reports. When the attempt stops being held first (an actor's
+  `spore step complete` won, the lease or deadline passed), it stops the watch with
+  its process group and goes on from the run's new state. A watch that ends without a
+  result leaves the attempt held, and the step is waited on as below until the next
+  sweep starts a watch again.
+- **The watch says that its holder waits for a person.** It stops the watch with its
+  process group, leaves the attempt held, and returns exit 6 with `needs` `held` and
+  the step's `waiting` `person` and `message` (§JSON output). The next `continue
+  --wait` starts the watch again.
+- **The step has no watch, or no watch runs.** It waits. It reloads the run every
+  `--poll-ms` (200 ms by default), so a report from elsewhere, such as `spore step
+  complete`, is applied within one poll. Its sweep expires the attempt at its lease
+  or deadline, after which the action's effect decides, and probes the attempt at
+  most every 30 s; a `dead` answer expires it at once.
+
+It returns, printing what is needed as `continue` does, only when the run has
+completed (exit 0), failed (1), waits for a signal (3), needs intervention (4), is
+quarantined (5), or is at a ready external step, at a held step whose holder waits for
+a person, or at a `capability-missing` step (6), or was cancelled (7). `--json` prints the same object as
+`continue --json`. SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit
+130: it stops claiming, gives in-flight work its grace period, and stops a running
+watch with its process group. The held attempt stays held for the next driver.
 
 **`step show [<runId>]`.** Prints the **step description** of the step the run is at,
 without claiming it, probing it or recording anything, so a person can read a
@@ -762,7 +792,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities) |
+| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities). For `continue --wait`, only a ready external step, a held step whose holder waits for a person (`step.waiting` is `person`), or a `capability-missing` step |
 | 7 | **0.2.** For `run`, `worker --until-parked` and `continue`: the run was cancelled, before the command or while it worked (§Cancelling a run) |
 | 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
@@ -919,6 +949,11 @@ command (or null), and the two times are those of the held attempt, null while r
 `state` is `capability-missing` when this `spore` lacks what the step's action needs
 (host.md §2, The handshake), and `missing` then says what it lacks and what to
 restore; `missing` is null in every other state.
+A held step whose watch, run by this `spore`, has said that its holder waits for a
+person (host.md §3, Async commands) also carries `"waiting": "person"` and `message`,
+the message of the watch's latest `needs` line (empty when the line had none). Only a
+command that works the run (`run`, `worker --until-parked`, `continue`) runs watches,
+so `status` never carries them.
 It never shows the step's input or the token.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.

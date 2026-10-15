@@ -1224,6 +1224,18 @@ impl Engine {
     /// its holder waits for a person), with no pending event and nothing of it in
     /// flight.
     pub async fn run_until_parked(&self, key: &RunKey) -> Result<RunView, HostError> {
+        self.until(key, false).await
+    }
+
+    /// Ticks as `run_until_parked`, but goes on past a held async step whose holder does
+    /// not wait for a person: returns only when the run has ended, waits for a signal,
+    /// needs intervention or is quarantined, or is at an async step that needs someone
+    /// (spec/host.md §2, `follow`).
+    pub async fn follow(&self, key: &RunKey) -> Result<RunView, HostError> {
+        self.until(key, true).await
+    }
+
+    async fn until(&self, key: &RunKey, follow: bool) -> Result<RunView, HostError> {
         let inner = &self.inner;
         loop {
             let report = self.tick().await?;
@@ -1231,7 +1243,12 @@ impl Engine {
             let view = self.get_run(key).await?.ok_or_else(|| {
                 HostError::invalid("run.not-found", format!("run {} does not exist", key.run))
             })?;
-            if !busy && (parked(&view) || self.waits_outside(&view).await?) {
+            let stops = parked(&view)
+                || match follow {
+                    true => self.needs_someone(&view).await?,
+                    false => self.waits_outside(&view).await?,
+                };
+            if !busy && stops {
                 return Ok(view);
             }
             if !report.did_work() {
