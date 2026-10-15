@@ -12,11 +12,18 @@ permissions:
   contents: read
 
 jobs:
-  # As the webtree-release App, so the release PR gets its pull_request checks.
+  # As the webtree-release App, so the release PR gets its pull_request checks. Its
+  # credentials come through AWS_ROLE, a secret of the release environment, which only
+  # main may use; `secrets: inherit` is the only way an environment secret reaches it.
   release-please:
     permissions:
       id-token: write
     uses: Web-tree/actions/.github/workflows/release-please.yml@v1
+    with:
+      aws-region: eu-central-1
+      app-id-parameter: /webtree/github/apps/webtree-release/app-id
+      private-key-parameter: /webtree/github/apps/webtree-release/private-key
+    secrets: inherit
 
   release:
     needs: release-please

@@ -163,7 +163,9 @@ and is removed once 0.2.0 is out.
 release-please runs as the org's `webtree-release` GitHub App, through the shared
 workflow `Web-tree/actions/.github/workflows/release-please.yml`. A release PR pushed
 with `GITHUB_TOKEN` would get its `pull_request` checks only after someone approves
-them; pushed by the App, it gets them like any other PR.
+them; pushed by the App, it gets them like any other PR. The job reads the App's
+credentials from AWS SSM through the role in `AWS_ROLE`, a secret of the `release`
+environment, which only `main` may deploy to.
 
 Merging the release PR is the release: the push of that merge makes release-please
 tag `v<version>` and create the GitHub release, with the PR's changelog as its notes.
