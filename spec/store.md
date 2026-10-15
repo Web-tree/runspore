@@ -33,7 +33,7 @@ audit record of an expiry, the run's base folder, the artifact table with
 that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
 attempt, an invocation's node `params` in every claim, the run's parent, the run's
-`updatedAtMs`, and scenarios S15 to S25; everything else is as in 0.1.
+`updatedAtMs`, `hold_attempt`, and scenarios S15 to S26; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -181,6 +181,24 @@ extendMs`. A replayed receipt returns the historical deadline and extends nothin
 **0.2:** an attempt with a `deadlineMs` is extended to the nearer of `now + extendMs`
 and `deadlineMs`, never past it. `heartbeat` is how a holder renews its lease.
 
+### hold_attempt (0.2)
+
+`hold_attempt(attempt, holder, leaseDurationMs, deadlineDurationMs)` hands a running
+attempt to a holder outside the worker: an async command whose start command has
+printed its holder handle (host §3, Async commands).
+
+Predicates: as `heartbeat`, the attempt is `running`, its ID, owner, and fence match,
+and now < `leaseUntilMs` (`stale` / `lease.lost` for all of these). A holder handle
+over 4 KiB is `quota` / `holder.too-large` and writes nothing.
+
+Writes: the attempt's `holder` (canonical JSON, kept and never read), `deadlineMs =
+now + deadlineDurationMs`, `leaseUntilMs` the nearer of `now + leaseDurationMs` and
+`deadlineMs`, and a null process record. Owner, fence and status are unchanged, so the
+attempt's reference still names it; from then on `heartbeat` renews it up to its
+deadline, and `finish_attempt` and `expire_attempt` end it as any attempt. Returns
+`{holder, leaseUntilMs, deadlineMs}`. A replayed receipt returns the historical value
+and writes nothing.
+
 ### set_process (0.2)
 
 `set_process(attempt, process)` stores the attempt's **process record**, the process
@@ -268,7 +286,10 @@ and are idempotent on an already matching state.
   attempt's `claimedAtMs`, or null before its first claim. **0.2:** a run shows
   `updatedAtMs`, the store time of its latest change: its creation, an appended event
   (a signal, a resolution, a result or an expiry), a commit, a claim, a quarantine and
-  a release each set it to now; a renewal and `set_process` leave it.
+  a release each set it to now; a renewal, `set_process` and `hold_attempt` leave it.
+  **0.2:** an invocation shows its input and its `params` as scheduled, the values
+  every claim returns, so a host can probe or watch an attempt it did not claim (host
+  §3, Async commands).
 
 ## 3. SQLite adapter
 
@@ -354,6 +375,7 @@ Written once, generic over a store factory and a manual clock, in
 | S23 | `create_run` with a parent, repeated with another, and without one (0.2) | `get_run` and `list_runs` show the first parent; the repeat is `duplicate`; a run created without one shows null |
 | S24 | An invocation before its claim, after it, after a replay of the claim, and after a retry's claim at a later time (0.2) | `list_invocations` shows `claimedAtMs` null, then the claim's time, the same time after the replay, then the retry's time |
 | S25 | A run created, committed, claimed, renewed, given a result, committed again, claimed and abandoned, given a signal, quarantined and released, each at a later time (0.2) | `get_run` shows `updatedAtMs` at the time of each change; the renewal leaves it |
+| S26 | `hold_attempt` on a running attempt with a process record; again with its request ID; with another owner, after its lease and after it finished; with a holder over 4 KiB (0.2) | The attempt keeps its reference and shows the holder, the deadline, the nearer lease and no process record in `list_invocations`, with the invocation's input and params; a renewal stops at the deadline and `finish_attempt` with the same reference is applied; the replay is `duplicate`; the others are `lease.lost`, and the large holder `holder.too-large`, writing nothing |
 
 SQLite-specific, in the adapter crate:
 

@@ -116,9 +116,12 @@ schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, and per kind: for
 `command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
 `native`, `function`; for `external` (0.2), `actor` and `async`), so a misspelt field
 is a problem rather than ignored. `async` takes `timeoutMs` and `leaseMs`, positive
-decimal strings, and `probe`, `watch`, `stop` and `channels`; an `external` action's
-`leaseMs` must be smaller than its `timeoutMs` (default `"3600000"`), else
-`action.lease-too-long` (host.md §2, Steps outside the worker).
+decimal strings, and `probe`, `watch`, `stop` and `channels`; an action's `leaseMs`
+must be smaller than its `timeoutMs` (default `"3600000"`), else
+`action.lease-too-long` (host.md §2, Steps outside the worker). `probe`, `watch` and
+`stop` are each `{"command": {"argv", "cwd", "env", "timeoutMs"}}`, `argv` required,
+and `channels` lists `"store"`, the one result channel a host offers (host.md §3,
+Async commands).
 
 The fields a node may carry depend on its kind in the DOT:
 
