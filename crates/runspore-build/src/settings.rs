@@ -200,10 +200,17 @@ pub struct Async {
 /// A program that looks after an async action's holder, named by how it is run.
 #[derive(JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("minProperties" = 1))]
 #[allow(dead_code)]
 struct Program {
     /// Run as a command, with the holder handle on stdin.
-    command: ProgramCommand,
+    #[serde(default)]
+    #[schemars(with = "ProgramCommand")]
+    command: Option<ProgramCommand>,
+    /// Run as a component. No `spore` runs one yet: `action.component-unsupported`.
+    #[serde(default)]
+    #[schemars(with = "BTreeMap<String, Value>")]
+    component: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(JsonSchema)]
@@ -229,13 +236,11 @@ struct ProgramCommand {
     timeout_ms: Option<String>,
 }
 
-/// A result channel: `store`, through `spore step complete` and `spore step fail`.
+/// A result channel. `spore` offers `store`, through `spore step complete` and
+/// `spore step fail`; a list with none it offers is `action.no-result-channel`.
 #[derive(JsonSchema)]
-#[serde(rename_all = "kebab-case")]
 #[allow(dead_code)]
-enum Channel {
-    Store,
-}
+struct Channel(String);
 
 /// Two mappings over the roots `stdout` (the parsed stdout), `input`, `params`, `run`
 /// and `step`.

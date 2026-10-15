@@ -15,8 +15,6 @@ use crate::command::{self, Program};
 pub const KIND: &str = "external";
 /// `async.timeoutMs` when the action gives none: one hour.
 pub const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
-/// The one result channel this host offers: the store, through `step complete|fail`.
-pub const STORE_CHANNEL: &str = "store";
 
 /// The `async` object of an external action or an async command: the attempt's bounds
 /// and the programs that look after its holder.
@@ -81,19 +79,13 @@ fn parse_async(spec: &Value) -> Result<Async, String> {
     let (probe, watch) = (program("probe")?, program("watch")?);
     // Kept for `cancel`; checked here so a bad one fails at start.
     program("stop")?;
+    // Which channels the host offers is the handshake's to check (spec/host.md §2).
     if let Some(channels) = spec.get("channels") {
-        let listed: Option<Vec<&str>> = channels
+        let strings = channels
             .as_array()
-            .and_then(|list| list.iter().map(Value::as_str).collect());
-        match listed {
-            Some(list) if list.contains(&STORE_CHANNEL) => {}
-            Some(list) => {
-                return Err(format!(
-                    "`async.channels` lists {}; this host offers `{STORE_CHANNEL}`",
-                    list.join(", ")
-                ))
-            }
-            None => return Err("`async.channels` must be an array of strings".into()),
+            .is_some_and(|list| list.iter().all(Value::is_string));
+        if !strings {
+            return Err("`async.channels` must be an array of strings".into());
         }
     }
     Ok(Async {
@@ -294,11 +286,14 @@ mod tests {
             json!({"watch": {"command": {"argv": ["w"], "shell": true}}}),
             json!({"watch": {"command": {"argv": ["w"], "timeoutMs": "0"}}}),
             json!({"stop": {"argv": ["s"]}}),
-            json!({"channels": ["nats"]}),
             json!({"channels": "store"}),
+            json!({"channels": [7]}),
         ] {
             let action = json!({"kind": "command", "argv": ["start"], "async": bad});
             assert!(async_of(&action).is_err(), "{action}");
         }
+        // Whether the host offers a channel is the handshake's to say, not the shape's.
+        let nats = json!({"kind": "command", "argv": ["start"], "async": {"channels": ["nats"]}});
+        assert!(async_of(&nats).is_ok());
     }
 }

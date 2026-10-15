@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fs::File;
 use std::future::Future;
@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use nix::fcntl::Flock;
 use runspore_types::artifact::{Artifact, Manifest};
 use runspore_types::canonical;
+use runspore_types::capabilities::{self, HostCapabilities, Shortfall};
 use runspore_types::digest::{self, ids};
 use runspore_types::failpoint;
 use runspore_types::model::{
@@ -39,9 +40,7 @@ mod slots;
 mod steps;
 
 pub use slots::HeldSlot;
-pub use steps::{
-    AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState, RESULT_CHANNEL,
-};
+pub use steps::{AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState};
 
 /// Quarantine code of a run whose stored artifact cannot be read.
 pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
@@ -49,6 +48,9 @@ pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
 pub const FILES_DIR_MISSING: &str = "host.files-dir-missing";
 /// Quarantine code of a run whose step files or work folder cannot be written.
 pub const FILES_UNWRITABLE: &str = "host.files-unwritable";
+/// The code of an `onIntervention` action this host has no runner for (spec/host.md §2,
+/// The handshake); 0.1 called it `host.runner-missing`.
+pub const CAPABILITY_MISSING: &str = "capability-missing";
 /// How often the sweep looks for step files no unfinished run needs.
 const FILES_SWEEP_EVERY: Duration = Duration::from_secs(30);
 
@@ -209,6 +211,8 @@ struct Runnable {
     visit: u32,
     base_dir: PathBuf,
     package: Arc<Package>,
+    /// The result channel the run recorded for the action, `None` when it recorded none.
+    result_channel: Option<String>,
 }
 
 /// What `dispatch` did with a due invocation.
@@ -329,6 +333,11 @@ struct Inner {
     watching: Mutex<HashMap<(RunKey, String), held::Waits>>,
     /// When the sweep last looked after the held async attempts.
     async_swept: Mutex<Option<Instant>>,
+    /// What this engine offers (spec/host.md §2, The handshake).
+    capabilities: HostCapabilities,
+    /// Invocations whose action this engine falls short of, which dispatch leaves for
+    /// a host that has the capability.
+    short: Mutex<HashSet<(RunKey, String)>>,
     tasks: Mutex<JoinSet<()>>,
     settled: Notify,
     /// Set by `shutdown`: no attempt is claimed from then on.
@@ -559,6 +568,8 @@ struct Checked {
     package: Vec<u8>,
     /// The package as JSON, for the checks `start` adds.
     workflow: Value,
+    /// The result channel picked for each async action, by action ID.
+    result_channels: BTreeMap<String, String>,
 }
 
 /// The checks of `validate_workflow`, with the dry transition fed `started`.
@@ -573,27 +584,32 @@ fn check_workflow(
         canonical::parse(workflow_json).map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
     let package =
         canonical::to_vec(&workflow).map_err(|e| HostError::invalid(e.code(), e.to_string()))?;
+    let offered = activities.capabilities();
+    let mut result_channels = BTreeMap::new();
     let actions = workflow.get("actions").and_then(Value::as_object);
     for (action_id, action) in actions.into_iter().flatten() {
         let kind = action.get("kind").and_then(Value::as_str).ok_or_else(|| {
             HostError::invalid("action.kind-missing", format!("action `{action_id}`"))
         })?;
-        // An external action has no runner: an actor outside the worker does it.
+        // First what the host offers, so a component program or a channel it lacks is
+        // named as such rather than as a malformed field.
+        if let Some(shortfall) = offered.shortfalls(action).into_iter().next() {
+            return Err(refused(action_id, &shortfall));
+        }
         if kind == external::KIND {
             external::parse(action).map_err(|e| {
                 HostError::invalid("action.invalid", format!("action `{action_id}`: {e}"))
             })?;
-            continue;
         }
-        let runner = activities.get(kind).ok_or_else(|| {
-            HostError::invalid(
-                "action.kind-unregistered",
-                format!("action `{action_id}` has kind `{kind}` with no runner"),
-            )
-        })?;
-        runner
-            .validate(action_id, action)
-            .map_err(|e| HostError::invalid("action.invalid", e))?;
+        if let (true, Some(channel)) = (capabilities::is_async(action), offered.pick(action)) {
+            result_channels.insert(action_id.clone(), channel);
+        }
+        // An external action has no runner: an actor outside the worker does it.
+        if let Some(runner) = activities.get(kind).filter(|_| kind != external::KIND) {
+            runner
+                .validate(action_id, action)
+                .map_err(|e| HostError::invalid("action.invalid", e))?;
+        }
     }
     reducer.transition(&TransitionRequest {
         identity: identity(reducer, &digest::package(&package)),
@@ -610,7 +626,20 @@ fn check_workflow(
     })?;
     check_schemas(&workflow)?;
     intervention::check(&workflow)?;
-    Ok(Checked { package, workflow })
+    Ok(Checked {
+        package,
+        workflow,
+        result_channels,
+    })
+}
+
+/// The refusal of an action the host falls short of: its code, the action, and what to
+/// configure.
+fn refused(action_id: &str, shortfall: &Shortfall) -> HostError {
+    HostError::invalid(
+        shortfall.code(),
+        format!("action `{action_id}`: {shortfall}"),
+    )
 }
 
 /// Every schema in a node's `outputSchemas` against the subset (spec/schema.md §1),
@@ -645,6 +674,7 @@ impl Engine {
         config: EngineConfig,
     ) -> Self {
         let (shutdown, _) = watch::channel(false);
+        let capabilities = activities.capabilities();
         Self {
             inner: Arc::new(Inner {
                 store,
@@ -661,6 +691,8 @@ impl Engine {
                 external: Mutex::new(HashSet::new()),
                 watching: Mutex::new(HashMap::new()),
                 async_swept: Mutex::new(None),
+                capabilities,
+                short: Mutex::new(HashSet::new()),
                 tasks: Mutex::new(JoinSet::new()),
                 settled: Notify::new(),
                 closing: AtomicBool::new(false),
@@ -673,6 +705,12 @@ impl Engine {
 
     pub fn config(&self) -> &EngineConfig {
         &self.inner.config
+    }
+
+    /// What this engine offers: the action kinds it runs, those it runs async, and its
+    /// result channels (spec/host.md §2, The handshake).
+    pub fn capabilities(&self) -> &HostCapabilities {
+        &self.inner.capabilities
     }
 
     /// Calls `observer` with every change of every run this engine commits from now on
@@ -759,7 +797,11 @@ impl Engine {
             run_id: key.run.clone(),
             input: input.clone(),
         })?;
-        let Checked { package, workflow } = check_workflow(
+        let Checked {
+            package,
+            workflow,
+            result_channels,
+        } = check_workflow(
             &*inner.reducer,
             &inner.activities,
             inner.config.limits,
@@ -786,6 +828,7 @@ impl Engine {
             base_dir: Some(inner.config.base_dir.to_string_lossy().into_owned()),
             artifact,
             parent: inner.config.parent.clone(),
+            result_channels,
         };
         let receipt = retry(true, || inner.store.create_run(request.clone())).await?;
         Ok(StartOutcome {
@@ -1538,8 +1581,9 @@ impl Inner {
         if this.closing.load(Ordering::SeqCst) || lock(&this.inflight).contains(&slot) {
             return Ok(Dispatched::Not);
         }
-        // An actor claims an external step; the worker never does.
-        if this.is_external(&key, &invocation_id).await {
+        // An actor claims an external step; the worker never does. A step this engine
+        // falls short of waits, untouched, for a host that has the capability.
+        if this.left_alone(&key, &invocation_id).await {
             return Ok(Dispatched::Not);
         }
         let delivery = match this.deliver(&key, &invocation_id).await? {
@@ -1589,12 +1633,14 @@ impl Inner {
         Ok(Dispatched::Started)
     }
 
-    /// The invocation's view and its run's package; `None` when either is gone.
+    /// The invocation's view, its run's package, and the result channel the run
+    /// recorded for the invocation's action; `None` when the run or the invocation is
+    /// gone.
     async fn invocation_package(
         &self,
         key: &RunKey,
         invocation_id: &str,
-    ) -> Result<Option<(InvocationView, Arc<Package>)>, HostError> {
+    ) -> Result<Option<(InvocationView, Arc<Package>, Option<String>)>, HostError> {
         let Some(view) = retry(false, || self.store.get_run(key)).await? else {
             return Ok(None);
         };
@@ -1603,7 +1649,59 @@ impl Inner {
         Ok(invocations
             .into_iter()
             .find(|i| i.invocation_id == invocation_id)
-            .map(|invocation| (invocation, package)))
+            .map(|invocation| {
+                let channel = view.result_channels.get(&invocation.action_id).cloned();
+                (invocation, package, channel)
+            }))
+    }
+
+    /// What this engine lacks to act on a step of `action`, as a sentence that says what
+    /// to restore; `None` when it lacks nothing. Checked with the channel the run
+    /// recorded, never a new pick, and with the runner's own `validate`, as at `start`
+    /// (spec/host.md §2, The handshake).
+    fn missing(&self, action_id: &str, action: &Value, channel: Option<&str>) -> Option<String> {
+        if let Some(shortfall) = self.capabilities.recheck(action, channel) {
+            return Some(shortfall.to_string());
+        }
+        let kind = action.get("kind").and_then(Value::as_str)?;
+        let runner = self
+            .activities
+            .get(kind)
+            .filter(|_| kind != external::KIND)?;
+        runner.validate(action_id, action).err().map(|e| {
+            format!("this host's `{kind}` runner cannot run it ({e}): use a host that can")
+        })
+    }
+
+    /// Whether dispatch leaves a due invocation alone: an `external` one, which an
+    /// actor claims, or one this engine falls short of, which waits untouched for a host
+    /// that has the capability. Remembered, since neither the action nor this engine's
+    /// runners change; a run that cannot be read is left to the usual dispatch.
+    async fn left_alone(&self, key: &RunKey, invocation_id: &str) -> bool {
+        let slot = (key.clone(), invocation_id.to_string());
+        if lock(&self.external).contains(&slot) || lock(&self.short).contains(&slot) {
+            return true;
+        }
+        let Ok(Some((invocation, package, channel))) =
+            self.invocation_package(key, invocation_id).await
+        else {
+            return false;
+        };
+        let Some(action) = package.actions.get(&invocation.action_id) else {
+            return false;
+        };
+        let left = if external::is_external(action) {
+            &self.external
+        } else if self
+            .missing(&invocation.action_id, action, channel.as_deref())
+            .is_some()
+        {
+            &self.short
+        } else {
+            return false;
+        };
+        lock(left).insert(slot);
+        true
     }
 
     /// Whether a due invocation belongs to an `external` action. Remembered, since an
@@ -1615,7 +1713,7 @@ impl Inner {
             return true;
         }
         let found = match self.invocation_package(key, invocation_id).await {
-            Ok(Some((invocation, package))) => package
+            Ok(Some((invocation, package, _))) => package
                 .actions
                 .get(&invocation.action_id)
                 .is_some_and(external::is_external),
@@ -1813,6 +1911,7 @@ impl Inner {
                 visit,
                 base_dir,
                 package,
+                result_channel,
             }) => {
                 let mut ctx = ActivityContext::new(
                     attempt.key.clone(),
@@ -1834,6 +1933,9 @@ impl Inner {
                 ctx.guard = self.config.guard.clone();
                 ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
                 ctx.token = Some(held::token(&claim));
+                if let Some(channel) = result_channel {
+                    ctx.result_channel = channel;
+                }
                 let (inner, held) = (self.clone(), attempt.clone());
                 ctx.process = Arc::new(move |process| {
                     let (inner, held) = (inner.clone(), held.clone());
@@ -1961,11 +2063,13 @@ impl Inner {
             .get("kind")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        // Dispatch claims nothing this engine has no runner for, so this is not reached;
+        // were it, the attempt is left to its lease rather than failed.
         let runner = self
             .activities
             .get(kind)
             .cloned()
-            .ok_or_else(|| fail("host.runner-missing", kind.to_string()))?;
+            .ok_or(Unrunnable::Abandon)?;
         let input = canonical::parse(&claim.input)
             .map_err(|e| fail("host.input-invalid", e.to_string()))?;
         let params = claim
@@ -1980,6 +2084,7 @@ impl Inner {
                 claim.attempt.invocation_id.clone(),
             )
         })?;
+        let result_channel = view.result_channels.get(&claim.action_id).cloned();
         let base_dir = view
             .base_dir
             .map_or_else(|| self.config.base_dir.clone(), PathBuf::from);
@@ -1991,6 +2096,7 @@ impl Inner {
             visit,
             base_dir,
             package,
+            result_channel,
         })
     }
 }

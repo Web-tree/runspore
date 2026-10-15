@@ -3,6 +3,7 @@
 //! One database file, shared by every `SqliteStore` opened on it, in this process or
 //! in others on the same host. Each mutation is one `BEGIN IMMEDIATE` transaction.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,7 +20,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -46,6 +47,8 @@ const UPGRADE_7: &str = "ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
     ALTER TABLE runs ADD COLUMN parent_node_id TEXT;";
 /// Upgrades a version 8 database to version 9: when an attempt was claimed.
 const UPGRADE_8: &str = "ALTER TABLE attempts ADD COLUMN claimed_at_ms INTEGER;";
+/// Upgrades a version 9 database to version 10: the run's result channels.
+const UPGRADE_9: &str = "ALTER TABLE runs ADD COLUMN result_channels TEXT;";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -360,7 +363,7 @@ fn cursor_u64(value: &Value, index: usize) -> R<i64> {
 const RUN_VIEW: &str = "SELECT tenant, run_id, start_key, package_digest, status, revision,
     applied_sequence, next_sequence, snapshot, snapshot_digest, quarantine_code,
     quarantine_details, quarantine_at_ms, created_at_ms, updated_at_ms, base_dir,
-    artifact_digest, parent_run_id, parent_node_id FROM runs";
+    artifact_digest, parent_run_id, parent_node_id, result_channels FROM runs";
 
 fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
     let code: Option<String> = r.get(10)?;
@@ -389,6 +392,12 @@ fn run_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunView> {
         parent: match (r.get(17)?, r.get(18)?) {
             (Some(run_id), Some(node_id)) => Some(RunParent { run_id, node_id }),
             _ => None,
+        },
+        result_channels: match r.get::<_, Option<String>>(19)? {
+            Some(text) => serde_json::from_str(&text).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(19, rusqlite::types::Type::Text, e.into())
+            })?,
+            None => BTreeMap::new(),
         },
     })
 }
@@ -440,6 +449,7 @@ impl SqliteStore {
                 (6, UPGRADE_6),
                 (7, UPGRADE_7),
                 (8, UPGRADE_8),
+                (9, UPGRADE_9),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -906,14 +916,16 @@ impl Store for SqliteStore {
                     )
                     .map_err(db)?;
                 }
+                let channels =
+                    (!q.result_channels.is_empty()).then(|| json!(q.result_channels).to_string());
                 c.execute(
                     "INSERT INTO runs (tenant, run_id, start_key, package_digest, started_digest,
                      status, revision, applied_sequence, next_sequence, last_accepted_ms,
                      snapshot, snapshot_digest, fence, quarantine_code, quarantine_details,
                      quarantine_at_ms, created_at_ms, updated_at_ms, base_dir, artifact_digest,
-                     parent_run_id, parent_node_id)
+                     parent_run_id, parent_node_id, result_channels)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'created', 0, 0, 1, 0, NULL, NULL, 0, NULL, NULL,
-                     NULL, ?6, ?6, ?7, ?8, ?9, ?10)",
+                     NULL, ?6, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         q.key.tenant,
                         q.key.run,
@@ -924,7 +936,8 @@ impl Store for SqliteStore {
                         q.base_dir,
                         q.artifact.as_ref().map(|a| &a.digest),
                         q.parent.as_ref().map(|p| &p.run_id),
-                        q.parent.as_ref().map(|p| &p.node_id)
+                        q.parent.as_ref().map(|p| &p.node_id),
+                        channels
                     ],
                 )
                 .map_err(db)?;

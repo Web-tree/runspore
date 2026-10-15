@@ -1,0 +1,10 @@
+── No result channel this spore offers ── action.no-result-channel/settings.json:8  action.no-result-channel
+Action "review" reports its result through ["nats"], and this spore offers only "store".
+
+  8 │       "async": { "channels": ["nats"] }
+    │                              ^^^^^^^^
+
+To fix: remove "channels", so the action reports through "store", or add "store" to the list.
+Why: the run records the channel it picks at start and keeps it, so the step must have one this spore offers.
+
+1 problem in review. Nothing was run.

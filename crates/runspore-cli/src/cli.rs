@@ -28,6 +28,17 @@ use crate::{project, view};
 
 pub const FORMAT: &str = "runspore.cli/0.2";
 
+/// The version of each contract this `spore` implements (spec/cli.md, Capabilities).
+const CONTRACTS: [(&str, &str); 7] = [
+    ("artifact", "0.1"),
+    ("cli", "0.2"),
+    ("dot", "0.2"),
+    ("host", "0.2"),
+    ("kernel", "0.2"),
+    ("schema", "0.2"),
+    ("store", "0.2"),
+];
+
 /// Exit code after a graceful shutdown on SIGINT, SIGTERM or SIGHUP: for `worker` always, for
 /// `run` and `worker --until-parked` when the run had not parked yet.
 const EXIT_INTERRUPTED: u8 = 130;
@@ -173,6 +184,9 @@ pub enum Command {
     /// the worker does.
     #[command(subcommand)]
     Step(StepCommand),
+    /// What this spore runs: its version, the contract versions, the action kinds, those
+    /// it runs async, and its result channels.
+    Capabilities,
 }
 
 #[derive(Subcommand)]
@@ -383,6 +397,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             return validate(cli, &project::workflow(workflow, &cwd)?, options);
         }
         Command::Explain { code } => return explain(code.as_deref()),
+        Command::Capabilities => return capabilities(),
         Command::Build {
             folder,
             output,
@@ -440,6 +455,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         Command::Init
         | Command::Validate { .. }
         | Command::Explain { .. }
+        | Command::Capabilities
         | Command::Build { .. }
         | Command::Start(_)
         | Command::Run(_) => unreachable!("handled above"),
@@ -597,6 +613,38 @@ fn registry() -> ActivityRegistry {
     ActivityRegistry::with_builtins(NativeRunner::new())
 }
 
+/// This machine, as the build checks what a run will need, with what this spore's
+/// engine offers.
+fn machine() -> Machine {
+    Machine::here().offering(registry().capabilities())
+}
+
+/// `spore capabilities`: the version, the contract versions, and the capability set
+/// (spec/cli.md, Capabilities). Reads no database.
+fn capabilities() -> Result<Output, Fail> {
+    let set = registry().capabilities();
+    let contracts: serde_json::Map<String, Value> = CONTRACTS
+        .iter()
+        .map(|(name, version)| (name.to_string(), json!(version)))
+        .collect();
+    let version = env!("CARGO_PKG_VERSION");
+    let line = |label: &str, items: &[String]| format!("{label:<15} {}\n", items.join(", "));
+    let contract_text: Vec<String> = CONTRACTS
+        .iter()
+        .map(|(name, version)| format!("{name} {version}"))
+        .collect();
+    let text = format!("{:<15} {version}\n", "version")
+        + &line("contracts", &contract_text)
+        + &line("action kinds", &set.action_kinds)
+        + &line("async kinds", &set.async_kinds)
+        + &line("result channels", &set.result_channels);
+    done(
+        json!({"version": version, "contracts": contracts, "actionKinds": set.action_kinds,
+               "asyncKinds": set.async_kinds, "resultChannels": set.result_channels}),
+        text,
+    )
+}
+
 /// The options of `validate`.
 struct Check {
     short: bool,
@@ -621,7 +669,7 @@ fn validate(cli: &Cli, workflow: &Path, options: Check) -> Result<Output, Fail> 
             );
         }
     };
-    let machine = Machine::here();
+    let machine = machine();
     let mut checked = runspore_build::check(&folder, &machine).map_err(build_fail)?;
     let mut fixed = Vec::new();
     let mut messages = String::new();
@@ -1737,7 +1785,7 @@ impl Source {
     /// Builds the folder in memory and loads its artifact like a prebuilt one. A folder
     /// with problems is refused with every one of them.
     fn folder(folder: &Path) -> Result<Self, Fail> {
-        let checked = runspore_build::check(folder, &Machine::here()).map_err(build_fail)?;
+        let checked = runspore_build::check(folder, &machine()).map_err(build_fail)?;
         let Some(built) = checked.built else {
             return Err(Fail::rejected(&checked.report));
         };

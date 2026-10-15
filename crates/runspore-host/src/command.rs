@@ -12,7 +12,6 @@ use tokio::process::Command;
 use runspore_types::store::MAX_HOLDER_BYTES;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRunner, ACTION_ROOTS};
-use crate::external::STORE_CHANNEL;
 use crate::guard::{Ending, Guarded};
 use crate::process;
 
@@ -673,7 +672,7 @@ impl ActivityRunner for CommandRunner {
             if let (true, Some(token)) = (spec.is_async, &ctx.token) {
                 command
                     .env("RUNSPORE_TOKEN", token)
-                    .env("RUNSPORE_RESULT_CHANNEL", STORE_CHANNEL);
+                    .env("RUNSPORE_RESULT_CHANNEL", &ctx.result_channel);
             }
         };
         if let Some(program) = ctx.files.as_ref().and_then(|f| f.program(&argv[0])) {

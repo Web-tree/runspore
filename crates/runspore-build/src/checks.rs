@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use runspore_types::artifact::{self, EntryKind, Owner};
+use runspore_types::capabilities::{Shortfall, COMPONENT};
 use runspore_types::model::{OUTCOME_EXHAUSTED, OUTCOME_FAILED, OUTCOME_OK};
 use serde_json::{json, Map, Value};
 
@@ -537,6 +538,7 @@ impl<'a> Checks<'a> {
                 self.argv_mappings(&at, &argv.clone(), id);
             }
         }
+        self.capabilities(id, &raw);
         // The rest reads the action as the build's own type, once it has that shape.
         let Ok(action) = serde_json::from_value::<Action>(raw.clone()) else {
             return;
@@ -611,6 +613,40 @@ impl<'a> Checks<'a> {
                     self.mapping(&field_at, mapping, None, id, &RESULT_ROOTS);
                 }
             }
+        }
+    }
+
+    /// The action against what the host offers (spec/host.md §2, The handshake). Its
+    /// kind, and which kinds take `async`, are the settings schema's to check: every kind
+    /// it allows, `spore` runs, and runs async where the schema allows `async`.
+    fn capabilities(&mut self, id: &str, raw: &Value) {
+        let Some(host) = self.machine.host.clone() else {
+            return;
+        };
+        let here = pointer("/actions", id);
+        let async_at = pointer(&here, "async");
+        if self.broken.touches(&async_at) || self.broken.touches(&pointer(&here, "kind")) {
+            return;
+        }
+        for shortfall in host.shortfalls(raw) {
+            let diagnostic = match shortfall {
+                Shortfall::Kind { .. }
+                | Shortfall::NotAsync { .. }
+                | Shortfall::ChannelGone { .. } => continue,
+                Shortfall::Component { program } => {
+                    let at = pointer(&pointer(&async_at, program), COMPONENT);
+                    Diagnostic::new("action.component-unsupported", At::key(&at))
+                        .arg("program", Arg::Computed(json!(program)))
+                }
+                Shortfall::NoChannel { offered, .. } => {
+                    let at = pointer(&async_at, "channels");
+                    Diagnostic::new("action.no-result-channel", At::value(&at))
+                        .arg("channels", Arg::Input(at.clone()))
+                        .arg("offered", Arg::Computed(json!(offered)))
+                        .fix(Fix::review(vec![Edit::Remove { at: at.clone() }]))
+                }
+            };
+            self.push(diagnostic);
         }
     }
 

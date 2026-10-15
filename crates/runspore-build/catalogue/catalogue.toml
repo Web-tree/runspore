@@ -962,6 +962,26 @@ args = { function = "input" }
 example = "action.unknown-function"
 
 [[code]]
+code = "action.component-unsupported"
+severity = "problem"
+title = '''Component program'''
+message = '''Action {action} names a component as its {program}, which this spore cannot run.'''
+fix = '''write it as a program instead, in the form {{"command": {{"argv": ["check-alive"]}}}}.'''
+why = '''spore refuses a workflow it cannot run as written before the run starts, never part way through.'''
+args = { program = "computed" }
+example = "action.component-unsupported"
+
+[[code]]
+code = "action.no-result-channel"
+severity = "problem"
+title = '''No result channel this spore offers'''
+message = '''Action {action} reports its result through {channels}, and this spore offers only {offered}.'''
+fix = '''remove "channels", so the action reports through "store", or add "store" to the list.'''
+why = '''the run records the channel it picks at start and keeps it, so the step must have one this spore offers.'''
+args = { channels = "input", offered = "computed" }
+example = "action.no-result-channel"
+
+[[code]]
 code = "command.no-argv"
 severity = "problem"
 title = '''Missing "argv"'''

@@ -170,7 +170,7 @@ async fn h31_a_start_command_hands_over_and_the_work_reports_with_its_token() {
     assert_eq!(w.parked().await, "running");
     let step = w.step().await.expect("at an async step");
     assert_eq!(
-        (step.kind, step.state, step.attempt, step.actor),
+        (step.kind.as_str(), step.state, step.attempt, step.actor),
         ("command", StepState::Held, 1, None)
     );
     assert_eq!(step.holder, Some(json!({"job": 7})));

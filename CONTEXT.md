@@ -140,6 +140,14 @@ _Avoid_: background step, detached step
 The way an async action's result reaches its run.
 _Avoid_: callback, webhook
 
+**Capability set**:
+What a host offers: the action kinds it runs, those it runs async, and its result channels. A workflow that asks for more is refused before its run starts; a run records the result channel picked for each async action.
+_Avoid_: features, feature flags
+
+**Capability-missing**:
+The state of a step whose action needs something this host lacks. The host leaves it untouched, never failed, until a host that has the capability serves the run.
+_Avoid_: runner missing, unsupported step
+
 **Holder**:
 Whoever a step in progress is waiting on: the worker for a sync action, the actor or the started job for an async one.
 _Avoid_: owner, assignee
