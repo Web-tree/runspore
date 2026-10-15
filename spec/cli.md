@@ -16,7 +16,7 @@ marked **0.2** below are new since 0.1.
 | `--json` | off | One JSON object on stdout instead of text |
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
 | `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
-| `--stop-grace-ms` | 5000 | Time a stopped command's process group gets between SIGTERM and SIGKILL (host.md §3, `stop_grace_ms`); used by `worker` and `run` |
+| `--stop-grace-ms` | 5000 | Time a stopped command's process group gets between SIGTERM and SIGKILL (host.md §3, `stop_grace_ms`); used by `worker`, `run` and `continue` |
 
 ## Commands
 
@@ -32,7 +32,8 @@ marked **0.2** below are new since 0.1.
 | `run <workflow> [--input …] [--key …] [--base-dir …]` | `start`, then works until the run is terminal or parked |
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId>` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs) |
-| `list` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs) |
+| `list [--unfinished]` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs); each with its workflow and what it needs. `--unfinished`: only the unfinished runs, newest first (§What a run needs) |
+| `continue [<runId>]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type (§What a run needs) |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics. **0.2:** in text, each with its time, its node, its outcome, the arrow the run took and the first line of its error or output (§JSON output) |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
@@ -42,6 +43,7 @@ marked **0.2** below are new since 0.1.
 | `step complete <token> --outcome <o> [--output <json>]` | **0.2.** Reports the step done with an outcome |
 | `step fail <token> --error <message> [--code <c>] [--retryable]` | **0.2.** Reports the step failed |
 | `step abandon <runId>` | **0.2.** Frees the run's held external step at once |
+| `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
 as [dot.md](dot.md) describes, or a workflow artifact (a file starting with the
@@ -207,7 +209,7 @@ its lease, and fences its holder out: a later report from it is `lease.lost`. Th
 action's effect then decides, as for any expiry. A run with no held external step
 exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
 
-The `step` commands are writing commands (§Project folder).
+The `step` commands but `step show` are writing commands (§Project folder).
 
 ## Runs that start runs (0.2)
 
@@ -240,9 +242,106 @@ per event of each unfinished run.
 In JSON, each entry of `runs` is `{"runId", "startKey", "status", "revision",
 "quarantined", "parent", "depth", "nodeId", "sinceMs"}`, in the tree's order. `parent`
 is `{"runId", "nodeId"}` or null; `depth` is 0 at the top and one more per level;
-`nodeId` and `sinceMs` are null at no node. `status` carries the run's `parent` and,
+`nodeId` and `sinceMs` are null at no node. Each entry also carries `workflow`,
+`needs`, `since` and `actor` (§What a run needs). `status` carries the run's `parent` and,
 as `children`, the runs below it in the same form and order, its direct children at
 depth 0; its text lists them under `children`.
+
+## What a run needs (0.2)
+
+An **unfinished run** is one that has not completed or failed. What it needs from
+someone is one of:
+
+| `needs` | When |
+| --- | --- |
+| `quarantined` | The run is quarantined, whatever else holds |
+| `working` | A worker has something to do: the run has not taken its first turn, it has an event not yet applied (a signal already sent to the node it waits at, for one), or it is `running` at a step a worker runs |
+| `signal` | It waits at an await-signal node, with no signal for it stored |
+| `stuck` | It needs intervention: a stuck step, or an unsafe step whose outcome is unknown |
+| `external-ready` | It is at an external step nobody holds (§Steps outside the worker) |
+| `held` | It is at an external step an actor holds |
+
+**`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
+was created), one line each and not as a tree: the run, its workflow, its node, what
+it needs, how long ago it last changed, its start key, and the actor of an external
+step:
+
+```text
+run_9a…  coding-loop  review     signal              2m10s  ticket-148
+run_4f…  build        tickets    held                  12s  build  actor reviewer
+```
+
+Each row of `list`, with or without `--unfinished`, carries beside the fields of §Runs
+that start runs: `workflow`, the name of the run's workflow (its graph id, kernel.md
+§2); `needs`, as above, null for a finished run; `since`, when the run last changed,
+the run's `updatedAtMs` (store.md §2), so a claim or an expiry counts as a change; and
+`actor`, the label of the external step it is at (`external-ready` or `held`), else
+null. With `--unfinished`, `depth` is 0.
+
+**`continue [<runId>]`.** Drives one unfinished run: it does the next thing the run
+needs, or says exactly what a person must do. Without `<runId>`:
+
+| Unfinished runs | What it does | Exit |
+| --- | --- | --- |
+| none | Prints `nothing to continue` and the workflows of the project folder (`.spore/workflows/`, found by walking up), so a person sees what can be started. JSON: `{"runs": [], "workflows": [{"name", "folder"}]}` | 0 |
+| several | Changes nothing. Exits with `run.several`: the runs as `list --unfinished` lists them, and how to name one. JSON details: `{"db", "runs"}`, the rows of `list --unfinished` | 2 |
+| one | Continues that run, as below | as below |
+
+With `<runId>`, or the one unfinished run, it:
+
+1. **Quarantined:** works nothing. It prints the quarantine's code and details and
+   `spore release <runId>`, and exits 5.
+2. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
+   parked, printing its progress on stderr (§Progress). Like `run`, it works as a
+   whole worker, so other runs of the database that fall due meanwhile move on too. On the way it sweeps attempts
+   as a worker does: a held external step whose lease or deadline has passed is
+   expired, and its action's effect decides. A held step is probed when its action has
+   a probe this host runs (host.md §2); a `dead` answer expires it with reason
+   `probe-dead`, and the run goes on.
+3. **Prints what is needed**, and exits as `run` does:
+
+   | The run | It prints | Exit |
+   | --- | --- | --- |
+   | completed | the end node | 0 |
+   | failed | the error | 1 |
+   | waiting for a signal | the node and the signal, `spore step show <runId>`, and one `spore signal` per outcome the node routes, as `status` gives them | 3 |
+   | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
+   | quarantined while it worked | as in 1 | 5 |
+   | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
+   | at a held external step | the step, the actor label, the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
+
+A run that is finished already is shown as above, and nothing is worked. The JSON is
+the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
+commands of the table in the order given; `commands` is empty for a finished run. The
+commands name the run and nothing else, as in `status`. `continue` takes `run`'s
+interrupts: SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit 130.
+
+**`step show [<runId>]`.** Prints the **step description** of the step the run is at,
+without claiming it, probing it or recording anything, so a person can read a
+decision's instructions before answering it. Without `<runId>` it takes the one
+unfinished run; with none it exits 2 with `run.none-unfinished`, and with several it
+exits 2 with `run.several`, as `continue` does. JSON:
+
+```json
+{"format": "runspore.cli/0.2", "runId": "run_…", "nodeId": "review",
+ "nodeKind": "await-signal", "activationId": "review/1", "actionId": null,
+ "signal": "approval", "outcomes": ["approved", "rejected"],
+ "outputSchemas": {"rejected": {…}}, "files": "/…/steps/…/review",
+ "instructions": "/…/steps/…/review/instructions/review.md",
+ "from": {"nodeId": "test", "outcome": "ok"}}
+```
+
+`nodeKind` is `activity` or `await-signal`. An activity has `actionId` and the
+action's `outcomes`; an await-signal node has `signal` and the outcomes it routes but
+`exhausted`, the same ones `status` lists. `outputSchemas` is the node's, `{}` without
+them. `files` and `instructions` are the step's files folder and its instructions
+file (host.md §3), null when it has none; the files are checked, or made again, as
+before a dispatch. `from` is the arrow into the node, as `status` gives it in
+`position.from`. Text mode prints the same, and then the instructions themselves. A
+run that is finished, or not at an activity or await-signal node, exits 2 with
+`step.none`. When the step files cannot be made, `step show` exits 10 with the code a
+dispatch would quarantine with (`artifact.unreadable`, `host.files-unwritable`) and
+leaves the run as it is; only a dispatch or a claim quarantines.
 
 ## Validation (0.2)
 
@@ -433,10 +532,12 @@ database is `<dir>/.spore/runspore.db`, add whichever of these lines are missing
 every other line, and create the file if it is absent.
 
 **Only writing commands create a database.** The writing commands are `start`, `run`,
-`worker`, `signal`, `resolve`, `release` and `step`. The read-only commands `status`, `list`
-and `events` treat a missing database as empty: `list` shows no runs, and `status` and
-`events` exit 2 with `run.not-found`. They never create the file. `validate` and
-`init` open no database.
+`worker`, `signal`, `resolve`, `release`, `continue` and `step` but `step show`. The
+read-only commands `status`, `list`, `events` and `step show` treat a missing database
+as empty: `list` shows no runs, `status`, `events` and `step show <runId>` exit 2 with
+`run.not-found`, and `step show` alone finds no unfinished run. `continue` on a
+missing database has nothing to continue, and says so as below. None of them creates
+the file. `validate` and `init` open no database.
 
 **Steps reach the run's database.** Every program the host starts gets `RUNSPORE_DB`,
 the absolute path of the database the worker uses (host.md §3). A `spore` call from
@@ -546,14 +647,14 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Success. For `run` and `worker --until-parked`: the run completed |
+| 0 | Success. For `run`, `worker --until-parked` and `continue`: the run completed |
 | 1 | The run failed |
 | 2 | Usage or validation error; for `validate`, a problem, or a warning with `--strict` |
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 6 | **0.2.** The run is waiting on an external step: an actor must claim it or report it |
-| 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version) |
+| 6 | **0.2.** The run is waiting on an external step: an actor must claim it or report it, or, for a held step, a person may abandon it |
+| 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
 ## JSON output

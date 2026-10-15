@@ -4,13 +4,20 @@
 use std::path::PathBuf;
 
 use runspore_types::canonical;
-use runspore_types::model::{ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, State};
+use runspore_types::model::{
+    ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, State, OUTCOME_EXHAUSTED,
+};
 use runspore_types::store::*;
 use serde_json::{json, Value};
 
-use super::{evidence, mutation, retry, Engine, Undeliverable};
+use super::{
+    evidence, mutation, retry, Engine, Undeliverable, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
+    FILES_UNWRITABLE,
+};
+use crate::arrival::Arrow;
 use crate::error::HostError;
 use crate::external::{self, External, StepToken};
+use crate::files::Unmade;
 
 /// The result channel a claim reports through: the store, by `step complete` or
 /// `step fail`.
@@ -96,6 +103,30 @@ pub struct StepRenewed {
     pub deadline_ms: Option<u64>,
 }
 
+/// The step a run is at, as `spore step show` describes it: never its input or token.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepDescription {
+    pub key: RunKey,
+    pub node_id: String,
+    /// `activity` or `await-signal`.
+    pub node_kind: String,
+    pub activation_id: String,
+    /// The action of an activity node.
+    pub action_id: Option<String>,
+    /// The signal an await-signal node waits for.
+    pub signal: Option<String>,
+    /// The action's outcomes, or the outcomes the node routes but `exhausted`.
+    pub outcomes: Vec<String>,
+    /// The node's `outputSchemas`, or an empty object.
+    pub output_schemas: Value,
+    /// The step files folder and its instructions file, when the run has an artifact.
+    pub files: Option<PathBuf>,
+    pub instructions: Option<PathBuf>,
+    /// The arrow that brought the run to the node, `None` at the start node's first
+    /// activation.
+    pub from: Option<Arrow>,
+}
+
 /// What a claim hands the actor from the package.
 struct Wanted {
     outcomes: Vec<String>,
@@ -112,6 +143,18 @@ struct Held {
     outcomes: Vec<String>,
     schemas: Value,
     deadline_ms: Option<u64>,
+}
+
+/// Step files that could not be made, under the code a dispatch would quarantine with.
+fn unmade(unmade: Unmade) -> HostError {
+    match unmade {
+        Unmade::Unreadable(details) => HostError::invalid(ARTIFACT_UNREADABLE, details),
+        Unmade::Unwritable(details) => HostError::invalid(FILES_UNWRITABLE, details),
+        Unmade::DirMissing => HostError::invalid(
+            FILES_DIR_MISSING,
+            "the run's workflow declares files, and the engine has no files_dir",
+        ),
+    }
 }
 
 fn token_invalid(message: impl Into<String>) -> HostError {
@@ -198,6 +241,69 @@ impl Engine {
             InvocationStatus::Settled => return Ok(None),
         }
         Ok(Some(step))
+    }
+
+    /// The step the run is at, without claiming, probing or recording anything; `None`
+    /// when the run is finished or not at an activity or await-signal node. The step
+    /// files are checked, or made again, as before a dispatch; when they cannot be, the
+    /// error is returned and the run is left as it is.
+    pub async fn describe_step(
+        &self,
+        view: &RunView,
+    ) -> Result<Option<StepDescription>, HostError> {
+        let state: Option<State> = view
+            .snapshot
+            .as_deref()
+            .and_then(|bytes| canonical::decode(bytes).ok());
+        let Some(position) = state
+            .filter(|s| !s.status.is_terminal())
+            .and_then(|s| s.position)
+        else {
+            return Ok(None);
+        };
+        let package = self.inner.package(&view.package_digest).await?;
+        let Some(node) = package.nodes.get(&position.node_id) else {
+            return Ok(None);
+        };
+        let kind = node["kind"].as_str().unwrap_or_default();
+        let (action_id, signal, outcomes) = match kind {
+            "activity" => {
+                let action_id = node["action"].as_str().unwrap_or_default().to_string();
+                let action = package.actions.get(&action_id).unwrap_or(&Value::Null);
+                (Some(action_id), None, outcomes(action))
+            }
+            "await-signal" => {
+                let routed = node["outcomes"].as_object().into_iter().flatten();
+                let routed = routed
+                    .map(|(outcome, _)| outcome.clone())
+                    .filter(|outcome| outcome != OUTCOME_EXHAUSTED);
+                let signal = node["signal"].as_str().map(String::from);
+                (None, signal, routed.collect())
+            }
+            _ => return Ok(None),
+        };
+        let made = self
+            .inner
+            .step_files(view, &position.node_id, action_id.as_deref())
+            .await
+            .map_err(unmade)?;
+        let files = made.map(|(files, _lock)| files);
+        Ok(Some(StepDescription {
+            key: view.key.clone(),
+            node_id: position.node_id,
+            node_kind: kind.to_string(),
+            activation_id: position.activation_id,
+            action_id,
+            signal,
+            outcomes,
+            output_schemas: node
+                .get("outputSchemas")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+            files: files.as_ref().map(|f| f.dir.clone()),
+            instructions: files.and_then(|f| f.instructions),
+            from: self.arrival(view).await?.from,
+        }))
     }
 
     /// Whether the run waits for an actor: it is `running` at an external step with no

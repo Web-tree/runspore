@@ -23,8 +23,8 @@ pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
 pub use engine::{
     validate_workflow, Engine, EngineConfig, ExternalStep, HeldSlot, Observer, RunIds,
-    StartOutcome, StepClaim, StepRenewed, StepReport, StepState, TickReport, ARTIFACT_UNREADABLE,
-    FILES_DIR_MISSING, FILES_UNWRITABLE, RESULT_CHANNEL,
+    StartOutcome, StepClaim, StepDescription, StepRenewed, StepReport, StepState, TickReport,
+    ARTIFACT_UNREADABLE, FILES_DIR_MISSING, FILES_UNWRITABLE, RESULT_CHANNEL,
 };
 pub use error::{HostError, Unrouted};
 pub use external::{StepToken, DEFAULT_TIMEOUT_MS as EXTERNAL_DEFAULT_TIMEOUT_MS};

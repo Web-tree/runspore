@@ -286,20 +286,10 @@ pub fn workflow(arg: &Path, cwd: &Path) -> Result<PathBuf, Fail> {
         ));
     };
     let workflows = root.join(FOLDER).join(WORKFLOWS);
-    let mut folders: Vec<PathBuf> = std::fs::read_dir(&workflows)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-                .collect()
-        })
-        .unwrap_or_default();
-    folders.sort();
     let mut names = Vec::new();
     let mut matches = Vec::new();
     let mut broken = None;
-    for folder in folders {
+    for folder in folders(&workflows) {
         match runspore_build::name(&folder) {
             Ok(found) if found == name => matches.push(folder),
             Ok(found) => names.push(found),
@@ -337,4 +327,33 @@ pub fn workflow(arg: &Path, cwd: &Path) -> Result<PathBuf, Fail> {
             ))
         }
     }
+}
+
+/// The folders in `workflows`, sorted.
+fn folders(workflows: &Path) -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = std::fs::read_dir(workflows)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
+        })
+        .unwrap_or_default();
+    folders.sort();
+    folders
+}
+
+/// The workflows of the project folder found by walking up from `cwd`, by name, each
+/// with its folder; a folder whose name cannot be read is left out.
+pub fn workflows(cwd: &Path) -> Vec<(String, PathBuf)> {
+    let Some(root) = find(cwd) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, PathBuf)> = folders(&root.join(FOLDER).join(WORKFLOWS))
+        .into_iter()
+        .filter_map(|folder| Some((runspore_build::name(&folder).ok()?, folder)))
+        .collect();
+    found.sort();
+    found
 }

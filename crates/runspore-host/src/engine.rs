@@ -38,7 +38,9 @@ mod slots;
 mod steps;
 
 pub use slots::HeldSlot;
-pub use steps::{ExternalStep, StepClaim, StepRenewed, StepReport, StepState, RESULT_CHANNEL};
+pub use steps::{
+    ExternalStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState, RESULT_CHANNEL,
+};
 
 /// Quarantine code of a run whose stored artifact cannot be read.
 pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
@@ -1620,16 +1622,31 @@ impl Inner {
     ) -> Result<Delivery, Unmade> {
         let dir = self.files.as_ref().expect("checked by the caller");
         let work_dir = Some(dir.work_dir(&view.key.run, &invocation.invocation_id)?);
+        let made = self
+            .step_files(view, &invocation.node_id, Some(&invocation.action_id))
+            .await?;
+        let (files, lock) = made.map_or((None, None), |(files, lock)| (Some(files), Some(lock)));
+        Ok(Delivery {
+            files,
+            work_dir,
+            _lock: lock,
+        })
+    }
+
+    /// The step files of `node`, whose action is `action`, checked or made again, with
+    /// the artifact's lock held shared; `None` for a run with no artifact.
+    async fn step_files(
+        &self,
+        view: &RunView,
+        node: &str,
+        action: Option<&str>,
+    ) -> Result<Option<(StepFiles, Flock<File>)>, Unmade> {
+        let dir = self.files.as_ref().ok_or(Unmade::DirMissing)?;
         let Some(artifact) = view.artifact_digest.as_deref() else {
-            return Ok(Delivery {
-                work_dir,
-                ..Delivery::default()
-            });
+            return Ok(None);
         };
         let manifest = self.manifest(artifact).await?;
-        let node = &invocation.node_id;
-        let (wanted, instructions, assets) =
-            files::wanted(&manifest, node, Some(&invocation.action_id));
+        let (wanted, instructions, assets) = files::wanted(&manifest, node, action);
         let step_dir = dir.step_dir(artifact, node)?;
         let lock = loop {
             // A sweep holds the lock exclusive only while it reads the runs.
@@ -1643,15 +1660,12 @@ impl Inner {
             let mut reader = ArtifactReader::open(&bytes)?;
             files::make(&step_dir, &wanted, |digest| reader.entry(digest))?;
         }
-        Ok(Delivery {
-            files: Some(StepFiles {
-                instructions: instructions.map(|path| step_dir.join(path)),
-                dir: step_dir,
-                assets,
-            }),
-            work_dir,
-            _lock: Some(lock),
-        })
+        let files = StepFiles {
+            instructions: instructions.map(|path| step_dir.join(path)),
+            dir: step_dir,
+            assets,
+        };
+        Ok(Some((files, lock)))
     }
 
     /// The stored artifact's bytes, checked against its digest.

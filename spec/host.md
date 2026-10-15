@@ -307,6 +307,14 @@ nothing to do until an actor reports or the attempt expires.
 `held`, the attempt number, and while held the holder handle, `deadlineMs` and
 `leaseUntilMs`. It never shows the input, the owner or the fence.
 
+**Describing a step (0.2).** `Engine::describe_step(view)` describes the step an
+unfinished run is at, an activity or an await-signal node, without claiming, probing
+or recording anything: its node, kind and activation, its action or signal, its
+outcomes and `outputSchemas`, its step files and instructions file (§3), and the arrow
+into it. It checks, or makes again, the step files as a dispatch does; when they cannot
+be made it returns the code a dispatch would quarantine with, and leaves the run as it
+is. It is `None` for a finished run or any other node.
+
 **Client operations.** Each takes or returns a **token**: the claimed attempt's
 reference (run, invocation, attempt number, owner and fence) as one string. Only its
 bearer can renew, complete or fail the attempt.
