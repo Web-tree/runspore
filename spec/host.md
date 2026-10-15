@@ -243,6 +243,17 @@ cancelled, by any process, once its in-flight attempts have stopped. **0.2:** or
 an async step (Steps outside the worker, below) that this engine does not watch, or
 whose watch has said that its holder waits for a person (§3, Async commands).
 
+**0.2:** `follow(key)` ticks as `run_until_parked` does, but goes on past a held async
+step whose holder does not wait for a person: it returns only when the run is
+terminal, `waiting`, `needs-intervention` or quarantined, or at an async step that
+needs someone: a ready external step, a step this host falls short of (The
+handshake, below), or a held step whose watch has said that its holder waits for a
+person. While the step is held it keeps ticking, sleeping `poll_ms` after a tick that
+did nothing, so a report from elsewhere is applied within one poll; its sweep expires
+the attempt at its lease or deadline, and probes and watches it at most every 30 s
+(§2 `tick`). `async_step` reports a held step whose watch said so with that watch's
+message.
+
 **0.2:** shutdown stops every watch the engine runs with its process group; the
 attempts they watched stay held for the next worker.
 

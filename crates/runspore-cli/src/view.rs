@@ -36,11 +36,16 @@ pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
 /// lacks a capability for, or null. Never its input or token.
 fn step_json(step: Option<&AsyncStep>) -> Value {
     step.map_or(Value::Null, |s| {
-        json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
+        let mut json = json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
                "deadlineMs": s.deadline_ms.map(|d| d.to_string()),
                "leaseUntilMs": s.lease_until_ms.map(|l| l.to_string()),
-               "missing": s.missing})
+               "missing": s.missing});
+        if let Some(message) = &s.waits {
+            json["waiting"] = json!("person");
+            json["message"] = json!(message);
+        }
+        json
     })
 }
 
@@ -65,7 +70,18 @@ fn step_text(step: Option<&AsyncStep>) -> String {
     if let Some(missing) = &s.missing {
         text += &format!("missing    {missing}\n");
     }
+    if let Some(message) = &s.waits {
+        text += &format!("waiting    for a person{}\n", told(message));
+    }
     text
+}
+
+/// A watch's message after a colon, or nothing when it gave none.
+fn told(message: &str) -> String {
+    match message {
+        "" => String::new(),
+        message => format!(": {message}"),
+    }
 }
 
 fn state(view: &RunView) -> Option<State> {
@@ -242,6 +258,9 @@ impl Shown {
                     }
                     if let Some(deadline) = step.deadline_ms {
                         head += &format!(", deadline {}", utc_text(deadline));
+                    }
+                    if let Some(message) = &step.waits {
+                        head += &format!("; it waits for a person{}", told(message));
                     }
                 }
                 (head, vec![format!("spore step abandon {run}")])

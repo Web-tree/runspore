@@ -147,7 +147,12 @@ pub enum Command {
     },
     /// Do the next thing a run needs, then print what a person must type: the run's,
     /// or the only unfinished one.
-    Continue { run_id: Option<String> },
+    Continue {
+        run_id: Option<String>,
+        /// Follow the run past held async steps until it needs a person or has ended.
+        #[arg(long)]
+        wait: bool,
+    },
     /// The run's events in order, with the revision that consumed each.
     Events { run_id: String },
     /// Deliver a signal. Repeating a message ID is a no-op.
@@ -504,7 +509,9 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             done(json, shown.text(&view))
         }
         Command::List { unfinished } => list(&engine, &db, *unfinished).await,
-        Command::Continue { run_id } => continue_run(&engine, &db, &cwd, run_id.as_deref()).await,
+        Command::Continue { run_id, wait } => {
+            continue_run(&engine, &db, &cwd, run_id.as_deref(), *wait).await
+        }
         Command::Events { run_id } => events(&engine, run_id).await,
         Command::Signal {
             run_id,
@@ -816,12 +823,13 @@ fn explain(code: Option<&str>) -> Result<Output, Fail> {
 fn missing_database(command: &Command, db: &Path, cwd: &Path) -> Result<Output, Fail> {
     match command {
         Command::List { .. } => done(json!({"db": db, "runs": []}), String::new()),
-        Command::Continue { run_id: None } => Ok(nothing_to_continue(cwd)),
+        Command::Continue { run_id: None, .. } => Ok(nothing_to_continue(cwd)),
         Command::Step(StepCommand::Show { run_id: None }) => Err(none_unfinished("step show")),
         Command::Status { run_id, .. }
         | Command::Events { run_id }
         | Command::Continue {
             run_id: Some(run_id),
+            ..
         }
         | Command::Step(StepCommand::Show {
             run_id: Some(run_id),
@@ -1190,16 +1198,22 @@ fn parent_step() -> Option<RunParent> {
 /// `run_until_parked`, or on SIGINT/SIGTERM/SIGHUP `Engine::shutdown`, which applies the
 /// results of the attempts it drains and leaves the rest of the run to the next worker.
 async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output, Fail> {
-    let (view, interrupted) = work(engine, key).await?;
+    let (view, interrupted) = work(engine, key, false).await?;
     let shown = Shown::read(engine, &view).await?;
     Ok(parked(&view, &shown, db, interrupted))
 }
 
-/// Works the run until it parks; with `true` when an interrupt stopped it first.
-async fn work(engine: &Engine, key: &RunKey) -> Result<(RunView, bool), Fail> {
+/// Works the run until it parks, or with `follow` until it needs a person or has ended
+/// (`Engine::follow`); with `true` when an interrupt stopped it first.
+async fn work(engine: &Engine, key: &RunKey, follow: bool) -> Result<(RunView, bool), Fail> {
     let mut stop = Interrupts::install()?;
     let parked = tokio::select! {
-        view = engine.run_until_parked(key) => Some(view?),
+        view = async {
+            match follow {
+                true => engine.follow(key).await,
+                false => engine.run_until_parked(key).await,
+            }
+        } => Some(view?),
         () = stop.wait() => None,
     };
     match parked {
@@ -1232,14 +1246,16 @@ fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output
     }
 }
 
-/// `spore continue [<runId>]` (spec/cli.md, What a run needs): with nothing unfinished
-/// the workflows to start; with several, the runs and exit 2; with one, the run worked
-/// until it parks, unless it is quarantined or finished, then what a person must type.
+/// `spore continue [<runId>] [--wait]` (spec/cli.md, What a run needs): with nothing
+/// unfinished the workflows to start; with several, the runs and exit 2; with one, the
+/// run worked until it parks (with `wait`, until it needs a person or has ended), unless
+/// it is quarantined or finished, then what a person must type.
 async fn continue_run(
     engine: &Engine,
     db: &Path,
     cwd: &Path,
     run: Option<&str>,
+    wait: bool,
 ) -> Result<Output, Fail> {
     let view = match run {
         Some(run) => existing(engine, run).await?,
@@ -1250,9 +1266,14 @@ async fn continue_run(
     };
     let (view, interrupted) = match view::needs(&view, None) {
         Some("quarantined") | None => (view, false),
-        Some(_) => work(engine, &view.key).await?,
+        Some(_) => work(engine, &view.key, wait).await?,
     };
     let shown = Shown::read(engine, &view).await?;
+    // A holder that waits for a person: its watch stops with its process group, and the
+    // attempt stays held for the next driver.
+    if shown.step.as_ref().is_some_and(|s| s.waits.is_some()) {
+        engine.shutdown().await;
+    }
     let mut out = parked(&view, &shown, db, interrupted);
     if !interrupted {
         let next = shown.next(&view);
