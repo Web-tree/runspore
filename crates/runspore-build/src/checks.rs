@@ -541,8 +541,8 @@ impl<'a> Checks<'a> {
         let Ok(action) = serde_json::from_value::<Action>(raw.clone()) else {
             return;
         };
+        self.lease(id, &action);
         if action.kind == Kind::External {
-            self.lease(id, &action);
             return;
         }
         if action.kind == Kind::Native {
@@ -614,8 +614,8 @@ impl<'a> Checks<'a> {
         }
     }
 
-    /// An external action's holder renews within `leaseMs`, so it must be shorter than
-    /// the deadline, `timeoutMs` (spec/host.md §2, Steps outside the worker).
+    /// An async action's holder renews within `leaseMs`, so it must be shorter than the
+    /// deadline, `timeoutMs` (spec/host.md §2, Steps outside the worker).
     fn lease(&mut self, id: &str, action: &Action) {
         let Some(spec) = &action.asynchronous else {
             return;

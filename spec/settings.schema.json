@@ -131,10 +131,11 @@
       "description": "An asynchronous action's bounds, and the programs that look after its holder.",
       "properties": {
         "channels": {
-          "description": "The result channels the action reports through, in order of preference.",
+          "description": "The result channels the action reports through, in order of preference.\nDefault `[\"store\"]`.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Channel"
           },
+          "minItems": 1,
           "type": "array"
         },
         "leaseMs": {
@@ -142,26 +143,30 @@
           "description": "How often the holder must renew, in milliseconds; smaller than `timeoutMs`.\nWithout it nobody renews."
         },
         "probe": {
-          "additionalProperties": true,
-          "description": "The program that tells whether the holder is still alive.",
-          "type": "object"
+          "$ref": "#/$defs/Program",
+          "description": "The program that tells whether the holder is still alive: it prints\n`{\"holder\": \"alive\" | \"dead\" | \"unknown\"}`."
         },
         "stop": {
-          "additionalProperties": true,
-          "description": "The program that stops the holder when its run is cancelled.",
-          "type": "object"
+          "$ref": "#/$defs/Program",
+          "description": "The program that stops the holder when its run is cancelled."
         },
         "timeoutMs": {
           "$ref": "#/$defs/Positive",
           "description": "How long one try may be held, in milliseconds, counted from its claim or\nstart. Default \"3600000\"."
         },
         "watch": {
-          "additionalProperties": true,
-          "description": "The program that waits for the holder's result.",
-          "type": "object"
+          "$ref": "#/$defs/Program",
+          "description": "The program that waits for the holder's result and prints it."
         }
       },
       "type": "object"
+    },
+    "Channel": {
+      "description": "A result channel: `store`, through `spore step complete` and `spore step fail`.",
+      "enum": [
+        "store"
+      ],
+      "type": "string"
     },
     "CommandResult": {
       "additionalProperties": false,
@@ -320,6 +325,52 @@
       "description": "A positive count of milliseconds written as a string of digits, such as `\"60000\"`.",
       "pattern": "^[1-9][0-9]{0,18}$",
       "type": "string"
+    },
+    "Program": {
+      "additionalProperties": false,
+      "description": "A program that looks after an async action's holder, named by how it is run.",
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/ProgramCommand",
+          "description": "Run as a command, with the holder handle on stdin."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "ProgramCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "argv": {
+          "description": "The program and its arguments, as a command's `argv`. `./<path>` names a file\nof the folder, bundled with the action; a bare name is looked up when it runs.",
+          "items": {
+            "$ref": "#/$defs/Word"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "cwd": {
+          "$ref": "#/$defs/Cwd",
+          "description": "The folder to run in, as a command's `cwd`."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra environment variables.",
+          "type": "object"
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/Positive",
+          "description": "How long it may run, in milliseconds. Default \"10000\" for a probe; for a\nwatch, until the try's deadline."
+        }
+      },
+      "required": [
+        "argv"
+      ],
+      "type": "object"
     },
     "Retry": {
       "additionalProperties": false,

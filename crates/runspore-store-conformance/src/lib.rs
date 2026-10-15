@@ -1726,7 +1726,11 @@ pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
         .value
         .attempt;
     w.store()
-        .set_process(set_process(&attempt, "process", Some(process_record("h", 7))))
+        .set_process(set_process(
+            &attempt,
+            "process",
+            Some(process_record("h", 7)),
+        ))
         .await
         .expect("process");
 
@@ -1747,7 +1751,10 @@ pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
         .store()
         .hold_attempt(hold(&stranger, "hold-other", json!({"pid": 1}), 500, 2_000))
         .await;
-    assert_eq!(failure(other), (StoreFailureKind::Stale, "lease.lost".into()));
+    assert_eq!(
+        failure(other),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
 
     w.clock.set(1_050);
     let holder = json!({"pid": 9, "started": "123"});
@@ -1759,13 +1766,22 @@ pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
     assert_eq!(held.disposition, Disposition::Applied);
     let encoded = canonical::encode(&holder).unwrap();
     assert_eq!(
-        (&held.value.holder, held.value.lease_until_ms, held.value.deadline_ms),
+        (
+            &held.value.holder,
+            held.value.lease_until_ms,
+            held.value.deadline_ms
+        ),
         (&encoded, 1_550, 3_050)
     );
     let shown = &w.invocations().await[0];
     assert_eq!(shown.attempt.as_ref(), Some(&attempt));
     assert_eq!(
-        (&shown.holder, shown.deadline_ms, shown.lease_until_ms, &shown.process),
+        (
+            &shown.holder,
+            shown.deadline_ms,
+            shown.lease_until_ms,
+            &shown.process
+        ),
         (&Some(encoded.clone()), Some(3_050), Some(1_550), &None)
     );
     assert_eq!(
@@ -1789,7 +1805,10 @@ pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
         .heartbeat(heartbeat(&attempt, "renew", 5_000))
         .await
         .expect("renew");
-    assert_eq!(renewed.value.lease_until_ms, 3_050, "never past the deadline");
+    assert_eq!(
+        renewed.value.lease_until_ms, 3_050,
+        "never past the deadline"
+    );
     w.store()
         .finish_attempt(finish(&attempt, "finish", 1))
         .await
@@ -1798,7 +1817,10 @@ pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
         .store()
         .hold_attempt(hold(&attempt, "hold-after", json!({"pid": 2}), 500, 2_000))
         .await;
-    assert_eq!(failure(after), (StoreFailureKind::Stale, "lease.lost".into()));
+    assert_eq!(
+        failure(after),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
 
     // A lease that ran out before the start handed over.
     let late = World::new(factory, "s26-late").await;
@@ -1815,7 +1837,10 @@ pub async fn s26_hold_attempt(factory: &dyn StoreFactory) {
         .store()
         .hold_attempt(hold(&attempt, "hold", json!({"pid": 3}), 500, 2_000))
         .await;
-    assert_eq!(failure(expired), (StoreFailureKind::Stale, "lease.lost".into()));
+    assert_eq!(
+        failure(expired),
+        (StoreFailureKind::Stale, "lease.lost".into())
+    );
     assert_eq!(late.invocations().await[0].holder, None);
 }
 
