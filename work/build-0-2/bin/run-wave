@@ -156,17 +156,28 @@ def gave_up(t, run, st):
     st["asked"].append(mark)
 
 
-def first_round(cp):
-    """The wave's merges of a checkpoint asked before its rounds were saved, read back
-    from its issue, where they sit under `## Merged in this wave`."""
+def old_rounds(cp):
+    """The rounds of a checkpoint asked before its rounds were saved, read back from its
+    issue: the wave's merges sit in its body under `## Merged in this wave`, and each later
+    ask left a comment, with the merges of a round of changes."""
     if not cp.get("url"):
         return []
     num = cp["url"].rstrip("/").split("/")[-1]
-    body = gh_json("issue", "view", num, "--repo", RUNSPORE, "--json", "body").get("body") or ""
+    i = gh_json("issue", "view", num, "--repo", RUNSPORE, "--json", "body,comments")
+    body = i.get("body") or ""
     head = "## Merged in this wave\n\n"
-    if head not in body:
-        return []
-    return [{"pass": 1, "feedback": None, "merged": body.split(head, 1)[1].split("\n\n", 1)[0].strip()}]
+    rounds = []
+    if head in body:
+        rounds.append({"pass": 1, "feedback": False,
+                       "merged": body.split(head, 1)[1].split("\n\n", 1)[0].strip()})
+    changes, restart = "The tickets from your changes are merged:\n\n", "The build run was restarted"
+    again = [c.get("body") or "" for c in i.get("comments") or []]
+    again = [c for c in again if c.startswith((changes, restart))]
+    for n, c in enumerate(again[:len(cp["asked"]) - 1], start=2):
+        if c.startswith(changes):
+            merged = c.removeprefix(changes).split("\n\nTry it again", 1)[0].strip()
+            rounds.append({"pass": n, "feedback": True, "merged": merged})
+    return rounds
 
 
 def ask(k, step_md, tickets, feedback):
@@ -178,7 +189,7 @@ def ask(k, step_md, tickets, feedback):
     effect = os.environ.get("RUNSPORE_EFFECT_KEY", "")
     cp = cps.get(k, {"asked": []})
     new_ask = effect not in cp["asked"]
-    rounds = cp["rounds"] if "rounds" in cp else first_round(cp)
+    rounds = cp["rounds"] if "rounds" in cp else old_rounds(cp)
     merged = "\n".join(f"- {t['id']}: {t['issue']}" for t in tickets)
     if new_ask and (feedback or not rounds):
         rounds = rounds + [{"pass": len(cp["asked"]) + 1, "feedback": feedback, "merged": merged}]
