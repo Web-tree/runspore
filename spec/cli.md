@@ -45,6 +45,7 @@ marked **0.2** below are new since 0.1.
 | `step fail <token> --error <message> [--code <c>] [--retryable]` | **0.2.** Reports the step failed |
 | `step abandon <runId>` | **0.2.** Frees the run's held async step at once |
 | `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
+| `capabilities` | **0.2.** Prints what this `spore` runs: its version, the version of each contract, and its capability set (§Capabilities) |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
 as [dot.md](dot.md) describes, or a workflow artifact (a file starting with the
@@ -192,6 +193,9 @@ canonical JSON of at most 4 KiB kept with the attempt and shown by `status` (exi
  "workDir": "/…/work/run_…/inv_…"}
 ```
 
+`resultChannel` is the result channel the run recorded for the action at `start`
+(§Capabilities).
+
 `params` is the node's evaluated `params`, `{}` when it has none (kernel.md §2).
 `files`, `instructions` and `workDir` are the step's files, its instructions file and
 its work folder (host.md §3), each null when it has none. The token is the claim's
@@ -231,6 +235,42 @@ action's effect then decides, as for any expiry. A run with no held async step
 exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
 
 The `step` commands but `step show` are writing commands (§Project folder).
+
+## Capabilities (0.2)
+
+`spore capabilities` says what this `spore` runs, so a tool that drives it can check
+before it starts anything. It reads no database and needs no project folder:
+
+```json
+{"format": "runspore.cli/0.2", "version": "0.2.0",
+ "contracts": {"artifact": "0.1", "cli": "0.2", "dot": "0.2", "host": "0.2",
+               "kernel": "0.2", "schema": "0.2", "store": "0.2"},
+ "actionKinds": ["command", "external", "native"],
+ "asyncKinds": ["command", "external"], "resultChannels": ["store"]}
+```
+
+- `version`: the version of the `spore` binary, the one `spore --version` prints.
+- `contracts`: the version of each specification it implements: the kernel
+  ([kernel.md](kernel.md)), the host ([host.md](host.md)), the store
+  ([store.md](store.md)), this command line, the DOT dialect ([dot.md](dot.md)), the
+  workflow artifact ([artifact.md](artifact.md)) and the schema subset
+  ([schema.md](schema.md)). A contract gains a key when it is added; one that changes
+  gets a new version.
+- `actionKinds`, `asyncKinds`, `resultChannels`: the host's capability set
+  (host.md §2, The handshake): the action kinds it runs, those it runs async, and the
+  result channels an async action can report through.
+
+Text mode prints one line per field, such as `async kinds     command, external`.
+
+`validate`, `build`, `start` and `run` check every action against the set and refuse
+a workflow that asks for something outside it, naming the action and what to
+configure (`action.component-unsupported`, `action.no-result-channel`; dot.md §6;
+`start` of an artifact also `action.kind-unregistered` and `action.async-unsupported`,
+host.md §2). `start` records the result channel it picked
+for each async action with the run, and `step claim` returns it as `resultChannel`.
+When a later `spore` cannot act on a step the way the run recorded, it leaves the step
+untouched: `status` shows the step as `capability-missing` with what to restore, and
+`run` and `worker --until-parked` stop there with exit 6.
 
 ## Runs that start runs (0.2)
 
@@ -674,7 +714,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it |
+| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities) |
 | 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
@@ -811,12 +851,16 @@ attempt has none. A running command shows its record; a command that ended has h
 record cleared; an attempt whose worker died keeps its record.
 
 **0.2:** `step` describes the async step the run is at (§Steps outside the
-worker), or is null anywhere else: `{"kind", "actor", "state", "attempt", "holder",
-"deadlineMs", "leaseUntilMs"}`. `kind` is `external`, or `command` for an async
+worker), or a step this `spore` cannot act on (§Capabilities), or is null anywhere
+else: `{"kind", "actor", "state", "attempt", "holder", "deadlineMs", "leaseUntilMs",
+"missing"}`. `kind` is the action's kind: `external`, or `command` for an async
 command. `actor` is the action's label or null. `state` is `ready` while nobody holds
 an external step and `held` while a claimed attempt runs, or an async command's
 attempt is held; `holder` is the handle given with `--holder` or printed by the start
 command (or null), and the two times are those of the held attempt, null while ready.
+`state` is `capability-missing` when this `spore` lacks what the step's action needs
+(host.md §2, The handshake), and `missing` then says what it lacks and what to
+restore; `missing` is null in every other state.
 It never shows the step's input or the token.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.

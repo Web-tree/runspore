@@ -92,14 +92,17 @@ process on its own.
      random `run_<32 lowercase hex>`: 128 bits from `run_ids`.
   2. Build the `run.started` evidence with that run ID; canonicalize the workflow;
      reject it if any action's `kind` has no registered runner or the runner's
-     `validate` fails; run a dry `run.started` transition and reject on failure.
+     `validate` fails (**0.2:** or the action asks for anything else this host does
+     not offer: The handshake, below); run a dry `run.started` transition and reject
+     on failure.
      **0.2:** then the checks of `validate_workflow` below, and, when the package
      carries `inputSchema`, check `input` against it ([schema.md](schema.md) §4):
      input that does not fit is refused with `invalid-input` / `input.invalid` and
      the errors, and nothing is created. A package without `inputSchema` accepts any
      input.
   3. `create_run` with request ID `start/<start_key>` and, in 0.2, `base_dir` as the
-     run's base folder and `parent` as its parent. `applied` is a new run;
+     run's base folder, `parent` as its parent, and the result channel picked for each
+     async action (The handshake, below). `applied` is a new run;
      `duplicate` is the run found, not new; `run.exists` (the key names a run with
      another workflow or input) is returned as the error. `run.start-key-mismatch`
      means another start with this key created its run after step 1: go back to
@@ -193,6 +196,10 @@ One bounded pass. It never blocks on an activity.
 3. **Dispatch.** For each `Outbox` item, while fewer than `max_concurrent_activities`
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
    **0.2:** an invocation of an `external` action is skipped: an actor claims it.
+   **0.2:** so is one whose action this host falls short of (The handshake, below):
+   nothing is claimed, and the step is `capability-missing` until a host that has the
+   capability serves the run. 0.1 claimed it and failed the attempt with
+   `host.runner-missing`, not retryable.
    **0.2:** a due invocation left unclaimed because every slot is taken is _queued_:
    it waits for a worker with a free slot. `held_slots(now)` lists the attempts that
    take a slot, those a worker claimed at a step that is not `external`, unfinished
@@ -298,8 +305,12 @@ attempts, fences, effect classes, retries and stuck steps apply unchanged.
   - `probe` and `watch`: optional, the programs that look after the holder, as for an
     async command (§3, Async commands): the host probes a held external step and
     watches it the same way, with the holder handle given at the claim.
-  - `channels`: as for an async command.
+  - `channels`: the result channels the actor may report through, in order of
+    preference, default `["store"]`, as for an async command (The handshake, below).
   - `stop`: kept in the package and not yet acted on.
+
+  This host refuses the `component` form of `probe`, `watch` and `stop` (The
+  handshake).
 
 `validate_workflow` and `start` check these fields and refuse a bad one with
 `action.invalid`, like a runner's `validate`. An external action needs no runner.
@@ -325,6 +336,7 @@ an actor or the work reports or the attempt expires, unless it watches the attem
 `Engine::async_step(view)` describes it: the action's kind (`external` or `command`)
 and actor, `ready` or `held`, the attempt number, and while held the holder handle,
 `deadlineMs` and `leaseUntilMs`. It never shows the input, the owner or the fence.
+**0.2:** it also describes a step that is `capability-missing` (The handshake).
 
 **Describing a step (0.2).** `Engine::describe_step(view)` describes the step an
 unfinished run is at, an activity or an await-signal node, without claiming, probing
@@ -359,8 +371,10 @@ way.
   returns the token, the run, node, action and invocation IDs, the attempt number, the
   evaluated input, (0.2) the node's evaluated `params` (`{}` when it has none), the
   declared outcomes, the node's `outputSchemas`, `deadlineMs`,
-  `leaseUntilMs`, the result channel (`store`), and the paths of the step files, its
-  instructions file and its work folder (null without `files_dir`).
+  `leaseUntilMs`, the result channel the run recorded for the action (The handshake;
+  `store` for a run that recorded none), and the paths of the step files, its
+  instructions file and its work folder (null without `files_dir`). A step whose
+  action this host falls short of is not claimed (The handshake).
 - `renew_step(token)`: `heartbeat` by `leaseMs` (or `timeoutMs`), capped at the
   deadline (store §2). Returns the new `leaseUntilMs`.
 - `complete_step(token, outcome, output)`: refuses, with nothing recorded, an outcome
@@ -385,6 +399,62 @@ run is `invalid-input` / `step.token-invalid`. A report whose attempt has alread
 watch) is refused with `stale` / `lease.lost`, and its result is kept with
 `record_late_evidence`: a stale report never moves the run, and nothing it says is
 lost. The first result from any channel wins.
+
+### The handshake (0.2)
+
+A host and a workflow agree, before a run starts, on how each action runs and how an
+async action's result comes back. The run keeps that agreement: a host never switches
+to another way mid-run, and never turns a capability it lacks into a step's failure.
+
+**The capability set.** `Engine::capabilities()` says what the host offers, each list
+sorted:
+
+| Field | Value |
+| --- | --- |
+| `actionKinds` | The kinds it runs: the kind of every runner in its registry, and `external` |
+| `asyncKinds` | The kinds it runs async: `external`, and `command` when its registry runs commands (§3, Async commands) |
+| `resultChannels` | The result channels it offers: `store`, where `complete_step` and `fail_step` write the result through the store's `finish_attempt` |
+
+It offers no `probe`, `watch` or `stop` in their `component` form. A kind, a channel
+or a form offered later is a new value of these lists, not a new field.
+
+**Async use.** An action is async when its kind is `external` or it carries an `async`
+object. Its result channels are `async.channels`, in order of preference, default
+`["store"]`.
+
+**At `validate_workflow` and `start`.** Every action is checked against the set. The
+first shortfall refuses the workflow with `invalid-input` and its code, and a message
+that names the action and what to configure; nothing is created:
+
+| Shortfall | Code | The message names |
+| --- | --- | --- |
+| Its kind is not in `actionKinds` | `action.kind-unregistered` | The kind and the kinds the host runs |
+| It carries `async` and its kind is not in `asyncKinds` | `action.async-unsupported` | The kind, the kinds the host runs async, and the fix: remove `async` |
+| Its `async` `probe`, `watch` or `stop` has the `component` form | `action.component-unsupported` | The program, and the fix: the `command` form |
+| None of its result channels is in `resultChannels` | `action.no-result-channel` | Its channels and the host's, for example "action `review` lists result channels `nats`; this host offers `store`" |
+
+For each async action, `start` picks the first of its result channels the host offers
+and records the picks with the run (store §2, `create_run`, `resultChannels`). A run
+found by its start key keeps the channels it was created with.
+
+**Before acting on a step.** Before `tick` claims an invocation and before
+`claim_step` claims one, the host checks the invocation's action again, with the
+channel the run recorded rather than a new pick: the action's kind is in
+`actionKinds`; an async action's kind is in `asyncKinds` and its recorded channel in
+`resultChannels` (a run that recorded none counts `store`); no `probe`, `watch` or
+`stop` has the `component` form. When the check falls short, the host leaves the
+invocation untouched: it claims nothing, so no attempt is spent and no lease starts.
+The step is **capability-missing** until a host that has the capability serves the
+run, which then runs it as usual.
+
+`async_step(view)` describes such a step when the run is `running`, has no pending
+event, and its outstanding invocation is `scheduled`, pending, with an action this
+host falls short of: the action's kind and actor, the state `capability-missing`, the
+attempt number, and `missing`, a sentence that says what the host lacks and what to
+restore, for example "this host has no runner for kind `native`: serve the run with a
+host that registers one". A held async step stays `held`: its attempt is its
+holder's, and the host does not touch it. `run_until_parked` returns at a
+capability-missing step, as at an async one.
 
 ### Telling a person (0.2)
 
@@ -430,7 +500,8 @@ Functions' top-level `Catch` do the same in their engines.
   folder and gets `RUNSPORE_DB` like any command, and no step files or work folder.
   Shutdown stops it like an attempt.
 - **Its result never changes the run.** A success records nothing. A `Failure` or
-  `Unknown` (a command's non-zero exit, timeout, missing runner, params that do not
+  `Unknown` (a command's non-zero exit, timeout, a runner this host lacks, code
+  `capability-missing`, which 0.1 called `host.runner-missing`, params that do not
   evaluate) is appended as an event of kind `on-intervention.failed` with event and
   request ID `on-intervention/<revision>`, body `{"action", "status", "error"}`, and
   nothing more: it is not retried, and the kernel consumes the event with no change
@@ -725,11 +796,12 @@ outlive the worker that started it is declared this way.
   name is looked up on the `PATH` when the program runs. `timeoutMs`, a positive
   decimal string, defaults to 10 s for a probe and to the time left before the
   attempt's deadline for a watch. The tag leaves room for a `component` form; this host
-  offers none and refuses one, like any other shape, with `action.invalid`.
+  offers none and refuses one with `action.component-unsupported` (§2, The
+  handshake); any other shape is `action.invalid`.
 - `channels`: the result channels the work can report through, in order of
   preference, default `["store"]`. This host offers one, `store` (`complete_step` and
-  `fail_step`, §2), and refuses a list without it with `action.invalid`. A declared
-  watch is a channel of its own and is not listed.
+  `fail_step`, §2), and refuses a list without it with `action.no-result-channel` (§2,
+  The handshake). A declared watch is a channel of its own and is not listed.
 - The start's stdout is always its holder handle: `output`, `exitOutcomes` for exit 0
   and a `result` block do not apply to it.
 
@@ -740,7 +812,7 @@ the node's input, with the same variables, and also:
 | Variable | Value |
 | --- | --- |
 | `RUNSPORE_TOKEN` | The attempt's token (§2, Client operations): the work renews, completes or fails the step with it |
-| `RUNSPORE_RESULT_CHANNEL` | `store` |
+| `RUNSPORE_RESULT_CHANNEL` | The result channel the run recorded for the action (§2, The handshake), `store` for a run that recorded none |
 
 On exit 0, stdout is the holder handle: canonical-domain JSON of at most 4 KiB, which
 the host stores and never reads. The host then calls `hold_attempt` (store §2) with the
@@ -1014,3 +1086,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H32 | **0.2.** A held async step probed by the sweep, by `probe_step` and by `claim_step`, with a probe that answers `alive`, `dead`, `unknown`, crashes, times out and prints something else | Only `dead` expires the attempt, with reason `probe-dead`; a repeatable step then gets its next try and an `unsafe` one needs intervention; every other answer leaves it held |
 | H33 | **0.2.** SIGKILL the worker after `hold_attempt`, while the job its async start command detached runs | The job survives; its report reaches the run, which the next worker completes |
 | H34 | **0.2.** SIGKILL the worker and its guard together while an async start command runs | The next sweep stops the start command's recorded group before it expires the attempt; the next try starts only after the group is gone |
+| H35 | **0.2.** The handshake: `validate_workflow` and `start` with an action of an unregistered kind, an action of a kind the host does not run async carrying `async`, a `component` probe, and result channels the host does not offer; a run started with an external action listing `["nats", "store"]`; a run started by an engine that registers a runner and served by one that does not | Each is refused with its code, a message naming the action and the fix, and no run; the run records `store` and a claim returns it; the second engine claims nothing, the invocation stays pending with no attempt, `async_step` reports `capability-missing` with what to restore, and `run_until_parked` returns; an engine with the runner then completes the run |

@@ -120,8 +120,13 @@ decimal strings, and `probe`, `watch`, `stop` and `channels`; an action's `lease
 must be smaller than its `timeoutMs` (default `"3600000"`), else
 `action.lease-too-long` (host.md §2, Steps outside the worker). `probe`, `watch` and
 `stop` are each `{"command": {"argv", "cwd", "env", "timeoutMs"}}`, `argv` required,
-and `channels` lists `"store"`, the one result channel a host offers (host.md §3,
-Async commands).
+or `{"component": {…}}`, and `channels` is a non-empty list of result channels
+(host.md §3, Async commands).
+**0.2:** each action is also checked against the capability set of the `spore` that
+builds it (host.md §2, The handshake): a `probe`, `watch` or `stop` in the `component`
+form, which no `spore` offers yet, is `action.component-unsupported`; `channels` that
+name no result channel it offers (this `spore` offers `store`) are
+`action.no-result-channel`.
 
 The fields a node may carry depend on its kind in the DOT:
 

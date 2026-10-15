@@ -33,7 +33,8 @@ audit record of an expiry, the run's base folder, the artifact table with
 that wrote a database (§3), an attempt's holder handle and deadline, a renewal capped
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
 attempt, an invocation's node `params` in every claim, the run's parent, the run's
-`updatedAtMs`, `hold_attempt`, and scenarios S15 to S26; everything else is as in 0.1.
+`updatedAtMs`, `hold_attempt`, the result channel picked for each async action, and
+scenarios S15 to S27; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -73,6 +74,13 @@ shown by `get_run` and `list_runs`. Like `baseDir`, it is not part of the run's
 identity: a repeat with another parent is a `duplicate`, and the run keeps the parent
 it was created with. The store does not check that the parent run exists; it may be in
 another database.
+
+**0.2:** the request carries `resultChannels`: an object from the ID of each async
+action of the package to the result channel `start` picked for it (host §2, The
+handshake), `{}` when the package has none. It is stored with the run and shown by
+`get_run` and `list_runs`. Like `baseDir`, it is not part of the run's identity: a
+repeat with other channels is a `duplicate`, and the run keeps the channels it was
+created with.
 
 ### find_run (0.2)
 
@@ -289,7 +297,8 @@ and are idempotent on an already matching state.
   a release each set it to now; a renewal, `set_process` and `hold_attempt` leave it.
   **0.2:** an invocation shows its input and its `params` as scheduled, the values
   every claim returns, so a host can probe or watch an attempt it did not claim (host
-  §3, Async commands).
+  §3, Async commands). **0.2:** a run shows its `resultChannels`, `{}` when it has
+  none.
 
 ## 3. SQLite adapter
 
@@ -316,7 +325,8 @@ and are idempotent on an already matching state.
   holder handle and deadline, null for attempts claimed before; version 6 to 7 adds an
   invocation's `params`, null for invocations scheduled before; version 7 to 8 adds the
   run's parent, null for runs created before; version 8 to 9 adds when an attempt was
-  claimed, null for attempts claimed before. The refusal happens before any
+  claimed, null for attempts claimed before; version 9 to 10 adds the run's result
+  channels, `{}` for runs created before. The refusal happens before any
   other read or write, so a refused file is left exactly as it was.
 
   This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
@@ -376,6 +386,7 @@ Written once, generic over a store factory and a manual clock, in
 | S24 | An invocation before its claim, after it, after a replay of the claim, and after a retry's claim at a later time (0.2) | `list_invocations` shows `claimedAtMs` null, then the claim's time, the same time after the replay, then the retry's time |
 | S25 | A run created, committed, claimed, renewed, given a result, committed again, claimed and abandoned, given a signal, quarantined and released, each at a later time (0.2) | `get_run` shows `updatedAtMs` at the time of each change; the renewal leaves it |
 | S26 | `hold_attempt` on a running attempt with a process record; again with its request ID; with another owner, after its lease and after it finished; with a holder over 4 KiB (0.2) | The attempt keeps its reference and shows the holder, the deadline, the nearer lease and no process record in `list_invocations`, with the invocation's input and params; a renewal stops at the deadline and `finish_attempt` with the same reference is applied; the replay is `duplicate`; the others are `lease.lost`, and the large holder `holder.too-large`, writing nothing |
+| S27 | `create_run` with result channels, repeated with others, and without any (0.2) | `get_run` and `list_runs` show the first channels; the repeat is `duplicate`; a run created without any shows `{}` |
 
 SQLite-specific, in the adapter crate:
 
@@ -395,3 +406,4 @@ SQLite-specific, in the adapter crate:
 | Q12 | Open a version 6 file (0.2) | Upgraded to the current version; its invocations are kept and claim with null `params`; a new schedule records its `params` |
 | Q13 | Open a version 7 file (0.2) | Upgraded to the current version; its runs are kept with no parent; a new run records its parent |
 | Q14 | Open a version 8 file (0.2) | Upgraded to the current version; its attempts are kept with no claim time; a new claim records its time |
+| Q15 | Open a version 9 file (0.2) | Upgraded to the current version; its runs are kept with result channels `{}`; a new run records its own |
