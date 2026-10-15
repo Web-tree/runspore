@@ -1,0 +1,14 @@
+// Starts one `ship` run per service, then waits until a person says the release is out.
+// The `ship` runs record this run as their parent, so `spore list` shows them below it.
+// Guide: docs/guide/watch-a-run.md.
+digraph "release" {
+  dialect = "runspore/0.2";
+  start   = "start_ships";
+
+  start_ships [label="Start a ship run per service"];
+  released    [kind="await-signal", label="Release out? (you)"];
+  done        [kind="complete"];
+
+  start_ships -> released;
+  released    -> done [on="ok"];
+}

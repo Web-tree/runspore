@@ -1,0 +1,22 @@
+{
+  "format": "runspore.workflow/0.2",
+  "inputSchema": {
+    "type": "object",
+    "required": ["version"],
+    "additionalProperties": false,
+    "properties": {
+      "version": { "type": "string", "minLength": 1, "description": "The version to release." }
+    }
+  },
+  "actions": {
+    "start_ships": {
+      "kind": "command",
+      "argv": ["sh", "-c", "for s in api web; do spore start ship --key \"$s-$1\" --input \"{\\\"service\\\": \\\"$s\\\"}\" || exit 1; done", "start-ships", { "$get": ["params", "version"] }],
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "start_ships": { "action": "start_ships", "params": { "version": { "$get": ["input", "version"] } } },
+    "released":    { "signal": "released" }
+  }
+}

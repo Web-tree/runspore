@@ -1,0 +1,19 @@
+// Ships one service: build it, wait for a person to approve, deploy it.
+// A deploy that keeps failing stops the run for a person, and `onIntervention`
+// in settings.json sends a notification.
+// Guide: docs/guide/watch-a-run.md.
+digraph "ship" {
+  dialect = "runspore/0.2";
+  start   = "build";
+
+  build   [label="Build"];
+  approve [kind="await-signal", label="Approve (you)"];
+  deploy  [label="Deploy"];
+  done    [kind="complete"];
+  stopped [kind="fail"];
+
+  build   -> approve;
+  approve -> deploy  [on="approved"];
+  approve -> stopped [on="rejected"];
+  deploy  -> done;
+}

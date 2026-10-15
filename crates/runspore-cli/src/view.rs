@@ -552,9 +552,9 @@ fn intervention_text(intervention: &Value, invocation: &Value) -> String {
         intervention["reason"].as_str(),
         intervention["attemptStatus"].as_str(),
     ) {
-        (Some("unknown"), Some("expired")) => "its last attempt's lease ran out with no result",
-        (Some("unknown"), _) => "the outcome of its last attempt is unknown",
-        _ => "it gave up and has no failed arrow",
+        (Some("unknown"), Some("expired")) => "lost its last attempt's lease with no result",
+        (Some("unknown"), _) => "has a last attempt whose outcome is unknown",
+        _ => "gave up and has no failed arrow",
     };
     let mut text = format!(
         "needs      a person: step {} {why}{}\n",
