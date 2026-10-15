@@ -273,6 +273,9 @@ impl Engine {
         &self,
         view: &RunView,
     ) -> Result<Option<StepDescription>, HostError> {
+        if view.ended() {
+            return Ok(None);
+        }
         let state: Option<State> = view
             .snapshot
             .as_deref()

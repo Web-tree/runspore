@@ -36,7 +36,7 @@ impl Engine {
                 inner.store.list_runs(tenant, cursor.clone(), PAGE)
             })
             .await?;
-            for run in page.items.iter().filter(|r| !finished(&r.status)) {
+            for run in page.items.iter().filter(|r| !r.ended()) {
                 let invocations = retry(false, || inner.store.list_invocations(&run.key)).await?;
                 for invocation in invocations {
                     let live = invocation.lease_until_ms.is_some_and(|l| now_ms < l);
@@ -71,8 +71,4 @@ impl Engine {
             }
         }
     }
-}
-
-fn finished(status: &str) -> bool {
-    matches!(status, "completed" | "failed")
 }

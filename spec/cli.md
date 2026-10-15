@@ -441,8 +441,8 @@ It exits 0 once the run is `cancelled`, or when it had already ended, and prints
 run's status afterwards, `cancel` its `{"reason", "at"}` as in `status`, null for a run
 that ended otherwise, and `stops` one `{"invocationId", "attempt", "exit"}` per stop
 that ran, `exit` null when it did not exit by itself. Text: `run <runId> cancelled
-(request ID <id>)`, a line per stop, or `run <runId> had already <status>; nothing
-changed`.
+(request ID <id>)` and a line per stop, or for a `duplicate` `run <runId> had already
+<status>; nothing changed` (`been cancelled` for a cancelled run).
 
 `run`, `worker --until-parked` and `continue` working a run that is cancelled
 meanwhile stop once their in-flight attempts of it have stopped, print its `status`,

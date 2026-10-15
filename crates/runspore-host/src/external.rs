@@ -24,6 +24,8 @@ pub(crate) struct Async {
     pub lease_ms: Option<u64>,
     pub probe: Option<Program>,
     pub watch: Option<Program>,
+    /// Run once when the run is cancelled while the attempt is held.
+    pub stop: Option<Program>,
 }
 
 impl Async {
@@ -76,9 +78,7 @@ fn parse_async(spec: &Value) -> Result<Async, String> {
             .map(|p| command::parse_program(&format!("async.{name}"), p))
             .transpose()
     };
-    let (probe, watch) = (program("probe")?, program("watch")?);
-    // Kept for `cancel`; checked here so a bad one fails at start.
-    program("stop")?;
+    let (probe, watch, stop) = (program("probe")?, program("watch")?, program("stop")?);
     // Which channels the host offers is the handshake's to check (spec/host.md §2).
     if let Some(channels) = spec.get("channels") {
         let strings = channels
@@ -93,6 +93,7 @@ fn parse_async(spec: &Value) -> Result<Async, String> {
         lease_ms,
         probe,
         watch,
+        stop,
     })
 }
 

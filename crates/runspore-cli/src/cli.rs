@@ -180,6 +180,17 @@ pub enum Command {
     },
     /// Lift a quarantine.
     Release { run_id: String },
+    /// End an unfinished run as cancelled: stop its running command and run its held
+    /// step's stop. A run that has ended is left as it is.
+    Cancel {
+        run_id: String,
+        /// Why, kept with the run.
+        #[arg(long)]
+        reason: Option<String>,
+        /// The request ID; repeating it is a no-op.
+        #[arg(long)]
+        id: Option<String>,
+    },
     /// Claim, renew, complete, fail or abandon an external step: one an actor outside
     /// the worker does.
     #[command(subcommand)]
@@ -330,6 +341,7 @@ impl From<HostError> for Fail {
                 f.kind == StoreFailureKind::Conflict
                     || f.code == "run.not-found"
                     || f.code == "lease.lost"
+                    || f.code == "run.cancelled"
             }
         };
         let fail = if usage { Fail::usage } else { Fail::internal };
@@ -574,6 +586,18 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             step_show(&engine, &db, run_id.as_deref()).await
         }
         Command::Step(command) => step(&engine, command).await,
+        Command::Cancel { run_id, reason, id } => {
+            let key = existing(&engine, run_id).await?.key;
+            let request_id = id.clone().unwrap_or_else(|| generated("cancel"));
+            let cancelled = engine
+                .cancel(&key, &request_id, reason.as_deref())
+                .await
+                .map_err(|e| id_reused(e, "cancel", &key.run, &request_id))?;
+            done(
+                view::cancelled_json(&cancelled, &request_id),
+                view::cancelled_text(&cancelled, &request_id),
+            )
+        }
         Command::Release { run_id } => {
             let key = existing(&engine, run_id).await?.key;
             let receipt = engine.release(&key).await?;
@@ -1116,7 +1140,7 @@ impl StartRequest {
     }
 }
 
-/// A `--id` of `signal` or `resolve` used on this run before, for another request:
+/// A `--id` of `signal`, `resolve` or `cancel` used on this run before, for another request:
 /// `<command>.id-reused` (spec/cli.md, Keys used again). Any other failure as it is.
 fn id_reused(e: HostError, command: &str, run: &str, id: &str) -> Fail {
     let reused = matches!(&e, HostError::Store(f)
@@ -1126,6 +1150,7 @@ fn id_reused(e: HostError, command: &str, run: &str, id: &str) -> Fail {
     }
     let other = match command {
         "signal" => "a signal with another name, outcome or data",
+        "cancel" => "a cancel with another reason",
         _ => "another resolution",
     };
     let mut fail = Fail::usage(
@@ -1418,7 +1443,7 @@ async fn whereabouts(
         .as_deref()
         .and_then(|bytes| serde_json::from_slice(bytes).ok());
     let Some(position) = state
-        .filter(|s| !s.status.is_terminal())
+        .filter(|s| !s.status.is_terminal() && !view.ended())
         .and_then(|s| s.position)
     else {
         return Ok((None, None));
@@ -1717,7 +1742,19 @@ async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {
         .map(|r| view::event_text(r, happened(r), width))
         .collect();
     let json: Vec<Value> = records.iter().map(view::event_json).collect();
-    done(json!({"runId": key.run, "events": json}), text.join("\n"))
+    // A cancel is a store record, not an event: it comes after the events.
+    let mut text = text.join("\n");
+    if let Some(cancel) = &run_view.cancel {
+        text += &format!("\n{}", view::cancel_line(cancel));
+    }
+    let cancel = run_view
+        .cancel
+        .as_ref()
+        .map(|c| json!({"reason": c.reason, "at": c.at_ms.to_string(), "requestId": c.request_id}));
+    done(
+        json!({"runId": key.run, "events": json, "cancel": cancel}),
+        text,
+    )
 }
 
 fn disposition(d: &Disposition) -> &'static str {

@@ -8,7 +8,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use runspore_types::canonical;
 use runspore_types::digest::ids;
-use runspore_types::model::RunStatus;
 use runspore_types::store::*;
 use serde_json::{json, Value};
 use tokio::sync::watch;
@@ -18,12 +17,15 @@ use super::{
     Package, PAGE,
 };
 use crate::activity::{ActivityContext, ActivityOutput};
+use crate::command::Program;
 use crate::error::HostError;
 use crate::external::{self, Async, StepToken};
 use crate::holder::{self, Answer, Watched};
 
 /// How often the sweep looks after the held async attempts of the tenant.
 const ASYNC_SWEEP_EVERY: Duration = Duration::from_secs(30);
+/// How much of a stop's stdout its late evidence keeps: the end.
+const STOP_STDOUT: usize = 16 * 1024;
 
 /// A held async attempt, with what its probe and watch need.
 pub(super) struct HeldAttempt {
@@ -36,7 +38,7 @@ pub(super) struct HeldAttempt {
     /// Canonical JSON of the holder handle; `null` when the claim gave none.
     holder: Vec<u8>,
     deadline_ms: u64,
-    bounds: Async,
+    pub(super) bounds: Async,
     outcomes: Vec<String>,
     visit: u32,
     base_dir: PathBuf,
@@ -79,6 +81,17 @@ impl Inner {
         if invocation.status != InvocationStatus::Running {
             return None;
         }
+        self.attempt_held(view, invocation).await
+    }
+
+    /// The latest attempt of `invocation` if it was held outside the worker, whether it
+    /// still runs or has ended: it has the deadline a claim outside the worker or
+    /// `hold_attempt` set, at an action held outside the worker.
+    pub(super) async fn attempt_held(
+        &self,
+        view: &RunView,
+        invocation: &InvocationView,
+    ) -> Option<HeldAttempt> {
         let deadline_ms = invocation.deadline_ms?;
         let attempt = invocation.attempt.clone()?;
         let package = self.package(&view.package_digest).await.ok()?;
@@ -234,6 +247,42 @@ impl Inner {
             }
         }
         Ok(Some(answer))
+    }
+
+    /// Runs the stop of `held`, an attempt a cancel has expired, once, and keeps its exit
+    /// code and stdout as late evidence (spec/host.md §3, Async commands, Stop). Returns
+    /// its exit code; whatever it does is otherwise ignored.
+    pub(super) async fn stop(&self, held: &HeldAttempt, program: &Program) -> Option<i32> {
+        // Without its step files the stop still runs; a `./` program then fails.
+        let delivery = match self
+            .deliver(&held.attempt.key, &held.attempt.invocation_id)
+            .await
+        {
+            Ok(Ok(delivery)) => delivery,
+            _ => super::Delivery::default(),
+        };
+        let ctx = self.held_context(held, &delivery, self.shutdown.subscribe());
+        let (exit, stdout) = holder::stop(&ctx, program, &held.input, &held.holder).await;
+        drop(delivery);
+        let tail = &stdout[stdout.len().saturating_sub(STOP_STDOUT)..];
+        let said = json!({"stop": {"exit": exit, "stdout": String::from_utf8_lossy(tail)}});
+        let attempt = &held.attempt;
+        if let (Ok(evidence), Ok(mutation)) = (
+            evidence(&said),
+            mutation(
+                "record_late_evidence",
+                format!("stop/{}", attempt.attempt_id),
+                json!([attempt]),
+            ),
+        ) {
+            let late = RecordLateEvidence {
+                mutation,
+                attempt: attempt.clone(),
+                evidence,
+            };
+            let _ = retry(true, || self.store.record_late_evidence(late.clone())).await;
+        }
+        exit
     }
 
     /// Starts a watch of `held` in the background, unless this engine watches it
@@ -394,9 +443,7 @@ impl Inner {
         loop {
             let page = retry(false, || this.store.list_runs(tenant, cursor.clone(), PAGE)).await?;
             for view in &page.items {
-                let finished = serde_json::from_value::<RunStatus>(json!(view.status))
-                    .is_ok_and(RunStatus::is_terminal);
-                if finished || view.quarantine.is_some() {
+                if view.ended() || view.quarantine.is_some() {
                     continue;
                 }
                 let invocations = retry(false, || this.store.list_invocations(&view.key)).await?;

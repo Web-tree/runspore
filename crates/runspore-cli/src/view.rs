@@ -4,12 +4,17 @@
 use std::collections::HashMap;
 
 use runspore_host::progress::{Change, Happened, Progress};
+use runspore_host::Cancelled;
 use runspore_host::{Arrival, Arrow, AsyncStep, HeldSlot, StepState};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
-use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
+use runspore_types::store::{
+    Disposition, EventRecord, InvocationStatus, InvocationView, RunCancel, RunView,
+    STATUS_CANCELLED,
+};
 use serde_json::{json, Value};
 
-/// The exit code a parked run maps to: quarantine first, then the run status. A
+/// The exit code a parked run maps to: quarantine first, then the run status (7 for a
+/// cancelled run). A
 /// running run parked at an async step waits on an actor or on the work it started; one
 /// at a step this spore lacks a capability for waits on a host that has it.
 pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
@@ -22,6 +27,7 @@ pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
         "waiting" => 3,
         "needs-intervention" => 4,
         "running" if step.is_some() => 6,
+        STATUS_CANCELLED => 7,
         _ => 10,
     }
 }
@@ -169,6 +175,10 @@ impl Shown {
                     .as_str()
                     .map_or_else(String::new, |n| format!(" at {n}"));
                 (format!("run {run} completed{at}"), Vec::new())
+            }
+            None if view.status == STATUS_CANCELLED => {
+                let why = reason_text(view.cancel.as_ref());
+                (format!("run {run} was cancelled{why}"), Vec::new())
             }
             None => {
                 let at = s["end"]["nodeId"]
@@ -352,7 +362,7 @@ pub fn needs(view: &RunView, step: Option<&AsyncStep>) -> Option<&'static str> {
     }
     let pending = view.applied_sequence + 1 < view.next_sequence;
     match view.status.as_str() {
-        "completed" | "failed" => None,
+        "completed" | "failed" | STATUS_CANCELLED => None,
         _ if pending => Some("working"),
         "waiting" => Some("signal"),
         "needs-intervention" => Some("stuck"),
@@ -412,7 +422,78 @@ fn status_json(view: &RunView, shown: &Shown) -> Value {
         "nodes": field(|s| json!(s.nodes)),
         "quarantine": view.quarantine.as_ref().map(|q| json!({
             "code": q.code, "details": q.details, "atMs": q.at_ms.to_string()})),
+        "cancel": view.cancel.as_ref().map(cancel_json),
     })
+}
+
+/// `{"reason", "at"}` of a cancel.
+fn cancel_json(cancel: &RunCancel) -> Value {
+    json!({"reason": cancel.reason, "at": cancel.at_ms.to_string()})
+}
+
+/// `: <reason>` of a cancel that was given one, else nothing.
+fn reason_text(cancel: Option<&RunCancel>) -> String {
+    cancel
+        .and_then(|c| c.reason.as_deref())
+        .map_or_else(String::new, |r| format!(": {r}"))
+}
+
+/// What `spore cancel` prints as JSON (spec/cli.md, Cancelling a run).
+pub fn cancelled_json(cancelled: &Cancelled, request_id: &str) -> Value {
+    let stops: Vec<Value> = cancelled
+        .stops
+        .iter()
+        .map(|s| json!({"invocationId": s.invocation_id, "attempt": s.attempt, "exit": s.exit}))
+        .collect();
+    let disposition = match cancelled.disposition {
+        Disposition::Applied => "applied",
+        Disposition::Duplicate => "duplicate",
+    };
+    json!({
+        "runId": cancelled.key.run, "requestId": request_id, "disposition": disposition,
+        "status": cancelled.status, "cancel": cancelled.cancel.as_ref().map(cancel_json),
+        "stops": stops,
+    })
+}
+
+/// What `spore cancel` prints as text: that the run was cancelled and each stop that
+/// ran, or that nothing changed.
+pub fn cancelled_text(cancelled: &Cancelled, request_id: &str) -> String {
+    let run = &cancelled.key.run;
+    if cancelled.disposition == Disposition::Duplicate {
+        let had = match cancelled.status.as_str() {
+            STATUS_CANCELLED => "been cancelled",
+            status => status,
+        };
+        return format!("run {run} had already {had}; nothing changed");
+    }
+    let mut text = format!("run {run} cancelled (request ID {request_id})");
+    for stop in &cancelled.stops {
+        let ended = stop.exit.map_or_else(
+            || "did not exit by itself".to_string(),
+            |code| format!("exited {code}"),
+        );
+        text += &format!(
+            "\nstop of {} attempt {} {ended}",
+            stop.invocation_id, stop.attempt
+        );
+    }
+    text
+}
+
+/// The line `events` ends with for a cancelled run: its cancel, a store record.
+pub fn cancel_line(cancel: &RunCancel) -> String {
+    let head = format!(
+        "{:>4}  {}  {:<22} {:<10}",
+        "-",
+        utc_text(cancel.at_ms),
+        "run.cancelled",
+        "store"
+    );
+    [cancel.reason.as_deref(), Some(cancel.request_id.as_str())]
+        .into_iter()
+        .flatten()
+        .fold(head, |line, part| format!("{line}  {part}"))
 }
 
 /// How a run that is not terminal stands, read from its state, its package and the
@@ -677,6 +758,13 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     }
     if let Some(q) = &view.quarantine {
         text += &format!("quarantine {}: {}\n", q.code, q.details);
+    }
+    if let Some(cancel) = &view.cancel {
+        text += &format!(
+            "cancelled  {}{}\n",
+            utc_text(cancel.at_ms),
+            reason_text(Some(cancel))
+        );
     }
     text
 }
