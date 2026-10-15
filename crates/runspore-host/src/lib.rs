@@ -12,6 +12,7 @@ mod error;
 mod external;
 mod files;
 pub mod guard;
+mod holder;
 pub mod process;
 pub mod progress;
 
@@ -22,10 +23,11 @@ pub use activity::{
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
 pub use engine::{
-    validate_workflow, Engine, EngineConfig, ExternalStep, HeldSlot, Observer, RunIds,
-    StartOutcome, StepClaim, StepDescription, StepRenewed, StepReport, StepState, TickReport,
+    validate_workflow, AsyncStep, Engine, EngineConfig, HeldSlot, Observer, RunIds, StartOutcome,
+    StepClaim, StepDescription, StepRenewed, StepReport, StepState, TickReport,
     ARTIFACT_UNREADABLE, FILES_DIR_MISSING, FILES_UNWRITABLE, RESULT_CHANNEL,
 };
 pub use error::{HostError, Unrouted};
 pub use external::{StepToken, DEFAULT_TIMEOUT_MS as EXTERNAL_DEFAULT_TIMEOUT_MS};
 pub use files::StepFiles;
+pub use holder::Answer;

@@ -33,13 +33,14 @@ use crate::guard;
 use crate::process::{self, Leftover};
 use crate::progress::{self, Change, Happened, Progress};
 
+mod held;
 mod intervention;
 mod slots;
 mod steps;
 
 pub use slots::HeldSlot;
 pub use steps::{
-    ExternalStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState, RESULT_CHANNEL,
+    AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState, RESULT_CHANNEL,
 };
 
 /// Quarantine code of a run whose stored artifact cannot be read.
@@ -81,6 +82,9 @@ pub struct EngineConfig {
     /// Recorded as the parent of every run this engine starts: the run and node of
     /// the step it is started from, if any.
     pub parent: Option<RunParent>,
+    /// Watches of held async attempts the engine runs at once, apart from
+    /// `max_concurrent_activities`.
+    pub max_watches: usize,
 }
 
 impl Default for EngineConfig {
@@ -102,6 +106,7 @@ impl Default for EngineConfig {
             guard: guard::own_executable(),
             files_dir: None,
             parent: None,
+            max_watches: 16,
         }
     }
 }
@@ -319,6 +324,11 @@ struct Inner {
     inflight: Mutex<HashSet<(RunKey, String)>>,
     /// Invocations of `external` actions, which dispatch leaves to actors.
     external: Mutex<HashSet<(RunKey, String)>>,
+    /// The held async attempts this engine watches, by run and attempt ID, with what
+    /// each watch tells.
+    watching: Mutex<HashMap<(RunKey, String), held::Waits>>,
+    /// When the sweep last looked after the held async attempts.
+    async_swept: Mutex<Option<Instant>>,
     tasks: Mutex<JoinSet<()>>,
     settled: Notify,
     /// Set by `shutdown`: no attempt is claimed from then on.
@@ -423,9 +433,55 @@ fn waiter(view: &RunView, package: &Package, signal: &str) -> Option<(String, Ve
 /// The visit `v` of the claimed node, at most `max_visits`, whose activation
 /// `<node>/<v>` derives the claimed invocation ID.
 fn invocation_visit(key: &RunKey, claim: &Claim, max_visits: u32) -> Option<u32> {
+    visit_of(
+        key,
+        &claim.node_id,
+        &claim.attempt.invocation_id,
+        max_visits,
+    )
+}
+
+/// The visit `v` of `node_id`, at most `max_visits`, whose activation `<node>/<v>`
+/// derives `invocation_id`.
+fn visit_of(key: &RunKey, node_id: &str, invocation_id: &str, max_visits: u32) -> Option<u32> {
     (1..=max_visits).find(|visit| {
-        let activation = ids::activation(&claim.node_id, *visit);
-        ids::invocation(&key.tenant, &key.run, &activation) == claim.attempt.invocation_id
+        let activation = ids::activation(node_id, *visit);
+        ids::invocation(&key.tenant, &key.run, &activation) == invocation_id
+    })
+}
+
+/// The `ActivityResult` of an attempt's output (spec/host.md §2, One attempt); `None`
+/// for a holder handle, which is no result.
+fn activity_result(
+    output: ActivityOutput,
+    attempt: &AttemptRef,
+    number: u32,
+) -> Option<ActivityResult> {
+    let (status, outcome, output, error, retryable) = match output {
+        ActivityOutput::Success { outcome, output } => {
+            (AttemptStatus::Success, Some(outcome), output, None, true)
+        }
+        ActivityOutput::Failure { error, retryable } => (
+            AttemptStatus::Failure,
+            None,
+            Value::Null,
+            Some(error),
+            retryable,
+        ),
+        ActivityOutput::Unknown { error } => {
+            (AttemptStatus::Unknown, None, Value::Null, Some(error), true)
+        }
+        ActivityOutput::Held { .. } => return None,
+    };
+    Some(ActivityResult {
+        invocation_id: attempt.invocation_id.clone(),
+        attempt_id: attempt.attempt_id.clone(),
+        attempt: number,
+        status,
+        outcome,
+        output,
+        error,
+        retryable,
     })
 }
 
@@ -603,6 +659,8 @@ impl Engine {
                 files_swept: Mutex::new(None),
                 inflight: Mutex::new(HashSet::new()),
                 external: Mutex::new(HashSet::new()),
+                watching: Mutex::new(HashMap::new()),
+                async_swept: Mutex::new(None),
                 tasks: Mutex::new(JoinSet::new()),
                 settled: Notify::new(),
                 closing: AtomicBool::new(false),
@@ -1042,6 +1100,7 @@ impl Engine {
             }
         }
         inner.sweep_files().await;
+        Inner::sweep_async(inner).await;
         let mut cursor = None;
         loop {
             let page = retry(false, || inner.store.scan_ready(cursor.clone(), PAGE)).await?;
@@ -1116,8 +1175,9 @@ impl Engine {
     }
 
     /// Ticks until the run is terminal, `waiting`, `needs-intervention` or quarantined,
-    /// or waits for an actor at an external step, with no pending event and nothing of
-    /// it in flight.
+    /// or waits at an async step this engine does not watch (or whose watch says that
+    /// its holder waits for a person), with no pending event and nothing of it in
+    /// flight.
     pub async fn run_until_parked(&self, key: &RunKey) -> Result<RunView, HostError> {
         let inner = &self.inner;
         loop {
@@ -1126,7 +1186,7 @@ impl Engine {
             let view = self.get_run(key).await?.ok_or_else(|| {
                 HostError::invalid("run.not-found", format!("run {} does not exist", key.run))
             })?;
-            if !busy && (parked(&view) || self.waits_on_actor(&view).await?) {
+            if !busy && (parked(&view) || self.waits_outside(&view).await?) {
                 return Ok(view);
             }
             if !report.did_work() {
@@ -1741,6 +1801,7 @@ impl Inner {
         let (stop, stop_rx) = watch::channel(false);
         let mut lost = false;
         let mut stopping = false;
+        let mut action_run = None;
         let output = match self.resolve_action(&attempt.key, &claim).await {
             Err(Unrunnable::Abandon) => return,
             Err(Unrunnable::Fail(output)) => output,
@@ -1772,6 +1833,7 @@ impl Inner {
                 ctx.work_dir = delivery.work_dir.clone();
                 ctx.guard = self.config.guard.clone();
                 ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
+                ctx.token = Some(held::token(&claim));
                 let (inner, held) = (self.clone(), attempt.clone());
                 ctx.process = Arc::new(move |process| {
                     let (inner, held) = (inner.clone(), held.clone());
@@ -1805,6 +1867,7 @@ impl Inner {
                         }
                     }
                 };
+                action_run = Some(action.clone());
                 checked(output, |outcome| {
                     package.schema(&claim.node_id, outcome).cloned()
                 })
@@ -1813,30 +1876,15 @@ impl Inner {
         // The try is over: a sweep may take the artifact's step files from here on.
         drop(delivery);
         failpoint::hit("host.attempt.after-effect");
-        let (status, outcome, output, error, retryable) = match output {
-            ActivityOutput::Success { outcome, output } => {
-                (AttemptStatus::Success, Some(outcome), output, None, true)
+        if let (ActivityOutput::Held { holder }, Some(action)) = (&output, &action_run) {
+            // A lost lease leaves nothing to hand over: the attempt has ended.
+            if !lost {
+                let _ = Inner::hold(self, &claim, action, holder).await;
             }
-            ActivityOutput::Failure { error, retryable } => (
-                AttemptStatus::Failure,
-                None,
-                Value::Null,
-                Some(error),
-                retryable,
-            ),
-            ActivityOutput::Unknown { error } => {
-                (AttemptStatus::Unknown, None, Value::Null, Some(error), true)
-            }
-        };
-        let result = ActivityResult {
-            invocation_id: attempt.invocation_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            attempt: claim.attempt_number,
-            status,
-            outcome,
-            output,
-            error,
-            retryable,
+            return;
+        }
+        let Some(result) = activity_result(output, &attempt, claim.attempt_number) else {
+            return;
         };
         let Ok(evidence) = evidence(&result) else {
             return;

@@ -1,5 +1,6 @@
 //! Steps outside the worker (spec/host.md §2): an actor claims an `external` step's
-//! attempt, renews it, and reports its result; a person may abandon it.
+//! attempt, renews it, and reports its result; the work an async command started
+//! reports the same way; a person may abandon either.
 
 use std::path::PathBuf;
 
@@ -10,14 +11,16 @@ use runspore_types::model::{
 use runspore_types::store::*;
 use serde_json::{json, Value};
 
+use super::held::outcomes;
 use super::{
-    evidence, mutation, retry, Engine, Undeliverable, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
-    FILES_UNWRITABLE,
+    evidence, mutation, retry, Engine, TickReport, Undeliverable, ARTIFACT_UNREADABLE,
+    FILES_DIR_MISSING, FILES_UNWRITABLE,
 };
 use crate::arrival::Arrow;
 use crate::error::HostError;
-use crate::external::{self, External, StepToken};
+use crate::external::{self, Async, External, StepToken};
 use crate::files::Unmade;
+use crate::holder::Answer;
 
 /// The result channel a claim reports through: the store, by `step complete` or
 /// `step fail`.
@@ -27,7 +30,7 @@ const MAX_RESULT_BYTES: usize = 64 * 1024;
 /// The code of a reported failure that names none.
 const STEP_FAILED: &str = "step.failed";
 
-/// Whether an external step waits for an actor or is held by one.
+/// Whether an async step waits for an actor or is held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepState {
     Ready,
@@ -43,10 +46,11 @@ impl StepState {
     }
 }
 
-/// The external step a run is at, as `status` shows it: never its input, owner or
+/// The async step a run is at, as `status` shows it: never its input, owner or
 /// fence.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExternalStep {
+pub struct AsyncStep {
+    /// `external`, or `command` for an async command.
     pub kind: &'static str,
     pub actor: Option<String>,
     pub state: StepState,
@@ -55,7 +59,7 @@ pub struct ExternalStep {
     pub invocation_id: String,
     pub node_id: String,
     pub action_id: String,
-    /// While held: the holder handle given at the claim.
+    /// While held: the holder handle given at the claim or printed by the start.
     pub holder: Option<Value>,
     pub deadline_ms: Option<u64>,
     pub lease_until_ms: Option<u64>,
@@ -139,7 +143,7 @@ struct Held {
     attempt: AttemptRef,
     number: u32,
     node_id: String,
-    external: External,
+    bounds: Async,
     outcomes: Vec<String>,
     schemas: Value,
     deadline_ms: Option<u64>,
@@ -161,20 +165,6 @@ fn token_invalid(message: impl Into<String>) -> HostError {
     HostError::invalid("step.token-invalid", message)
 }
 
-/// The outcomes an action declares; none declared is `["ok"]` (kernel §2).
-fn outcomes(action: &Value) -> Vec<String> {
-    action
-        .get("outcomes")
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(Value::as_str)
-                .map(String::from)
-                .collect()
-        })
-        .unwrap_or_else(|| vec!["ok".to_string()])
-}
-
 /// A fresh owner for one claim, so its token names that claim alone.
 fn fresh_owner() -> Result<String, HostError> {
     let mut bytes = [0u8; 16];
@@ -187,8 +177,9 @@ fn fresh_owner() -> Result<String, HostError> {
 }
 
 impl Engine {
-    /// The external step the run is at, if any (spec/host.md §2, Waiting on a step).
-    pub async fn external_step(&self, view: &RunView) -> Result<Option<ExternalStep>, HostError> {
+    /// The async step the run is at, if any (spec/host.md §2, Waiting on a step): an
+    /// external step, ready or held, or an async command's held attempt.
+    pub async fn async_step(&self, view: &RunView) -> Result<Option<AsyncStep>, HostError> {
         let state: Option<State> = view
             .snapshot
             .as_deref()
@@ -203,10 +194,14 @@ impl Engine {
         let Some(action) = package.actions.get(&scheduled.action_id) else {
             return Ok(None);
         };
-        if !external::is_external(action) {
+        let is_external = external::is_external(action);
+        if !matches!(external::async_of(action), Ok(Some(_))) {
             return Ok(None);
         }
-        let actor = external::parse(action).ok().and_then(|e| e.actor);
+        let actor = match is_external {
+            true => external::parse(action).ok().and_then(|e| e.actor),
+            false => None,
+        };
         let invocations = self.list_invocations(&view.key).await?;
         let Some(invocation) = invocations
             .into_iter()
@@ -214,8 +209,20 @@ impl Engine {
         else {
             return Ok(None);
         };
-        let mut step = ExternalStep {
-            kind: external::KIND,
+        // An async command is held only once its start has handed over: a pending one
+        // waits for a worker, and a running one without a deadline is still starting.
+        let held_by_worker = invocation.deadline_ms.is_none();
+        match invocation.status {
+            InvocationStatus::Pending if !is_external => return Ok(None),
+            InvocationStatus::Running if !is_external && held_by_worker => return Ok(None),
+            _ => {}
+        }
+        let mut step = AsyncStep {
+            kind: if is_external {
+                external::KIND
+            } else {
+                "command"
+            },
             actor,
             state: StepState::Ready,
             attempt: invocation.attempt_number,
@@ -306,14 +313,21 @@ impl Engine {
         }))
     }
 
-    /// Whether the run waits for an actor: it is `running` at an external step with no
-    /// pending event.
-    pub(super) async fn waits_on_actor(&self, view: &RunView) -> Result<bool, HostError> {
+    /// Whether the run waits on something outside this engine: it is `running` at an
+    /// async step with no pending event, and this engine does not watch the step, or its
+    /// watch says that the holder waits for a person.
+    pub(super) async fn waits_outside(&self, view: &RunView) -> Result<bool, HostError> {
         let pending = view.applied_sequence + 1 < view.next_sequence;
         if pending || view.quarantine.is_some() || view.status != "running" {
             return Ok(false);
         }
-        Ok(self.external_step(view).await?.is_some())
+        Ok(match self.async_step(view).await? {
+            None => false,
+            Some(step) => {
+                step.state != StepState::Held
+                    || !self.watches(&view.key, &step.invocation_id, step.attempt)
+            }
+        })
     }
 
     /// Claims a ready external step whose action's label is `actor` (both absent counts
@@ -342,6 +356,15 @@ impl Engine {
                 Some(bytes)
             }
         };
+        if let Some(run) = run {
+            // A held step whose holder is gone frees the run's step for this claim.
+            let key = self.key(run);
+            if self.probe_step(&key).await? == Some(Answer::Dead) {
+                self.inner
+                    .coordinate(&key, &mut TickReport::default())
+                    .await?;
+            }
+        }
         for (key, invocation_id) in self.ready_steps(run).await? {
             let Some((invocation, package)) =
                 self.inner.invocation_package(&key, &invocation_id).await?
@@ -440,17 +463,17 @@ impl Engine {
                     key,
                     invocation_id,
                     owner,
-                    external.lease_ms(),
+                    external.bounds.lease_ms(),
                     holder,
-                    external.timeout_ms
+                    external.bounds.timeout_ms
                 ]),
             )?,
             key: key.clone(),
             invocation_id: invocation_id.to_string(),
             worker: owner,
-            lease_duration_ms: external.lease_ms(),
+            lease_duration_ms: external.bounds.lease_ms(),
             holder,
-            deadline_duration_ms: Some(external.timeout_ms),
+            deadline_duration_ms: Some(external.bounds.timeout_ms),
         };
         let claim = match retry(true, || inner.store.claim_attempt(request.clone())).await {
             Ok(receipt) => receipt.value,
@@ -488,7 +511,8 @@ impl Engine {
         }))
     }
 
-    /// The attempt a token names, if it is an attempt of an external step of its run.
+    /// The attempt a token names, if it is an attempt of an external step or an async
+    /// command of its run.
     async fn held(&self, token: &str) -> Result<Held, HostError> {
         let token: StepToken = token
             .parse()
@@ -496,7 +520,7 @@ impl Engine {
         let attempt = token.attempt_ref(&self.inner.config.tenant);
         let unknown = || {
             token_invalid(format!(
-                "the token names no attempt of an external step of run {}",
+                "the token names no attempt of an external step or an async command of run {}",
                 token.run
             ))
         };
@@ -511,9 +535,11 @@ impl Engine {
         let action = package
             .actions
             .get(&invocation.action_id)
-            .filter(|a| external::is_external(a))
             .ok_or_else(unknown)?;
-        let external = external::parse(action).map_err(|_| unknown())?;
+        let bounds = external::async_of(action)
+            .ok()
+            .flatten()
+            .ok_or_else(unknown)?;
         let schemas = package
             .nodes
             .get(&invocation.node_id)
@@ -525,7 +551,7 @@ impl Engine {
             number: token.attempt,
             outcomes: outcomes(action),
             node_id: invocation.node_id,
-            external,
+            bounds,
             schemas,
             deadline_ms: invocation.deadline_ms,
         })
@@ -535,7 +561,7 @@ impl Engine {
     /// deadline.
     pub async fn renew_step(&self, token: &str) -> Result<StepRenewed, HostError> {
         let held = self.held(token).await?;
-        let extend_ms = held.external.lease_ms();
+        let extend_ms = held.bounds.lease_ms();
         let request = Heartbeat {
             mutation: mutation(
                 "heartbeat",
@@ -680,13 +706,13 @@ impl Engine {
         )))
     }
 
-    /// Expires the run's held external attempt at once with reason `abandoned`; the
+    /// Expires the run's held async attempt at once with reason `abandoned`; the
     /// action's effect then decides.
     pub async fn abandon_step(&self, key: &RunKey) -> Result<StepReport, HostError> {
         let not_held = || {
             HostError::invalid(
                 "step.not-held",
-                format!("run {} has no held external step", key.run),
+                format!("run {} has no held async step", key.run),
             )
         };
         let view = self.get_run(key).await?.ok_or_else(|| {
@@ -696,7 +722,7 @@ impl Engine {
                 format!("run {} does not exist", key.run),
             ))
         })?;
-        let step = self.external_step(&view).await?.ok_or_else(not_held)?;
+        let step = self.async_step(&view).await?.ok_or_else(not_held)?;
         if step.state != StepState::Held {
             return Err(not_held());
         }

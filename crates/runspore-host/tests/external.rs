@@ -84,9 +84,9 @@ impl World {
             .status
     }
 
-    async fn step(&self) -> Option<runspore_host::ExternalStep> {
+    async fn step(&self) -> Option<runspore_host::AsyncStep> {
         let view = self.engine.get_run(&self.key).await.unwrap().unwrap();
-        self.engine.external_step(&view).await.unwrap()
+        self.engine.async_step(&view).await.unwrap()
     }
 
     async fn claim(&self) -> runspore_host::StepClaim {

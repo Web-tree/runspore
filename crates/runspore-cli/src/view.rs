@@ -4,14 +4,14 @@
 use std::collections::HashMap;
 
 use runspore_host::progress::{Change, Happened, Progress};
-use runspore_host::{Arrival, Arrow, ExternalStep, HeldSlot, StepState};
+use runspore_host::{Arrival, Arrow, AsyncStep, HeldSlot, StepState};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunView};
 use serde_json::{json, Value};
 
 /// The exit code a parked run maps to: quarantine first, then the run status. A
-/// running run parked at an external step waits on an actor.
-pub fn exit_for(view: &RunView, step: Option<&ExternalStep>) -> u8 {
+/// running run parked at an async step waits on an actor or on the work it started.
+pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
     if view.quarantine.is_some() {
         return 5;
     }
@@ -25,9 +25,9 @@ pub fn exit_for(view: &RunView, step: Option<&ExternalStep>) -> u8 {
     }
 }
 
-/// The `step` object of `status`: the external step the run is at, or null. Never its
+/// The `step` object of `status`: the async step the run is at, or null. Never its
 /// input or token.
-fn step_json(step: Option<&ExternalStep>) -> Value {
+fn step_json(step: Option<&AsyncStep>) -> Value {
     step.map_or(Value::Null, |s| {
         json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
@@ -36,7 +36,7 @@ fn step_json(step: Option<&ExternalStep>) -> Value {
     })
 }
 
-fn step_text(step: Option<&ExternalStep>) -> String {
+fn step_text(step: Option<&AsyncStep>) -> String {
     let Some(s) = step else {
         return String::new();
     };
@@ -103,7 +103,7 @@ pub struct Shown {
     pub arrival: Arrival,
     pub package: Option<Value>,
     pub invocations: Vec<InvocationView>,
-    pub step: Option<ExternalStep>,
+    pub step: Option<AsyncStep>,
     pub last_result: Option<Value>,
     pub children: Tree,
     pub slots: Vec<HeldSlot>,
@@ -214,7 +214,10 @@ impl Shown {
             }
             Some("held") => {
                 let step = self.step.as_ref();
-                let who = step.and_then(|s| s.actor.as_deref()).unwrap_or("an actor");
+                let who = match step {
+                    Some(s) if s.kind == "command" => "the work its async command started",
+                    s => s.and_then(|s| s.actor.as_deref()).unwrap_or("an actor"),
+                };
                 let mut head = format!("run {run} at {node} is held by {who}");
                 if let Some(step) = step {
                     head += &format!(", attempt {}", step.attempt);
@@ -328,8 +331,8 @@ impl Tree {
 }
 
 /// What an unfinished run needs from someone (spec/cli.md, What a run needs); `None`
-/// once it has finished. `step` is the external step it is at, if any.
-pub fn needs(view: &RunView, step: Option<&ExternalStep>) -> Option<&'static str> {
+/// once it has finished. `step` is the async step it is at, if any.
+pub fn needs(view: &RunView, step: Option<&AsyncStep>) -> Option<&'static str> {
     if view.quarantine.is_some() {
         return Some("quarantined");
     }

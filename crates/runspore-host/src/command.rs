@@ -9,7 +9,10 @@ use serde_json::{json, Map, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
+use runspore_types::store::MAX_HOLDER_BYTES;
+
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRunner, ACTION_ROOTS};
+use crate::external::STORE_CHANNEL;
 use crate::guard::{Ending, Guarded};
 use crate::process;
 
@@ -28,6 +31,7 @@ const RESULT_ROOTS: [&str; 5] = ["stdout", "input", "params", "run", "step"];
 pub struct CommandRunner;
 
 /// Where a command runs: a path, or a JSON Pointer into the node's input naming one.
+#[derive(Debug, Clone)]
 enum Cwd {
     Path(String),
     FromInput(String),
@@ -44,9 +48,55 @@ struct Spec {
     result: Option<(Value, Value)>,
     outcomes: Vec<String>,
     exit_outcomes: Vec<(i32, String)>,
+    /// An async command: `argv` is its start command, whose stdout is the holder
+    /// handle.
+    is_async: bool,
 }
 
-fn parse(action: &Value) -> Result<Spec, String> {
+/// An async action's probe, watch or stop program (spec/host.md §3, Async commands):
+/// the `command` form, with a command's `argv`, `cwd` and `env`.
+#[derive(Debug, Clone)]
+pub(crate) struct Program {
+    argv: Vec<Value>,
+    cwd: Option<Cwd>,
+    env: Vec<(String, String)>,
+    pub timeout_ms: Option<u64>,
+}
+
+/// Reads `{"command": {"argv", "cwd", "env", "timeoutMs"}}`; `name` is how a refusal
+/// names it. The `component` form is not offered by this host.
+pub(crate) fn parse_program(name: &str, value: &Value) -> Result<Program, String> {
+    let shape = format!(
+        "`{name}` must be {{\"command\": {{\"argv\", \"cwd\", \"env\", \"timeoutMs\"}}}}; \
+         this host offers no other form"
+    );
+    let Some(Value::Object(fields)) = value
+        .as_object()
+        .filter(|tag| tag.len() == 1)
+        .and_then(|tag| tag.get("command"))
+    else {
+        return Err(shape);
+    };
+    if let Some(key) = fields
+        .keys()
+        .find(|k| !["argv", "cwd", "env", "timeoutMs"].contains(&k.as_str()))
+    {
+        return Err(format!("`{name}.command` has no field `{key}`"));
+    }
+    let program = Value::Object(fields.clone());
+    Ok(Program {
+        argv: argv_of(&program).map_err(|e| format!("`{name}.command`: {e}"))?,
+        cwd: cwd_of(&program).map_err(|e| format!("`{name}.command`: {e}"))?,
+        env: env_of(&program).map_err(|e| format!("`{name}.command`: {e}"))?,
+        timeout_ms: crate::external::millis(
+            &program,
+            "timeoutMs",
+            &format!("{name}.command.timeoutMs"),
+        )?,
+    })
+}
+
+fn argv_of(action: &Value) -> Result<Vec<Value>, String> {
     let argv = action
         .get("argv")
         .and_then(Value::as_array)
@@ -61,7 +111,11 @@ fn parse(action: &Value) -> Result<Spec, String> {
             _ => return Err(ARGV_SHAPE.into()),
         }
     }
-    let cwd = match action.get("cwd") {
+    Ok(argv)
+}
+
+fn cwd_of(action: &Value) -> Result<Option<Cwd>, String> {
+    Ok(match action.get("cwd") {
         None => None,
         Some(Value::String(s)) => Some(Cwd::Path(s.clone())),
         Some(Value::Object(m)) => match m.get("fromInput") {
@@ -71,8 +125,11 @@ fn parse(action: &Value) -> Result<Spec, String> {
             _ => return Err(CWD_SHAPE.into()),
         },
         Some(_) => return Err(CWD_SHAPE.into()),
-    };
-    let env = match action.get("env") {
+    })
+}
+
+fn env_of(action: &Value) -> Result<Vec<(String, String)>, String> {
+    Ok(match action.get("env") {
         None => Vec::new(),
         Some(Value::Object(m)) => m
             .iter()
@@ -80,7 +137,14 @@ fn parse(action: &Value) -> Result<Spec, String> {
             .collect::<Option<_>>()
             .ok_or("`env` values must be strings")?,
         Some(_) => return Err("`env` must be an object of strings".into()),
-    };
+    })
+}
+
+fn parse(action: &Value) -> Result<Spec, String> {
+    let argv = argv_of(action)?;
+    let cwd = cwd_of(action)?;
+    let env = env_of(action)?;
+    let is_async = crate::external::async_of(action)?.is_some();
     let timeout_ms = match action.get("timeoutMs") {
         None => None,
         Some(Value::String(s)) => Some(s.parse().map_err(|_| "`timeoutMs` must be a u64")?),
@@ -150,7 +214,118 @@ fn parse(action: &Value) -> Result<Spec, String> {
         result,
         outcomes: outcomes.into_iter().map(str::to_string).collect(),
         exit_outcomes,
+        is_async,
     })
+}
+
+/// Sets up a program the host starts for a step (spec/host.md §3): its folder, the
+/// action's `env`, the step's variables, piped standard streams, and after `env` the
+/// variables a workflow cannot override.
+fn prepare(command: &mut Command, ctx: &ActivityContext, cwd: &Path, env: &[(String, String)]) {
+    command
+        .current_dir(cwd)
+        .envs(env.iter().cloned())
+        .env("RUNSPORE_RUN_ID", &ctx.key.run)
+        .env("RUNSPORE_NODE_ID", &ctx.node_id)
+        .env("RUNSPORE_INVOCATION_ID", &ctx.invocation_id)
+        .env("RUNSPORE_ATTEMPT", ctx.attempt.to_string())
+        .env("RUNSPORE_VISIT", ctx.visit.to_string())
+        .env("RUNSPORE_EFFECT_KEY", &ctx.effect_key)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // After `env`, so a workflow cannot point its steps at another database.
+    if let Some(db) = &ctx.db {
+        command.env("RUNSPORE_DB", db);
+    }
+    // After `env` too; one the step lacks is removed, so a value the worker inherited
+    // never reaches it.
+    let files = ctx.files.as_ref();
+    let instructions = files.and_then(|f| f.instructions.as_ref());
+    for (name, value) in [
+        ("RUNSPORE_STEP_FILES", files.map(|f| &f.dir)),
+        ("RUNSPORE_INSTRUCTIONS", instructions),
+        ("RUNSPORE_WORK_DIR", ctx.work_dir.as_ref()),
+    ] {
+        match value {
+            Some(path) => command.env(name, path),
+            None => command.env_remove(name),
+        };
+    }
+    for name in ["RUNSPORE_TOKEN", "RUNSPORE_RESULT_CHANNEL"] {
+        command.env_remove(name);
+    }
+}
+
+/// A probe's or watch's stdout and how it ended; `None` when it did not run, was
+/// stopped, timed out, or ended by a signal.
+pub(crate) struct Ran {
+    pub code: i32,
+    pub stdout: Vec<u8>,
+}
+
+/// Runs an async action's probe or watch for the try `ctx` names: under the guard,
+/// without a process record, with `stdin` and the step's variables. Each line of stdout
+/// is offered to `line`; the lines it takes are left out of `Ran::stdout`.
+pub(crate) async fn run_program(
+    ctx: &ActivityContext,
+    program: &Program,
+    input: &Value,
+    stdin: Vec<u8>,
+    timeout: Duration,
+    line: impl Fn(&[u8]) -> bool + Send + 'static,
+) -> Option<Ran> {
+    let cwd = working_folder(program.cwd.as_ref(), &ctx.base_dir, input).ok()?;
+    let mut argv = words(&program.argv, &ctx.scope(input)).ok()?;
+    if let Some(found) = ctx.files.as_ref().and_then(|f| f.program(&argv[0])) {
+        argv[0] = found.to_string_lossy().into_owned();
+    }
+    let setup = |command: &mut Command| prepare(command, ctx, &cwd, &program.env);
+    let mut guarded = Guarded::spawn(&ctx.guard, ctx.stop_grace, &argv, setup)
+        .await
+        .ok()?;
+    guarded.go().await.ok()?;
+    let (input_pipe, stdout, stderr) = guarded.stdio();
+    let feed = tokio::spawn(async move {
+        if let Some(mut pipe) = input_pipe {
+            let _ = pipe.write_all(&stdin).await;
+        }
+    });
+    let stdout = tokio::spawn(lines(stdout.expect("piped"), line));
+    let stderr = tokio::spawn(drain(stderr.expect("piped"), TAIL, false));
+    let ending = tokio::select! {
+        ending = guarded.wait() => Some(ending),
+        () = tokio::time::sleep(timeout) => None,
+        () = ctx.stopped() => None,
+    };
+    if ending.is_none() {
+        guarded.stop().await;
+    }
+    feed.abort();
+    let stdout = stdout.await.unwrap_or_default();
+    let _ = stderr.await;
+    match ending? {
+        Ending::Exited(code) => Some(Ran { code, stdout }),
+        Ending::Signaled(_) | Ending::Lost => None,
+    }
+}
+
+/// Reads `reader` to EOF line by line, keeping at most `MAX_STDOUT` bytes of the lines
+/// `take` does not take.
+async fn lines(reader: impl AsyncRead + Unpin, take: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+    let mut reader = tokio::io::BufReader::new(reader);
+    let mut kept = Vec::new();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match tokio::io::AsyncBufReadExt::read_until(&mut reader, b'\n', &mut line).await {
+            Ok(0) | Err(_) => return kept,
+            Ok(_) => {}
+        }
+        if !take(&line) && kept.len() + line.len() <= MAX_STDOUT {
+            kept.extend_from_slice(&line);
+        }
+    }
 }
 
 const ARGV_SHAPE: &str = "`argv` must be a non-empty array of strings and mappings";
@@ -329,8 +504,28 @@ fn text_output(
     })
 }
 
+/// An async start's stdout on exit 0: its holder handle, canonical-domain JSON of at
+/// most 4 KiB.
+fn holder_handle(
+    stdout: &[u8],
+    total: usize,
+    fail: impl Fn(&str, String, Map<String, Value>, bool) -> ActivityOutput,
+) -> ActivityOutput {
+    if total > MAX_HOLDER_BYTES {
+        let message = format!("the holder handle is {total} bytes; at most {MAX_HOLDER_BYTES}");
+        return fail("command.output-too-large", message, Map::new(), false);
+    }
+    match canonical::parse(stdout) {
+        Ok(holder) => ActivityOutput::Held { holder },
+        Err(e) => {
+            let message = format!("stdout is not a holder handle, canonical-domain JSON: {e}");
+            fail("command.malformed-output", message, Map::new(), false)
+        }
+    }
+}
+
 /// Reads a result-mode stdout: `{"outcome", "output"}` or `{"error", "retryable"}`.
-fn result_output(stdout: &[u8]) -> Result<ActivityOutput, String> {
+pub(crate) fn result_output(stdout: &[u8]) -> Result<ActivityOutput, String> {
     let value = canonical::parse(stdout).map_err(|e| e.to_string())?;
     let shape = "expected {\"outcome\", \"output\"} or {\"error\", \"retryable\"}";
     let Value::Object(fields) = value else {
@@ -473,35 +668,12 @@ impl ActivityRunner for CommandRunner {
         };
         let stdin_bytes = canonical::to_vec(input).unwrap_or_default();
         let setup = |command: &mut Command| {
-            command
-                .current_dir(cwd)
-                .envs(spec.env.iter().cloned())
-                .env("RUNSPORE_RUN_ID", &ctx.key.run)
-                .env("RUNSPORE_NODE_ID", &ctx.node_id)
-                .env("RUNSPORE_INVOCATION_ID", &ctx.invocation_id)
-                .env("RUNSPORE_ATTEMPT", ctx.attempt.to_string())
-                .env("RUNSPORE_VISIT", ctx.visit.to_string())
-                .env("RUNSPORE_EFFECT_KEY", &ctx.effect_key)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            // After `env`, so a workflow cannot point its steps at another database.
-            if let Some(db) = &ctx.db {
-                command.env("RUNSPORE_DB", db);
-            }
-            // After `env` too; one the step lacks is removed, so a value the worker
-            // inherited never reaches it.
-            let files = ctx.files.as_ref();
-            let instructions = files.and_then(|f| f.instructions.as_ref());
-            for (name, value) in [
-                ("RUNSPORE_STEP_FILES", files.map(|f| &f.dir)),
-                ("RUNSPORE_INSTRUCTIONS", instructions),
-                ("RUNSPORE_WORK_DIR", ctx.work_dir.as_ref()),
-            ] {
-                match value {
-                    Some(path) => command.env(name, path),
-                    None => command.env_remove(name),
-                };
+            prepare(command, ctx, &cwd, &spec.env);
+            // An async start's work reports with the attempt's token.
+            if let (true, Some(token)) = (spec.is_async, &ctx.token) {
+                command
+                    .env("RUNSPORE_TOKEN", token)
+                    .env("RUNSPORE_RESULT_CHANNEL", STORE_CHANNEL);
             }
         };
         if let Some(program) = ctx.files.as_ref().and_then(|f| f.program(&argv[0])) {
@@ -582,6 +754,9 @@ impl ActivityRunner for CommandRunner {
                 return unknown("command.signaled", message, streams);
             }
         };
+        if spec.is_async && code == 0 {
+            return holder_handle(&stdout.kept, stdout.total, fail);
+        }
         let mapped = spec.exit_outcomes.iter().find(|(c, _)| *c == code);
         let outcome = match mapped {
             Some((_, name)) => name.clone(),
