@@ -67,17 +67,25 @@ fn group_alive(group: i32) -> bool {
     killpg(Pid::from_raw(group), None) != Err(Errno::ESRCH)
 }
 
-/// The start of H33: detaches a job in a process group of its own, with its streams
-/// away from the start's, and prints the job's handle. The job waits for `go`, then
-/// reports through `spore step complete` with the attempt's token.
+/// The start of H33: detaches a job in a session and process group of its own
+/// (`setsid`), with its streams away from the start's, and prints the job's handle.
+/// The job waits for `go`, then reports through `spore step complete` with the
+/// attempt's token. Perl's `setsid` stands in for the `setsid` tool, which macOS
+/// lacks; `set -m` is no substitute, as dash turns job control off without a tty.
+/// The start waits for the job's `job.pid`, written after `setsid`: ending sooner
+/// would let the guard kill the start's group with the job still in it.
 fn detaching_start() -> String {
     format!(
-        "printf %s \"$RUNSPORE_RUN_ID\" > run_id; set -m; \
-         (while [ ! -f go ]; do sleep 0.05; done; \
-          '{BIN}' --native-kernel --json step complete \"$RUNSPORE_TOKEN\" --outcome ok \
-             --output '{{\"from\": \"job\"}}' > reported.tmp; mv reported.tmp reported.json) \
+        "printf %s \"$RUNSPORE_RUN_ID\" > run_id; \
+         perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' /bin/sh -c \
+           'echo $$ > job.pid.tmp; mv job.pid.tmp job.pid; \
+            while [ ! -f go ]; do sleep 0.05; done; \
+            \"$0\" --native-kernel --json step complete \"$RUNSPORE_TOKEN\" --outcome ok \
+               --output \"{{\\\"from\\\": \\\"job\\\"}}\" > reported.tmp; \
+            mv reported.tmp reported.json' '{BIN}' \
            < /dev/null > /dev/null 2>&1 & \
-         echo $! > job.pid; echo \"{{\\\"pid\\\": $!}}\""
+         while [ ! -f job.pid ]; do sleep 0.01; done; \
+         echo \"{{\\\"pid\\\": $(cat job.pid)}}\""
     )
 }
 
