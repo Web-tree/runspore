@@ -760,8 +760,8 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
     let deadline_ms = q.deadline_duration_ms.map(|d| now.saturating_add(d));
     let lease_until_ms = capped(now.saturating_add(q.lease_duration_ms), deadline_ms);
     c.execute(
-        "UPDATE runs SET fence = ?3 WHERE tenant = ?1 AND run_id = ?2",
-        params![q.key.tenant, q.key.run, i(fence)],
+        "UPDATE runs SET fence = ?3, updated_at_ms = ?4 WHERE tenant = ?1 AND run_id = ?2",
+        params![q.key.tenant, q.key.run, i(fence), i(now)],
     )
     .map_err(db)?;
     c.execute(
