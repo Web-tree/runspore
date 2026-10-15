@@ -12,32 +12,11 @@ permissions:
   contents: read
 
 jobs:
+  # As the webtree-release App, so the release PR gets its pull_request checks.
   release-please:
-    runs-on: ubuntu-latest
-    # Never cancelled: a later run finds a merged release PR this one skipped and releases it.
-    concurrency:
-      group: release-please
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
-    outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name: ${{ steps.rp.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@v5
-        id: rp
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-      # A push made with GITHUB_TOKEN starts no pull_request run, so the release PR would
-      # never get its required checks; a workflow_dispatch is the exception.
-      - name: Run CI on the release PR
-        if: steps.rp.outputs.prs_created == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ steps.rp.outputs.pr }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
+      id-token: write
+    uses: Web-tree/actions/.github/workflows/release-please.yml@v1
 
   release:
     needs: release-please

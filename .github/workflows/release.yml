@@ -1,6 +1,7 @@
 # Builds the four archives of spec/release.md. With a release tag it also signs,
 # attests and publishes them: release-please.yml calls it with the tag of the release
-# it just made, and a tag v* pushed by hand starts it too. Called with no tag (every
+# it just made, and a tag v* pushed by hand starts it too. The push of the tag
+# release-please made starts it as well, and that run does nothing. Called with no tag (every
 # other push to main), it builds and keeps the archives as workflow artifacts only.
 # The contract is spec/release.md; a failure at any step publishes nothing.
 name: release
@@ -30,6 +31,8 @@ env:
 
 jobs:
   build:
+    # The webtree-release App made this tag, and the release-please.yml run that made it publishes it.
+    if: ${{ !(github.ref_type == 'tag' && github.actor == 'webtree-release[bot]') }}
     strategy:
       matrix:
         include:

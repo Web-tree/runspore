@@ -4,8 +4,6 @@ on:
   pull_request:
   push:
     branches: [main]
-  # release-please.yml starts it on the release PR, which GITHUB_TOKEN pushes.
-  workflow_dispatch:
 
 permissions:
   contents: read
