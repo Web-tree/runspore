@@ -160,9 +160,12 @@ bumps the minor version and a `fix` the patch; a `!` (breaking change) bumps the
 minor version too. The first release is `0.2.0`: `release-as` in the config pins it,
 and is removed once 0.2.0 is out.
 
-release-please pushes the release PR with `GITHUB_TOKEN`, which starts no
-`pull_request` workflow, so the same run starts `ci.yml` on the PR's branch by
-`workflow_dispatch`, which gives the PR its required checks.
+release-please runs as the org's `webtree-release` GitHub App, through the shared
+workflow `Web-tree/actions/.github/workflows/release-please.yml`. A release PR pushed
+with `GITHUB_TOKEN` would get its `pull_request` checks only after someone approves
+them; pushed by the App, it gets them like any other PR. The job reads the App's
+credentials from AWS SSM through the role in `AWS_ROLE`, a secret of the `release`
+environment, which only `main` may deploy to.
 
 Merging the release PR is the release: the push of that merge makes release-please
 tag `v<version>` and create the GitHub release, with the PR's changelog as its notes.
@@ -171,9 +174,9 @@ tag `v<version>` and create the GitHub release, with the PR's changelog as its n
 
 `.github/workflows/release.yml` is a reusable workflow. `release-please.yml` calls it
 on every push to `main`: with the new tag when release-please made a release, with no
-tag otherwise. A tag pushed with `GITHUB_TOKEN` starts no other workflow, so the
-release is built in the run that made it. A tag `v*` pushed by hand also starts
-`release.yml`, for a release that has to be made again.
+tag otherwise, so the release is built in the run that made it. The push of the tag
+the App made starts `release.yml` too, and that run skips every job. A tag `v*`
+pushed by hand also starts `release.yml`, for a release that has to be made again.
 
 With no tag, it builds each archive of §1 on a runner of its operating system and
 keeps them as workflow artifacts for 7 days; it signs and publishes nothing. A target
