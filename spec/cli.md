@@ -264,10 +264,11 @@ Text mode prints one line per field, such as `async kinds     command, external`
 
 `validate`, `build`, `start` and `run` check every action against the set and refuse
 a workflow that asks for something outside it, naming the action and what to
-configure (`action.component-unsupported`, `action.no-result-channel`; dot.md §6;
-`start` of an artifact also `action.kind-unregistered` and `action.async-unsupported`,
-host.md §2). `start` records the result channel it picked
-for each async action with the run, and `step claim` returns it as `resultChannel`.
+configure (`action.component-unsupported`, `action.no-result-channel`; dot.md §6).
+`start` of an artifact also refuses an action of a kind this `spore` does not run or
+does not run async (`action.kind-unregistered`, `action.async-unsupported`; host.md
+§2). `start` records the result channel it picked for each async action with the run,
+and `step claim` returns it as `resultChannel`.
 When a later `spore` cannot act on a step the way the run recorded, it leaves the step
 untouched: `status` shows the step as `capability-missing` with what to restore, and
 `run` and `worker --until-parked` stop there with exit 6.
@@ -321,6 +322,7 @@ someone is one of:
 | `stuck` | It needs intervention: a stuck step, or an unsafe step whose outcome is unknown |
 | `external-ready` | It is at an external step nobody holds (§Steps outside the worker) |
 | `held` | It is at an async step that is held: an external step an actor holds, or an async command whose started work has not reported |
+| `capability-missing` | It is at a step this `spore` cannot act on the way the run recorded (§Capabilities) |
 
 **`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
 was created), one line each and not as a tree: the run, its workflow, its node, what
@@ -370,6 +372,7 @@ With `<runId>`, or the one unfinished run, it:
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
    | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, and `spore step abandon <runId>` | 6 |
+   | at a `capability-missing` step | the step and what this `spore` lacks and what to restore, as `status` gives it in `step.missing`; no command | 6 |
 
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
@@ -800,7 +803,8 @@ here is recorded for `status`: it is read from the state, the package and the st
     the attempt's process record, null until the program has started.
   - `queued`: the try is due and nobody has claimed it: it waits for a worker with a
     free slot (`slots` below), or for any worker at all; at an external step, for an
-    actor to claim it (`step`). `sinceMs` is when the try
+    actor to claim it (`step`); at a `capability-missing` step, for a `spore` that
+    can act on it (`step`). `sinceMs` is when the try
     was due: the later of the transition that scheduled it and the end of its
     backoff.
   - `backoff`: the try is not due yet; `sinceMs` is when it will be, `forMs` is
@@ -821,8 +825,9 @@ for a worker to run.
 
 Text mode shows `running` as `started by <worker> since …, for …, pid <pid>`,
 `queued for a free worker slot since …, for …` (at an external step `queued for an
-actor to claim it since …`) or `waiting to retry, due …`. Under it, except at an
-external step, `slots` shows, per worker, `<n> of <limit> in use by <worker>` and one line per step it
+actor to claim it since …`, at a `capability-missing` step `queued for a spore that
+can run it since …`) or `waiting to retry, due …`. Under it, except at an external or
+`capability-missing` step, `slots` shows, per worker, `<n> of <limit> in use by <worker>` and one line per step it
 runs: the run's start key, the node, the attempt, the pid and since when; with none,
 `none of <limit> in use: no worker runs a step`.
 

@@ -10,6 +10,8 @@
 //! - Receipt lookup, the mutation, and receipt insertion share one transaction.
 //! - Time is the store's authority clock, sampled after the write lock is held.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -202,6 +204,10 @@ pub struct CreateRun {
     /// of the run's identity: a repeat with another parent is a duplicate and keeps
     /// the first.
     pub parent: Option<RunParent>,
+    /// The result channel `start` picked for each async action, by action ID. Not part
+    /// of the run's identity: a repeat with other channels is a duplicate and keeps the
+    /// first.
+    pub result_channels: BTreeMap<String, String>,
 }
 
 /// The step a run was started from: a run of the same tenant and the node it was at.
@@ -555,6 +561,8 @@ pub struct RunView {
     pub base_dir: Option<String>,
     /// The parent recorded at `create_run`.
     pub parent: Option<RunParent>,
+    /// The result channels recorded at `create_run`, by action ID.
+    pub result_channels: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

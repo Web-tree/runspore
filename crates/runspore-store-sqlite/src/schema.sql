@@ -33,6 +33,7 @@ CREATE TABLE runs (
     artifact_digest TEXT,
     parent_run_id TEXT,
     parent_node_id TEXT,
+    result_channels TEXT,
     PRIMARY KEY (tenant, run_id),
     UNIQUE (tenant, start_key)
 );

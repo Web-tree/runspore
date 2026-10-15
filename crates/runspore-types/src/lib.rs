@@ -1,6 +1,7 @@
 //! The frozen contract every Runspore crate builds against.
 //!
 //! - [`artifact`]: the workflow artifact's manifest and entry-path rules.
+//! - [`capabilities`]: what a host offers, and how an action falls short of it.
 //! - [`canonical`]: the one JSON encoding used for anything hashed or stored.
 //! - [`digest`]: digests and derived identities.
 //! - [`model`]: workflow document, run state, event and command payloads.
@@ -13,6 +14,7 @@
 
 pub mod artifact;
 pub mod canonical;
+pub mod capabilities;
 pub mod digest;
 #[cfg(not(target_family = "wasm"))]
 pub mod failpoint;

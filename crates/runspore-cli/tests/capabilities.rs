@@ -1,0 +1,147 @@
+//! `spore capabilities` and the handshake (spec/cli.md §Capabilities, spec/host.md §2,
+//! The handshake): what this spore offers, a workflow that asks for more, and a run at
+//! a step this spore cannot act on.
+
+mod common;
+
+use std::sync::Arc;
+
+use common::Dir;
+use runspore_host::{
+    ActivityOutput, ActivityRegistry, CommandRunner, Engine, EngineConfig, NativeRunner,
+};
+use runspore_kernel::NativeReducer;
+use runspore_store_sqlite::SqliteStore;
+use serde_json::{json, Value};
+
+/// `spore --json --native-kernel …`: the exit code and the JSON it printed.
+fn json(dir: &Dir, extra: &[&str]) -> (Option<i32>, Value) {
+    let mut all = vec!["--json", "--native-kernel", "--poll-ms", "20"];
+    all.extend_from_slice(extra);
+    let out = dir.run(&all);
+    (out.code(), out.json())
+}
+
+#[test]
+fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database() {
+    let dir = Dir::new("capabilities");
+    let (code, out) = json(&dir, &["capabilities"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert_eq!(out["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        out["contracts"],
+        json!({"artifact": "0.1", "cli": "0.2", "dot": "0.2", "host": "0.2",
+               "kernel": "0.2", "schema": "0.2", "store": "0.2"})
+    );
+    assert_eq!(out["actionKinds"], json!(["command", "external", "native"]));
+    assert_eq!(out["asyncKinds"], json!(["command", "external"]));
+    assert_eq!(out["resultChannels"], json!(["store"]));
+    assert!(!dir.file("runspore.db").exists());
+
+    let text = dir.run(&["capabilities"]).stdout;
+    assert!(
+        text.contains("async kinds     command, external\n"),
+        "{text}"
+    );
+    assert!(text.contains("result channels store\n"), "{text}");
+}
+
+#[test]
+fn validate_and_start_refuse_a_result_channel_this_spore_does_not_offer() {
+    let dir = Dir::new("no-channel");
+    let flow = dir.folder(
+        "review",
+        &json!({
+            "format": "runspore.workflow/0.2", "name": "review", "start": "review",
+            "actions": {"review": {"kind": "external", "effect": "unsafe",
+                                   "async": {"channels": ["nats"]}}},
+            "nodes": {
+                "review": {"kind": "activity", "action": "review", "outcomes": {"ok": "done"}},
+                "done": {"kind": "complete"}
+            }
+        }),
+    );
+    let flow = flow.to_str().unwrap();
+    let (code, out) = json(&dir, &["validate", flow]);
+    assert_eq!(code, Some(2), "{out}");
+    assert_eq!(out["diagnostics"][0]["code"], "action.no-result-channel");
+    let (code, out) = json(&dir, &["start", flow]);
+    assert_eq!(code, Some(2), "{out}");
+    assert_eq!(out["error"]["code"], "workflow.invalid");
+    assert_eq!(
+        out["error"]["details"]["diagnostics"][0]["code"],
+        "action.no-result-channel"
+    );
+}
+
+/// A run of a `native` step, started and coordinated by engines in this process: one
+/// that has the function starts it, one with no `native` runner moves it to the step.
+/// `spore` has no such function, so the step is one it cannot act on.
+fn at_a_native_step(dir: &Dir) -> String {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let path = dir.file("runspore.db");
+        let engine = |activities| {
+            Engine::new(
+                Arc::new(SqliteStore::open(&path).unwrap()),
+                Arc::new(NativeReducer),
+                activities,
+                EngineConfig::default(),
+            )
+        };
+        let native = NativeRunner::new().function("work", |_, _| async {
+            ActivityOutput::Success {
+                outcome: "ok".into(),
+                output: Value::Null,
+            }
+        });
+        let workflow = serde_json::to_vec(&json!({
+            "format": "runspore.workflow/0.2", "name": "work", "start": "work",
+            "actions": {"work": {"kind": "native", "function": "work", "effect": "pure"}},
+            "nodes": {
+                "work": {"kind": "activity", "action": "work", "outcomes": {"ok": "done"}},
+                "done": {"kind": "complete"}
+            }
+        }))
+        .unwrap();
+        let with = engine(ActivityRegistry::with_builtins(native));
+        let key = with.start(&workflow, json!({}), "k").await.unwrap().key;
+        let without = engine(ActivityRegistry::new().with("command", Arc::new(CommandRunner)));
+        without.run_until_parked(&key).await.unwrap();
+        key.run
+    })
+}
+
+#[test]
+fn status_and_worker_show_a_step_this_spore_cannot_act_on_and_leave_it_untouched() {
+    let dir = Dir::new("capability-missing");
+    let run = at_a_native_step(&dir);
+
+    let (code, out) = json(&dir, &["worker", "--run", &run, "--until-parked"]);
+    assert_eq!(code, Some(6), "{out}");
+    assert_eq!(out["status"], "running");
+    let step = &out["step"];
+    assert_eq!(
+        (&step["kind"], &step["state"], &step["attempt"]),
+        (&json!("native"), &json!("capability-missing"), &json!(1))
+    );
+    let missing = step["missing"].as_str().unwrap();
+    assert!(
+        missing.contains("no native function `work` is registered"),
+        "{missing}"
+    );
+    assert_eq!(out["running"]["state"], "queued");
+    assert_eq!(out["running"]["claimed"], false);
+
+    let text = dir.run(&["status", &run]).stdout;
+    assert!(
+        text.contains("step       native capability-missing, attempt 1\n"),
+        "{text}"
+    );
+    assert!(text.contains(&format!("missing    {missing}\n")), "{text}");
+    assert!(
+        text.contains("queued for a spore that can run it"),
+        "{text}"
+    );
+    assert!(!text.contains("slots "), "{text}");
+}

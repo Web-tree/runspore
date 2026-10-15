@@ -1,0 +1,16 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "review": {
+      "kind": "external",
+      "actor": "reviewer",
+      "effect": "unsafe",
+      "async": {
+        "probe": { "command": { "argv": ["true"] } }
+      }
+    }
+  },
+  "nodes": {
+    "review": { "action": "review" }
+  }
+}

@@ -17,7 +17,7 @@ use runspore_types::store::*;
 use serde_json::{json, Map, Value};
 use tokio::sync::watch;
 
-use super::{evidence, lock, retry, Inner, Package};
+use super::{evidence, lock, retry, Inner, Package, CAPABILITY_MISSING};
 use crate::activity::{ActivityContext, ActivityOutput};
 use crate::error::HostError;
 use crate::external;
@@ -225,7 +225,9 @@ impl Inner {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let Some(runner) = self.activities.get(kind).cloned() else {
-            return failure("host.runner-missing", kind.to_string(), Value::Null);
+            let shortfall = self.capabilities.recheck(action, None);
+            let message = shortfall.map_or_else(|| kind.to_string(), |s| s.to_string());
+            return failure(CAPABILITY_MISSING, message, Value::Null);
         };
         let params = match &notice.params {
             None => Value::Object(Map::new()),

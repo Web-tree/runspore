@@ -162,10 +162,7 @@
       "type": "object"
     },
     "Channel": {
-      "description": "A result channel: `store`, through `spore step complete` and `spore step fail`.",
-      "enum": [
-        "store"
-      ],
+      "description": "A result channel. `spore` offers `store`, through `spore step complete` and\n`spore step fail`; a list with none it offers is `action.no-result-channel`.",
       "type": "string"
     },
     "CommandResult": {
@@ -329,15 +326,18 @@
     "Program": {
       "additionalProperties": false,
       "description": "A program that looks after an async action's holder, named by how it is run.",
+      "minProperties": 1,
       "properties": {
         "command": {
           "$ref": "#/$defs/ProgramCommand",
           "description": "Run as a command, with the holder handle on stdin."
+        },
+        "component": {
+          "additionalProperties": true,
+          "description": "Run as a component. No `spore` runs one yet: `action.component-unsupported`.",
+          "type": "object"
         }
       },
-      "required": [
-        "command"
-      ],
       "type": "object"
     },
     "ProgramCommand": {

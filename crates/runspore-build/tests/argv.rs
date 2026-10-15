@@ -119,7 +119,9 @@ fn an_argv_item_is_a_string_or_a_mapping() {
 #[test]
 fn probe_watch_and_stop_argv_mappings_are_checked_too() {
     for program in ["probe", "watch", "stop"] {
-        let mut action = command(json!(["make"]));
+        // An external action: this spore runs no `command` async (spec/host.md §2, The
+        // handshake).
+        let mut action = json!({"kind": "external", "effect": "unsafe"});
         action["async"] = json!({
             program: {"command": {"argv": ["check", {"$get": ["step", "attempt"]}]}}
         });
@@ -144,7 +146,8 @@ fn probe_watch_and_stop_argv_mappings_are_checked_too() {
 
 /// An async command's `async` has the shapes the host takes (spec/dot.md §4, host.md §3,
 /// Async commands): tagged programs, the `store` channel, a lease shorter than the
-/// deadline.
+/// deadline. A component program and a channel this spore does not offer are refused
+/// by the handshake (host.md §2).
 #[test]
 fn an_async_command_takes_tagged_programs_and_the_store_channel() {
     let mut action = command(json!(["start"]));
@@ -158,10 +161,17 @@ fn an_async_command_takes_tagged_programs_and_the_store_channel() {
         (
             "probe",
             json!({"component": {"ref": "./p.wasm", "export": "probe"}}),
-            "settings.unknown-key",
+            "action.component-unsupported",
         ),
+        (
+            "probe",
+            json!({"commnd": {"argv": ["check"]}}),
+            "settings.typo-key",
+        ),
+        ("stop", json!({}), "settings.empty"),
         ("watch", json!({"command": {"argv": []}}), "settings.empty"),
-        ("channels", json!(["nats"]), "settings.not-allowed"),
+        ("channels", json!(["nats"]), "action.no-result-channel"),
+        ("channels", json!([]), "settings.empty"),
         ("leaseMs", json!("60000"), "action.lease-too-long"),
     ] {
         let mut bad = action.clone();

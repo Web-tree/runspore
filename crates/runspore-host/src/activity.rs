@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runspore_types::capabilities::{HostCapabilities, STORE_CHANNEL};
 use runspore_types::model::ErrorInfo;
 use runspore_types::store::{ProcessRecord, RunKey};
 use serde_json::{json, Map, Value};
@@ -98,6 +99,9 @@ pub struct ActivityContext {
     /// The attempt's token, given to an async command's start command as
     /// `RUNSPORE_TOKEN`; none outside an engine's attempt.
     pub token: Option<String>,
+    /// The result channel the run recorded for the action, given to an async command's
+    /// start command as `RUNSPORE_RESULT_CHANNEL`; `store` when it recorded none.
+    pub result_channel: String,
     stop: watch::Receiver<bool>,
 }
 
@@ -153,6 +157,7 @@ impl ActivityContext {
             stop_grace: Duration::from_millis(DEFAULT_STOP_GRACE_MS),
             process: Arc::new(|_| Box::pin(async { Ok(()) })),
             token: None,
+            result_channel: STORE_CHANNEL.to_string(),
             stop,
         }
     }
@@ -242,6 +247,11 @@ impl ActivityRegistry {
     /// The runner for `kind`.
     pub fn get(&self, kind: &str) -> Option<&Arc<dyn ActivityRunner>> {
         self.runners.get(kind)
+    }
+
+    /// What a host with these runners offers (spec/host.md §2, The handshake).
+    pub fn capabilities(&self) -> HostCapabilities {
+        HostCapabilities::of(self.runners.keys().map(String::as_str))
     }
 }
 

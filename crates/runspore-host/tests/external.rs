@@ -104,7 +104,12 @@ async fn h27_the_worker_never_runs_an_external_step_and_parks_there() {
     assert_eq!(w.parked().await, "running");
     let step = w.step().await.expect("at an external step");
     assert_eq!(
-        (step.kind, step.actor.as_deref(), step.state, step.attempt),
+        (
+            step.kind.as_str(),
+            step.actor.as_deref(),
+            step.state,
+            step.attempt
+        ),
         ("external", Some("reviewer"), StepState::Ready, 1)
     );
     assert_eq!((step.holder, step.deadline_ms), (None, None));
@@ -140,7 +145,7 @@ async fn h27_only_a_claim_naming_the_label_takes_the_step() {
         (
             claim.deadline_ms,
             claim.lease_until_ms,
-            claim.result_channel
+            claim.result_channel.as_str()
         ),
         (T0 + 60_000, T0 + 10_000, "store")
     );

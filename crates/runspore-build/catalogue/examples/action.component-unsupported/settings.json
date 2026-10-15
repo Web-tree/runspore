@@ -1,0 +1,16 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "review": {
+      "kind": "external",
+      "actor": "reviewer",
+      "effect": "unsafe",
+      "async": {
+        "probe": { "component": { "ref": "./alive.wasm", "export": "probe" } }
+      }
+    }
+  },
+  "nodes": {
+    "review": { "action": "review" }
+  }
+}

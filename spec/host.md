@@ -442,19 +442,20 @@ found by its start key keeps the channels it was created with.
 channel the run recorded rather than a new pick: the action's kind is in
 `actionKinds`; an async action's kind is in `asyncKinds` and its recorded channel in
 `resultChannels` (a run that recorded none counts `store`); no `probe`, `watch` or
-`stop` has the `component` form. When the check falls short, the host leaves the
-invocation untouched: it claims nothing, so no attempt is spent and no lease starts.
-The step is **capability-missing** until a host that has the capability serves the
-run, which then runs it as usual.
+`stop` has the `component` form; and the runner of its kind accepts it, as its
+`validate` did at `start` (a `native` action's function is registered). When the
+check falls short, the host leaves the invocation untouched: it claims nothing, so no
+attempt is spent and no lease starts. The step is **capability-missing** until a host
+that has the capability serves the run, which then runs it as usual.
 
 `async_step(view)` describes such a step when the run is `running`, has no pending
 event, and its outstanding invocation is `scheduled`, pending, with an action this
 host falls short of: the action's kind and actor, the state `capability-missing`, the
 attempt number, and `missing`, a sentence that says what the host lacks and what to
-restore, for example "this host has no runner for kind `native`: serve the run with a
-host that registers one". A held async step stays `held`: its attempt is its
-holder's, and the host does not touch it. `run_until_parked` returns at a
-capability-missing step, as at an async one.
+restore, for example "this host has no runner for kind `native`; it runs `command`,
+`external`: use a host that registers one, or one of those kinds". A held async step
+stays `held`: its attempt is its holder's, and the host does not touch it.
+`run_until_parked` returns at a capability-missing step, as at an async one.
 
 ### Telling a person (0.2)
 

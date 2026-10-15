@@ -27,6 +27,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use runspore_types::artifact::{self, EntryKind, Manifest, Owner};
+use runspore_types::capabilities::HostCapabilities;
 use runspore_types::{canonical, digest};
 use serde_json::Value;
 
@@ -154,13 +155,16 @@ pub fn name(folder: &Path) -> Result<String, BuildError> {
     }
 }
 
-/// Where programs are looked up, and which native functions exist, when the build
-/// checks what a run will need.
+/// Where programs are looked up, which native functions exist, and what the host
+/// offers, when the build checks what a run will need.
 #[derive(Debug, Clone)]
 pub struct Machine {
     pub programs: Programs,
     /// The native functions the host registered; `None` does not check them.
     pub functions: Option<Vec<String>>,
+    /// The host's capability set (spec/host.md §2, The handshake); `None` does not
+    /// check actions against it.
+    pub host: Option<HostCapabilities>,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +183,15 @@ impl Machine {
         Self {
             programs: Programs::Path(std::env::var_os("PATH").unwrap_or_default()),
             functions: Some(Vec::new()),
+            host: None,
+        }
+    }
+
+    /// This machine, checking actions against what `host` offers.
+    pub fn offering(self, host: HostCapabilities) -> Self {
+        Self {
+            host: Some(host),
+            ..self
         }
     }
 
@@ -187,14 +200,17 @@ impl Machine {
         Self {
             programs: Programs::Unchecked,
             functions: None,
+            host: None,
         }
     }
 
-    /// The machine the catalogue's examples assume: the programs they name exist.
+    /// The machine the catalogue's examples assume: the programs they name exist, and
+    /// the host offers what `spore` does.
     pub fn examples() -> Self {
         Self {
             programs: Programs::Known(EXAMPLE_PROGRAMS.iter().map(|p| p.to_string()).collect()),
             functions: Some(Vec::new()),
+            host: Some(HostCapabilities::of(["command", "native"])),
         }
     }
 }

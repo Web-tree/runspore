@@ -3,6 +3,7 @@
 //! Scenarios S01 to S22 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -93,6 +94,7 @@ pub fn create_run(key: &RunKey, request_id: &str, variant: u32) -> CreateRun {
         base_dir: None,
         artifact: None,
         parent: None,
+        result_channels: BTreeMap::new(),
     }
 }
 
@@ -1884,6 +1886,43 @@ pub async fn s23_parent(factory: &dyn StoreFactory) {
     assert_eq!(run.parent, None);
 }
 
+/// S27: the run keeps the result channels it was created with; a repeat with others is
+/// a duplicate, and a run created without any shows none.
+pub async fn s27_result_channels(factory: &dyn StoreFactory) {
+    let fixture = factory.fresh(ManualClock::new(1_000));
+    let store = fixture.store.as_ref();
+    let key = RunKey::new(DEFAULT_TENANT, "s25");
+    let channels = |channel: &str| BTreeMap::from([("review".to_string(), channel.to_string())]);
+    let mut first = create_run(&key, "create", 0);
+    first.result_channels = channels("store");
+    store.create_run(first.clone()).await.unwrap();
+    let mut other = first.clone();
+    other.result_channels = channels("nats");
+    other.mutation = mutation(
+        "create_run",
+        "create-again",
+        json!([key, "start", first.package_digest, first.started.digest]),
+    );
+    let again = store.create_run(other).await.unwrap();
+    assert_eq!(again.disposition, Disposition::Duplicate);
+    let run = store.get_run(&key).await.unwrap().expect("run");
+    assert_eq!(run.result_channels, channels("store"));
+    let listed = store
+        .list_runs(DEFAULT_TENANT, None, 10)
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(listed[0].result_channels, channels("store"));
+
+    let bare = RunKey::new(DEFAULT_TENANT, "s25-none");
+    store
+        .create_run(create_run(&bare, "create-none", 0))
+        .await
+        .unwrap();
+    let run = store.get_run(&bare).await.unwrap().expect("run");
+    assert!(run.result_channels.is_empty());
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -1896,7 +1935,7 @@ macro_rules! store_conformance_tests {
             s15_start_key_race s16_process_record s17_base_dir
             s18_artifact s19_holder_and_deadline s20_expire_reasons s21_deadline_sweep
             s22_params s23_parent s24_claimed_at s25_updated_at
-            s26_hold_attempt);
+            s26_hold_attempt s27_result_channels);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

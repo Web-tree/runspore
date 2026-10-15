@@ -10,7 +10,8 @@ use runspore_types::store::{EventRecord, InvocationStatus, InvocationView, RunVi
 use serde_json::{json, Value};
 
 /// The exit code a parked run maps to: quarantine first, then the run status. A
-/// running run parked at an async step waits on an actor or on the work it started.
+/// running run parked at an async step waits on an actor or on the work it started; one
+/// at a step this spore lacks a capability for waits on a host that has it.
 pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
     if view.quarantine.is_some() {
         return 5;
@@ -25,14 +26,15 @@ pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
     }
 }
 
-/// The `step` object of `status`: the async step the run is at, or null. Never its
-/// input or token.
+/// The `step` object of `status`: the async step the run is at, or the step this spore
+/// lacks a capability for, or null. Never its input or token.
 fn step_json(step: Option<&AsyncStep>) -> Value {
     step.map_or(Value::Null, |s| {
         json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
                "deadlineMs": s.deadline_ms.map(|d| d.to_string()),
-               "leaseUntilMs": s.lease_until_ms.map(|l| l.to_string())})
+               "leaseUntilMs": s.lease_until_ms.map(|l| l.to_string()),
+               "missing": s.missing})
     })
 }
 
@@ -53,7 +55,11 @@ fn step_text(step: Option<&AsyncStep>) -> String {
     if let Some(deadline) = s.deadline_ms {
         text += &format!(", deadline {deadline} ms");
     }
-    text + "\n"
+    text += "\n";
+    if let Some(missing) = &s.missing {
+        text += &format!("missing    {missing}\n");
+    }
+    text
 }
 
 fn state(view: &RunView) -> Option<State> {
@@ -230,6 +236,14 @@ impl Shown {
                 }
                 (head, vec![format!("spore step abandon {run}")])
             }
+            Some("capability-missing") => {
+                let missing = self.step.as_ref().and_then(|s| s.missing.as_deref());
+                let why = missing.map_or_else(String::new, |m| format!(": {m}"));
+                (
+                    format!("run {run} at {node} needs a spore that can run it{why}"),
+                    Vec::new(),
+                )
+            }
             Some(_) => (
                 format!("run {run} is working at {node}"),
                 vec![format!("spore continue {run}")],
@@ -345,6 +359,7 @@ pub fn needs(view: &RunView, step: Option<&AsyncStep>) -> Option<&'static str> {
         _ => Some(match step.map(|s| s.state) {
             Some(StepState::Ready) => "external-ready",
             Some(StepState::Held) => "held",
+            Some(StepState::CapabilityMissing) => "capability-missing",
             None => "working",
         }),
     }
@@ -641,10 +656,11 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     }
     text += &waiting_text(&s["waiting"]);
     text += &intervention_text(&s["intervention"], &s["invocation"]);
-    // An external step waits for an actor, not for a worker's slot.
-    let external = shown.step.is_some();
-    text += &running_text(&s["running"], external);
-    if s["running"].is_object() && !external {
+    // An external step waits for an actor, and a capability-missing one for a spore
+    // that can run it, not for a worker's slot.
+    let waits = shown.step.as_ref().map(|step| step.state);
+    text += &running_text(&s["running"], waits);
+    if s["running"].is_object() && waits.is_none() {
         text += &slots_text(&s["slots"]);
     }
     for (node, streak) in s["streaks"].as_object().into_iter().flatten() {
@@ -751,8 +767,9 @@ fn intervention_text(intervention: &Value, invocation: &Value) -> String {
 }
 
 /// The try, and whether its program runs, it waits for a slot (an `external` step: for
-/// an actor) or it waits to retry.
-fn running_text(running: &Value, external: bool) -> String {
+/// an actor; a capability-missing one: for a spore that can run it) or it waits to
+/// retry.
+fn running_text(running: &Value, waits: Option<StepState>) -> String {
     if !running.is_object() {
         return String::new();
     }
@@ -771,7 +788,10 @@ fn running_text(running: &Value, external: bool) -> String {
             Some(due) => format!("waiting to retry, due {}", utc_text(due)),
             None => "waiting to retry".to_string(),
         },
-        _ if external => format!("queued for an actor to claim it{since}"),
+        _ if waits == Some(StepState::CapabilityMissing) => {
+            format!("queued for a spore that can run it{since}")
+        }
+        _ if waits.is_some() => format!("queued for an actor to claim it{since}"),
         _ => format!("queued for a free worker slot{since}"),
     };
     format!(

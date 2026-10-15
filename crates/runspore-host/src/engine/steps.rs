@@ -1,10 +1,12 @@
 //! Steps outside the worker (spec/host.md §2): an actor claims an `external` step's
 //! attempt, renews it, and reports its result; the work an async command started
-//! reports the same way; a person may abandon either.
+//! reports the same way; a person may abandon either. A step this host falls short of
+//! waits outside the worker too, as `capability-missing`.
 
 use std::path::PathBuf;
 
 use runspore_types::canonical;
+use runspore_types::capabilities::STORE_CHANNEL;
 use runspore_types::model::{
     ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, State, OUTCOME_EXHAUSTED,
 };
@@ -22,19 +24,18 @@ use crate::external::{self, Async, External, StepToken};
 use crate::files::Unmade;
 use crate::holder::Answer;
 
-/// The result channel a claim reports through: the store, by `step complete` or
-/// `step fail`.
-pub const RESULT_CHANNEL: &str = "store";
 /// The largest result body an actor may report.
 const MAX_RESULT_BYTES: usize = 64 * 1024;
 /// The code of a reported failure that names none.
 const STEP_FAILED: &str = "step.failed";
 
-/// Whether an async step waits for an actor or is held.
+/// Whether an async step waits for an actor or is held, or whether this host lacks
+/// what the step's action needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepState {
     Ready,
     Held,
+    CapabilityMissing,
 }
 
 impl StepState {
@@ -42,16 +43,18 @@ impl StepState {
         match self {
             Self::Ready => "ready",
             Self::Held => "held",
+            Self::CapabilityMissing => "capability-missing",
         }
     }
 }
 
-/// The async step a run is at, as `status` shows it: never its input, owner or
-/// fence.
+/// The step a run waits at outside the worker, as `status` shows it: an async step, or
+/// one this host falls short of. Never its input, owner or fence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsyncStep {
-    /// `external`, or `command` for an async command.
-    pub kind: &'static str,
+    /// The action's kind: `external`, `command` for an async command, or any kind this
+    /// host falls short of.
+    pub kind: String,
     pub actor: Option<String>,
     pub state: StepState,
     /// The attempt the kernel last authorized.
@@ -63,6 +66,8 @@ pub struct AsyncStep {
     pub holder: Option<Value>,
     pub deadline_ms: Option<u64>,
     pub lease_until_ms: Option<u64>,
+    /// While `capability-missing`: what this host lacks and what to restore.
+    pub missing: Option<String>,
 }
 
 /// What an actor gets from a claim: everything needed to do the step.
@@ -82,7 +87,8 @@ pub struct StepClaim {
     pub output_schemas: Value,
     pub deadline_ms: u64,
     pub lease_until_ms: u64,
-    pub result_channel: &'static str,
+    /// The result channel the run recorded for the action at `start`.
+    pub result_channel: String,
     /// The step files folder, its instructions file and the work folder, when the
     /// engine has a `files_dir`.
     pub files: Option<PathBuf>,
@@ -136,6 +142,7 @@ struct Wanted {
     outcomes: Vec<String>,
     schemas: Value,
     external: External,
+    channel: String,
 }
 
 /// A held attempt a token names, with what the host needs to check a report.
@@ -177,8 +184,9 @@ fn fresh_owner() -> Result<String, HostError> {
 }
 
 impl Engine {
-    /// The async step the run is at, if any (spec/host.md §2, Waiting on a step): an
-    /// external step, ready or held, or an async command's held attempt.
+    /// The async step the run is at, or the step this host falls short of, if any
+    /// (spec/host.md §2, Waiting on a step, The handshake): an external step, ready or
+    /// held, or an async command's held attempt.
     pub async fn async_step(&self, view: &RunView) -> Result<Option<AsyncStep>, HostError> {
         let state: Option<State> = view
             .snapshot
@@ -194,14 +202,22 @@ impl Engine {
         let Some(action) = package.actions.get(&scheduled.action_id) else {
             return Ok(None);
         };
+        let channel = view.result_channels.get(&scheduled.action_id);
+        let missing = self
+            .inner
+            .missing(&scheduled.action_id, action, channel.map(String::as_str));
         let is_external = external::is_external(action);
-        if !matches!(external::async_of(action), Ok(Some(_))) {
+        if !matches!(external::async_of(action), Ok(Some(_))) && missing.is_none() {
             return Ok(None);
         }
         let actor = match is_external {
             true => external::parse(action).ok().and_then(|e| e.actor),
             false => None,
         };
+        let kind = action
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let invocations = self.list_invocations(&view.key).await?;
         let Some(invocation) = invocations
             .into_iter()
@@ -209,20 +225,8 @@ impl Engine {
         else {
             return Ok(None);
         };
-        // An async command is held only once its start has handed over: a pending one
-        // waits for a worker, and a running one without a deadline is still starting.
-        let held_by_worker = invocation.deadline_ms.is_none();
-        match invocation.status {
-            InvocationStatus::Pending if !is_external => return Ok(None),
-            InvocationStatus::Running if !is_external && held_by_worker => return Ok(None),
-            _ => {}
-        }
         let mut step = AsyncStep {
-            kind: if is_external {
-                external::KIND
-            } else {
-                "command"
-            },
+            kind: kind.to_string(),
             actor,
             state: StepState::Ready,
             attempt: invocation.attempt_number,
@@ -232,9 +236,20 @@ impl Engine {
             holder: None,
             deadline_ms: None,
             lease_until_ms: None,
+            missing: None,
         };
+        // An async command is held only once its start has handed over: a pending one
+        // waits for a worker, and a running one without a deadline is still starting
+        // (or is a step a worker runs).
+        let held_by_worker = invocation.deadline_ms.is_none();
         match invocation.status {
+            InvocationStatus::Pending if missing.is_some() => {
+                step.state = StepState::CapabilityMissing;
+                step.missing = missing;
+            }
+            InvocationStatus::Pending if !is_external => return Ok(None),
             InvocationStatus::Pending => {}
+            InvocationStatus::Running if !is_external && held_by_worker => return Ok(None),
             InvocationStatus::Running => {
                 step.state = StepState::Held;
                 step.holder = invocation
@@ -313,9 +328,9 @@ impl Engine {
         }))
     }
 
-    /// Whether the run waits on something outside this engine: it is `running` at an
-    /// async step with no pending event, and this engine does not watch the step, or its
-    /// watch says that the holder waits for a person.
+    /// Whether the run waits on something outside this engine: it is `running` with no
+    /// pending event at a step this host falls short of, or at an async step this engine
+    /// does not watch, or whose watch says that the holder waits for a person.
     pub(super) async fn waits_outside(&self, view: &RunView) -> Result<bool, HostError> {
         let pending = view.applied_sequence + 1 < view.next_sequence;
         if pending || view.quarantine.is_some() || view.status != "running" {
@@ -366,7 +381,7 @@ impl Engine {
             }
         }
         for (key, invocation_id) in self.ready_steps(run).await? {
-            let Some((invocation, package)) =
+            let Some((invocation, package, channel)) =
                 self.inner.invocation_package(&key, &invocation_id).await?
             else {
                 continue;
@@ -381,7 +396,13 @@ impl Engine {
             let Ok(external) = external::parse(action) else {
                 continue;
             };
-            if external.actor.as_deref() != actor {
+            // A step this host falls short of is not claimed, so its attempt is untouched.
+            if external.actor.as_deref() != actor
+                || self
+                    .inner
+                    .missing(&invocation.action_id, action, channel.as_deref())
+                    .is_some()
+            {
                 continue;
             }
             let wanted = Wanted {
@@ -393,6 +414,7 @@ impl Engine {
                     .cloned()
                     .unwrap_or_else(|| json!({})),
                 external,
+                channel: channel.unwrap_or_else(|| STORE_CHANNEL.to_string()),
             };
             if let Some(claim) = self
                 .claim_one(&key, &invocation_id, wanted, holder.clone())
@@ -504,7 +526,7 @@ impl Engine {
             output_schemas: wanted.schemas,
             deadline_ms: claim.deadline_ms.unwrap_or(claim.lease_until_ms),
             lease_until_ms: claim.lease_until_ms,
-            result_channel: RESULT_CHANNEL,
+            result_channel: wanted.channel,
             files: files.map(|f| f.dir.clone()),
             instructions: files.and_then(|f| f.instructions.clone()),
             work_dir: delivery.work_dir.clone(),

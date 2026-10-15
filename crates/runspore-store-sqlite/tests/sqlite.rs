@@ -1,5 +1,6 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q13 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q15 of `spec/store.md` section 4.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -297,7 +298,8 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
@@ -353,7 +355,8 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
@@ -392,7 +395,8 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
@@ -447,7 +451,8 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
@@ -478,7 +483,8 @@ async fn q10_a_version_5_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
@@ -543,7 +549,8 @@ async fn q12_a_version_6_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
@@ -592,7 +599,8 @@ async fn q13_a_version_7_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          PRAGMA user_version = 7;",
@@ -625,7 +633,8 @@ async fn q14_a_version_8_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          PRAGMA user_version = 8;",
     )
     .unwrap();
@@ -660,6 +669,38 @@ async fn q14_a_version_8_file_is_upgraded() {
     assert_eq!(shown.claimed_at_ms, Some(1_100));
 }
 
+/// Q15: a version 9 file gains the run's result channels; the runs it holds have none,
+/// and a new run records its own.
+#[tokio::test]
+async fn q15_a_version_9_file_is_upgraded() {
+    let path = fresh_path();
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let old = RunKey::new(DEFAULT_TENANT, "old");
+    store
+        .create_run(create_run(&old, "create", 0))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         PRAGMA user_version = 9;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    let kept = store.get_run(&old).await.unwrap().expect("old run kept");
+    assert!(kept.result_channels.is_empty());
+    let new = RunKey::new(DEFAULT_TENANT, "new");
+    let mut request = create_run(&new, "create-new", 0);
+    request.result_channels = BTreeMap::from([("review".into(), "store".into())]);
+    store.create_run(request.clone()).await.unwrap();
+    let run = store.get_run(&new).await.unwrap().expect("new run");
+    assert_eq!(run.result_channels, request.result_channels);
+}
+
 /// Q11: an upgrade that stops after one of its steps leaves the file at its old
 /// version, with nothing of the upgrade in it; the next open upgrades it whole.
 #[tokio::test]
@@ -668,7 +709,8 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert!(child(&path, "create-run", None).status.success());
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+        "ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
