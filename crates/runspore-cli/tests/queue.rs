@@ -117,10 +117,13 @@ fn ticket_order(name: &str, ship_priority: Option<i32>) -> Vec<String> {
         .spawn()
         .unwrap();
     let status = |run: &str| spore(&dir, &["--json", "status", run]).json();
-    wait_for("the second and third run to queue", || {
-        runs[1..]
-            .iter()
-            .all(|run| status(run)["running"]["state"] == "queued")
+    // The later runs are queued from their start; the first holds the slot only once
+    // the worker has taken its step.
+    wait_for("the first run to start and the others to queue", || {
+        status(&runs[0])["running"]["state"] == "started"
+            && runs[1..]
+                .iter()
+                .all(|run| status(run)["running"]["state"] == "queued")
     });
     assert_eq!(status(&runs[0])["running"]["queue"], Value::Null);
     for (n, run) in runs[1..].iter().enumerate() {
