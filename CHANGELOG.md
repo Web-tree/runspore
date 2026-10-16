@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/Web-tree/runspore/compare/v0.4.0...v0.5.0) (2026-10-16)
+
+
+### Features
+
+* **191:** keep the run database in ~/.spore, shared by every worktree of a repository ([#227](https://github.com/Web-tree/runspore/issues/227)) ([fcdb1f4](https://github.com/Web-tree/runspore/commit/fcdb1f4fa5adcbb0356f685706e53c0e7a3720bd)), closes [#191](https://github.com/Web-tree/runspore/issues/191)
+
 ## [0.4.0](https://github.com/Web-tree/runspore/compare/v0.3.0...v0.4.0) (2026-10-16)
 
 
