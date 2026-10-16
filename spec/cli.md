@@ -1000,3 +1000,40 @@ leaves behind is picked up by the next worker.
 A worker that dies without a graceful shutdown (SIGKILL, a crash) still stops its
 commands: each one's guard stops its process group. The guard is a hidden mode of
 `spore` itself; it is not a command.
+
+## Coming back after a kill (0.2)
+
+A run lives in the database, not in the process that drives it. When that process
+goes, whatever took it (a closed terminal, SIGKILL, a crash, the machine going down),
+the next `spore continue` finds the run where the database says and works it from
+there. Nothing is replayed from the dead process.
+
+A driver that dies without a graceful shutdown records nothing: the try it was running
+keeps its lease, the guard or the next sweep stops the try's process group (host.md §3,
+The process record), and once the lease runs out the next driver expires the try and
+the action's effect decides (host.md §4). A driver stopped by SIGINT, SIGTERM or SIGHUP
+records the try as `unknown` (§Interrupts), so the next try needs no lease to run out.
+Either way a try that was cut off is no result: it counts against the action's
+`maxAttempts`, and changes no visit count and no loop count (kernel.md §7.4).
+
+The check is the reference coding loop, [examples/coding-loop/](../examples/coding-loop/):
+`implement` and `test` are `idempotent` commands of 3 tries each, `test` routes `red`
+back to `implement` with `"loopLimits": {"red": 3}` and its `exhausted` arrow to
+`tests_stuck`, and `approve` and `tests_stuck` are await-signal nodes. Killed at each
+point, the run is found as follows:
+
+| Killed | The run afterwards | `needs` | `continue` | What runs again | What does not |
+| --- | --- | --- | --- | --- | --- |
+| Before `start` returned | No run, or a run with no turn taken | none, or `working` | With no run, `nothing to continue` and the workflows (exit 0); else it works the run from its start node | The start node's first try | — |
+| During a try of `implement` before its last | `running` at `implement`, no result recorded | `working` | Works on: the next try, once the lease has run out | `implement`'s command, with `step.resumed` `true` and the same input | Recorded results, earlier visits, decisions, visit and loop counts |
+| During the last try of `implement` | `running` at `implement`; once the lease has run out, the next driver's sweep makes it `needs-intervention`, error `activity.attempts-exhausted` | `working`, then `stuck` | The step, its error and the three `spore resolve` forms (exit 4); after `--retry`, a fourth try | `implement`'s command, after `--retry` | As above |
+| After a result was recorded, before the next step started | `running`, the next step's try due | `working` | Starts the next step | Nothing | Everything recorded |
+| After a command returned, before its result was recorded | `running`, the try cut off | `working` | The next try, once the lease has run out | The command, which finds what its cut-off try left on disk | As above |
+| During a try of `test` | `running` at `test`, no result recorded | `working` | The next try, once the lease has run out | `test`'s command, from the start | `implement`'s result, the red count |
+| During the last try of `test` | As for `implement`, at `test` | `working`, then `stuck` | As for `implement` (exit 4) | `test`'s command, after `--retry` | As above |
+| While it waits at `approve` or `tests_stuck` | `waiting` | `signal` | The node, `spore step show` and one `spore signal` per outcome (exit 3) | Nothing | Everything |
+| After a signal was sent, before it was applied | `waiting`, the signal stored | `working` | Applies the stored signal and goes on; the same signal again with the same `--id` is a `duplicate` | Nothing | The decision |
+| After the run ended | `completed`, `failed` or `cancelled` | not listed | `nothing to continue` (exit 0); with the run ID, its end (exit 0, 1 or 7) | Nothing | — |
+
+`spore cancel` at any of these points ends the run as `cancelled` (§Cancelling a run):
+`list --unfinished` leaves it out, `continue` on it exits 7, and no step runs again.
