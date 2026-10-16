@@ -2,7 +2,8 @@
 //! it follows a run past a held async step until the run needs a person or has ended. A
 //! report from elsewhere is picked up within one poll, a cancel from elsewhere ends it
 //! with 7, a watch's `needs` line makes it return 6 with the watch's message, and an
-//! interrupt leaves the attempt held.
+//! interrupt leaves the attempt held. With `--json` it exits 0 whenever it printed the
+//! run's status, unless `--exit-status` asks for the run's exit code.
 
 mod common;
 
@@ -120,8 +121,12 @@ fn finish(mut child: Child) -> (Option<i32>, Value) {
 fn a_report_from_elsewhere_is_picked_up_within_one_poll() {
     let dir = external("wait-report");
     let run = start(&dir);
-    // A ready external step needs an actor: it returns at once.
+    // A ready external step needs an actor: it returns at once, and with `--json` says
+    // so in `needs` and exits 0; `--exit-status` exits 6 as `continue` does.
     let (code, ready) = json(&dir, &["continue", &run, "--wait"]);
+    assert_eq!(code, Some(0), "{ready}");
+    assert_eq!(ready["needs"], "external-ready", "{ready}");
+    let (code, ready) = json(&dir, &["continue", &run, "--wait", "--exit-status"]);
     assert_eq!(code, Some(6), "{ready}");
     assert_eq!(ready["needs"], "external-ready", "{ready}");
     let (_, claim) = json(&dir, &["step", "claim", &run, "--actor", "reviewer"]);
@@ -171,7 +176,13 @@ fn a_cancel_from_elsewhere_ends_it_with_7() {
     assert_eq!(code, Some(6), "{ready}");
     let (_, claim) = json(&dir, &["step", "claim", &run, "--actor", "reviewer"]);
     assert!(claim["token"].is_string(), "{claim}");
-    let follower = dir.spawn(&args(&["--json", "continue", &run, "--wait"]));
+    let follower = dir.spawn(&args(&[
+        "--json",
+        "continue",
+        &run,
+        "--wait",
+        "--exit-status",
+    ]));
     std::thread::sleep(Duration::from_millis(500));
 
     let (code, cancelled) = json(&dir, &["cancel", &run]);
@@ -182,7 +193,7 @@ fn a_cancel_from_elsewhere_ends_it_with_7() {
 }
 
 #[test]
-fn a_watch_that_says_its_holder_waits_for_a_person_returns_6_with_its_message() {
+fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
     let watch = "cat > /dev/null; echo $$ >> watch.pids; \
                  echo '{\"needs\": \"person\", \"message\": \"answer in pane 2\"}'; \
                  exec sleep 600";
@@ -192,7 +203,7 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_6_with_its_message() 
         &dir,
         &["--stop-grace-ms", "500", "continue", &run, "--wait"],
     );
-    assert_eq!(code, Some(6), "{waits}");
+    assert_eq!(code, Some(0), "{waits}");
     assert_eq!(waits["needs"], "held", "{waits}");
     assert_eq!(waits["step"]["state"], "held", "{waits}");
     assert_eq!(waits["step"]["waiting"], "person", "{waits}");
@@ -212,6 +223,7 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_6_with_its_message() 
         "{status}"
     );
     assert_eq!(status["step"].get("waiting"), None, "{status}");
+    // Text output keeps the run's exit code.
     let again = dir.run(&args(&[
         "--stop-grace-ms",
         "500",
@@ -275,4 +287,12 @@ fn an_interrupt_stops_the_watch_and_leaves_the_attempt_held() {
         "the attempt is held for the next driver: {status}"
     );
     assert_eq!(status["step"]["holder"], json!({"job": 1}), "{status}");
+}
+
+#[test]
+fn exit_status_needs_wait() {
+    let dir = external("wait-exit-status");
+    let run = start(&dir);
+    let out = dir.run(&args(&["continue", &run, "--exit-status"]));
+    assert_eq!(out.code(), Some(2), "{}{}", out.stdout, out.stderr);
 }

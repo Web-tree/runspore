@@ -153,9 +153,10 @@ fn start(dir: &Dir) -> String {
     started["runId"].as_str().unwrap().to_string()
 }
 
-/// `continue <run> --wait` to its end: what the person must do next.
+/// `continue <run> --wait` to its end: what the person must do next, with the run's
+/// exit code (`--exit-status`).
 fn follow(dir: &Dir, run: &str) -> (Option<i32>, Value) {
-    json(dir, &["continue", run, "--wait"])
+    json(dir, &["continue", run, "--wait", "--exit-status"])
 }
 
 /// `continue <run> --wait` in the background, in a process group of its own, as a

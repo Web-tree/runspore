@@ -153,6 +153,9 @@ pub enum Command {
         /// Follow the run past held async steps until it needs a person or has ended.
         #[arg(long)]
         wait: bool,
+        /// With --wait --json, exit with the run's code (3, 4, 6, …) instead of 0.
+        #[arg(long, requires = "wait")]
+        exit_status: bool,
     },
     /// The run's events in order, with the revision that consumed each.
     Events { run_id: String },
@@ -510,8 +513,18 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             done(json, shown.text(&view))
         }
         Command::List { unfinished } => list(&engine, &db, *unfinished).await,
-        Command::Continue { run_id, wait } => {
-            continue_run(&engine, &db, &cwd, run_id.as_deref(), *wait, cli.json).await
+        Command::Continue {
+            run_id,
+            wait,
+            exit_status,
+        } => {
+            let mut out =
+                continue_run(&engine, &db, &cwd, run_id.as_deref(), *wait, cli.json).await?;
+            // A follower reads `needs`, not the exit code, unless it asks for the code.
+            if *wait && cli.json && !exit_status && out.exit != EXIT_INTERRUPTED {
+                out.exit = 0;
+            }
+            Ok(out)
         }
         Command::Events { run_id } => events(&engine, run_id).await,
         Command::Signal {

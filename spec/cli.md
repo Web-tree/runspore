@@ -34,7 +34,7 @@ marked **0.2** below are new since 0.1.
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId> [--no-probe]` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs). It first probes a held async step; `--no-probe` reads the store only (§Steps outside the worker) |
 | `list [--unfinished]` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs); each with its workflow and what it needs. `--unfinished`: only the unfinished runs, newest first (§What a run needs) |
-| `continue [<runId>] [--wait]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type. With `--wait`, follows the run past held async steps until it needs a person or has ended (§What a run needs) |
+| `continue [<runId>] [--wait [--exit-status]]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type. With `--wait`, follows the run past held async steps until it needs a person or has ended; with `--json` it then exits 0, or with the run's code under `--exit-status` (§What a run needs) |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics. **0.2:** in text, each with its time, its node, its outcome, the arrow the run took and the first line of its error or output (§JSON output) |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
@@ -431,8 +431,13 @@ It returns, printing what is needed as `continue` does, only when the run has
 completed (exit 0), failed (1), waits for a signal (3), needs intervention (4), is
 quarantined (5), or is at a ready external step, at a held step whose holder waits for
 a person, or at a `capability-missing` step (6), or was cancelled (7). `--json` prints the same object as
-`continue --json`. SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit
-130: it stops claiming, gives in-flight work its grace period, and stops a running
+`continue --json`, and exits 0 whenever it printed the run's status: a follower reads
+`needs` (null once the run has ended) and `status`, and a run that only waits for a
+decision is not reported as a failed command. `--exit-status` keeps the codes above
+for scripts, as `gh run watch --exit-status` does; without `--json` they always
+apply. `--exit-status` without `--wait` exits 2 (`usage`). Errors keep their codes
+(2, 10). SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit
+130, with or without `--json`: it stops claiming, gives in-flight work its grace period, and stops a running
 watch with its process group. The held attempt stays held for the next driver.
 
 **`step show [<runId>]`.** Prints the **step description** of the step the run is at,
@@ -810,7 +815,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Success. For `run`, `worker --until-parked` and `continue`: the run completed; for `continue` without `--wait`, also a run at a step another worker runs |
+| 0 | Success. For `run`, `worker --until-parked` and `continue`: the run completed; for `continue` without `--wait`, also a run at a step another worker runs. For `continue --wait --json` without `--exit-status`: it printed the run's status, whatever the run needs (§What a run needs) |
 | 1 | The run failed |
 | 2 | Usage or validation error; for `validate`, a problem, or a warning with `--strict` |
 | 3 | The run is waiting for a signal |
