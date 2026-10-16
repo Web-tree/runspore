@@ -373,10 +373,34 @@ quarantine. Read views show status `cancelled` and the cancel record.
     that `spore`, or move the file aside;
   - its schema is version 1, the schema `spore` 0.1 wrote: `schema.too-old`. The
     message says the file belongs to `spore` 0.1 and names the same fix, with the 0.1
-    binary. 0.2 replaces 0.1 outright: nothing upgrades a 0.1 database.
+    binary. 0.2 replaces 0.1 outright: nothing upgrades a 0.1 database;
+  - (**0.2**) its schema is older, written by an earlier 0.2 `spore`, and the caller
+    did not ask to migrate: `schema.needs-migrate`. The message names the version and
+    the writer the file records, and the fix: `spore migrate` once no older worker
+    uses the file, or keep using that `spore`.
 
-  A version written by an earlier 0.2 `spore` is upgraded in place in one transaction,
-  and the writer is recorded again: version 2 to 3 adds the run's base folder, null
+  Opening a file never upgrades it, as a Postgres major version never upgrades a
+  data directory by opening it, and Temporal's schema moves only through
+  `temporal-sql-tool update-schema`.
+
+  **Migrate (0.2).** Only an open that asks to migrate (`SqliteStore::migrate`) upgrades a
+  version written by an earlier 0.2 `spore`, in place in one transaction, and the
+  writer is recorded again. Under the write lock, before any upgrade step, it is
+  refused with kind `unavailable` / `migrate.workers-live` while a worker of another
+  `spore` uses the file, and the file is left as it was. The message names each such
+  worker and says to stop it, or let it finish, and migrate again. A worker of
+  another `spore` is:
+  - a registered worker whose version is not this `spore`'s and whose heartbeat is
+    fresh: `until_ms` in the `workers` table is still ahead. A process that works on
+    runs (`spore run`, `worker`, `continue`) registers with its worker ID, version,
+    host and process ID, renews it every heartbeat for one lease, and removes it when
+    it stops;
+  - an attempt still `running` under a live lease whose owner is a worker ID
+    (`worker-…`, host.md §3) that is not registered: a worker of a `spore` older than
+    the `workers` table. The message names the worker and the step and run it runs.
+    An actor's claim of an external step does not count.
+
+  The steps: version 2 to 3 adds the run's base folder, null
   for runs created before; version 3 to 4 adds the artifact table and the run's
   artifact digest; version 4 to 5 adds the writer; version 5 to 6 adds an attempt's
   holder handle and deadline, null for attempts claimed before; version 6 to 7 adds an
@@ -384,18 +408,19 @@ quarantine. Read views show status `cancelled` and the cancel record.
   run's parent, null for runs created before; version 8 to 9 adds when an attempt was
   claimed, null for attempts claimed before; version 9 to 10 adds the run's result
   channels, `{}` for runs created before; version 10 to 11 adds the run's cancel
-  record, null for runs created before. The refusal happens before any
-  other read or write, so a refused file is left exactly as it was.
+  record, null for runs created before; version 11 to 12 adds the `workers` table.
+  The refusals happen before any other read or write, so a refused file is left
+  exactly as it was.
 
   This holds for the whole 0.2 line: every schema version a 0.2 `spore` ever wrote is
-  upgraded in place, step by step, and only a 0.1 file and a newer one are refused.
-  Each schema change ships with its upgrade step from the version before, and its
-  scenario in §4. All steps and the new version run in the one transaction that opens
-  the file, so an upgrade that stops part way leaves the file at its old version,
-  still readable by the `spore` that wrote it. Once upgraded, that older `spore`
-  refuses the file as `schema.too-new`. The runs in the file carry on as they were:
-  each keeps its package, artifact and snapshot, and the kernel continues them
-  (kernel, Versions).
+  upgraded in place by `migrate`, step by step, and only a 0.1 file and a newer one
+  are refused. Each schema change ships with its upgrade step from the version
+  before, and its scenario in §4. All steps and the new version run in the one
+  transaction that opens the file, so an upgrade that stops part way leaves the file
+  at its old version, still readable by the `spore` that wrote it. Once upgraded,
+  that older `spore` refuses the file as `schema.too-new`. The runs in the file carry
+  on as they were: each keeps its package, artifact and snapshot, and the kernel
+  continues them (kernel, Versions).
 - `capabilities()`: protocol `0.2`, `multiworkerClaims = true` (same host),
   `persistentWakeup = false`, `transactionScope = "database"`,
   `failureModel = "crash-stop"`, `maxRecordBytes = 262144`.
@@ -408,7 +433,7 @@ Around the transaction commit of each mutating operation:
 `store.<op>.before-commit` and `store.<op>.after-commit`, with `<op>` one of
 `create-run`, `append-event`, `commit-turn`, `claim-attempt`, `heartbeat`,
 `set-process` (0.2), `finish-attempt`, `expire-attempt`, `cancel-run` (0.2). **0.2:** `store.upgrade.after-step`
-after each upgrade step of an open, before the transaction commits. Use
+after each upgrade step of a migrate, before the transaction commits. Use
 `runspore_types::failpoint::hit`.
 
 ## 4. Conformance tests
@@ -463,13 +488,16 @@ SQLite-specific, in the adapter crate:
 | Q04 | Open a file with a newer schema version | `schema.too-new`; the message names the writer the file records and the fix |
 | Q05 | Expire one attempt plainly and one with `processUnchecked` (0.2) | Each writes one `attempt.expired` audit record with reason `lease`; only the second notes `process.unchecked` |
 | Q06 | Open a version 1 file, written by `spore` 0.1 (0.2) | `schema.too-old`; the message names 0.1 and the fix; the file is unchanged |
-| Q07 | Open a version 2 file (0.2) | Upgraded to the current version; its runs are kept with a null base folder; a new run records its folder |
-| Q08 | Open a version 3 file (0.2) | Upgraded to the current version; its runs are kept and show no artifact; a new run stores its artifact |
-| Q09 | Open a version 4 file (0.2) | Upgraded to the current version; its runs are kept; the file records this `spore` as its writer |
-| Q10 | Open a version 5 file (0.2) | Upgraded to the current version; its attempts are kept with no holder and no deadline; a new claim records both |
-| Q11 | A child process aborts at `store.upgrade.after-step` while opening a version 4 file (0.2) | The file keeps version 4 and none of the upgrade; its runs are kept; the next open upgrades it to the current version |
-| Q12 | Open a version 6 file (0.2) | Upgraded to the current version; its invocations are kept and claim with null `params`; a new schedule records its `params` |
-| Q13 | Open a version 7 file (0.2) | Upgraded to the current version; its runs are kept with no parent; a new run records its parent |
-| Q14 | Open a version 8 file (0.2) | Upgraded to the current version; its attempts are kept with no claim time; a new claim records its time |
-| Q15 | Open a version 9 file (0.2) | Upgraded to the current version; its runs are kept with result channels `{}`; a new run records its own |
-| Q16 | Open a version 10 file (0.2) | Upgraded to the current version; its runs are kept with no cancel record; one of them can then be cancelled |
+| Q07 | Migrate a version 2 file (0.2) | Upgraded to the current version; its runs are kept with a null base folder; a new run records its folder |
+| Q08 | Migrate a version 3 file (0.2) | Upgraded to the current version; its runs are kept and show no artifact; a new run stores its artifact |
+| Q09 | Migrate a version 4 file (0.2) | Upgraded to the current version; its runs are kept; the file records this `spore` as its writer |
+| Q10 | Migrate a version 5 file (0.2) | Upgraded to the current version; its attempts are kept with no holder and no deadline; a new claim records both |
+| Q11 | A child process aborts at `store.upgrade.after-step` while migrating a version 4 file (0.2) | The file keeps version 4 and none of the upgrade; its runs are kept; the next migrate upgrades it to the current version |
+| Q12 | Migrate a version 6 file (0.2) | Upgraded to the current version; its invocations are kept and claim with null `params`; a new schedule records its `params` |
+| Q13 | Migrate a version 7 file (0.2) | Upgraded to the current version; its runs are kept with no parent; a new run records its parent |
+| Q14 | Migrate a version 8 file (0.2) | Upgraded to the current version; its attempts are kept with no claim time; a new claim records its time |
+| Q15 | Migrate a version 9 file (0.2) | Upgraded to the current version; its runs are kept with result channels `{}`; a new run records its own |
+| Q16 | Migrate a version 10 file (0.2) | Upgraded to the current version; its runs are kept with no cancel record; one of them can then be cancelled |
+| Q17 | Migrate a version 11 file, then migrate it again (0.2) | Upgraded to the current version with the `workers` table; the migration reports version 11 and its writer; its runs are kept; the second migrate changes nothing |
+| Q18 | Open a version 11 file without migrating (0.2) | `schema.needs-migrate`; the message names the version, the writer, this `spore` and `spore migrate`; the file is unchanged |
+| Q19 | Migrate a version 11 file while one attempt is held under a live lease by `worker-old` and one by an actor; again once the lease has passed (0.2) | `migrate.workers-live` naming `worker-old`, its step and run, not the actor; the file is unchanged; then migrated |

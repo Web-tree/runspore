@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q15 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q19 of `spec/store.md` section 4.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
