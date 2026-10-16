@@ -31,7 +31,8 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 | Stuck steps | 0.2: a step that gives up with no `failed` route pauses the run for a person, who retries, completes or fails it |
 | Loop limits | 0.2: `loopLimits` bounds how many times in a row a step routes an outcome; the next one takes the step's `exhausted` edge. Every node is reachable from the start, and an end from every node |
 | Retry | Kernel-decided delivery retries with exponential backoff, same invocation and effect key |
-| Actions | `command` (argv, no shell) and registered native Rust functions |
+| Actions | `command` (argv, no shell) and registered native Rust functions; 0.2: `external` actions an actor claims and reports, and async commands whose job outlives the worker |
+| Cancel | 0.2: a run can be cancelled; it ends `cancelled`, its history kept, a step in progress stopped |
 | Store | SQLite, one file, several processes on one host |
 | Recovery | Receipts by request ID, revision compare-and-swap, fenced strict leases, lease expiry |
 | Hosts | Rust via Wasmtime; Node and Bun verified at the kernel-trace level only |
@@ -45,6 +46,13 @@ host or SDK, browser and Cloudflare profiles, approvals and capability brokering
 secrets, telemetry, blobs, history compaction, run migration, package signing. Each is
 additive under a later semantics version. 0.2 took cancellation, input and output
 schema checks, and the DOT frontend off this list; 0.1 had none of them.
+
+The supported setup is one machine, one OS user and one database per checkout
+([store.md](store.md) §3). Several machines on one database, two repositories sharing
+one on purpose, and other OS users are unsupported and not detected. There is no
+authorization: an actor label is a filter, not a permission, and whoever can write
+the database file may claim, signal, resolve, abandon or cancel. Authenticated
+approvals belong to the target architecture of a multi-user host (`docs/11`).
 
 ## Decisions taken at the freeze
 

@@ -131,7 +131,8 @@ document, a node that carries `outputSchemas` or `params`, or a document that ca
 **Params (0.2).** An `activity` node of a `runspore.workflow/0.2` document may carry
 `params`: a mapping (§4) saying how the node sets up its action, kept apart from
 `input`, the data the action gets. One action can then serve many nodes, each with its
-own settings: a `claude -p` action run by an `implement` node and a `review` node, each
+own settings: a `coder` action, a coding tool run as a command, used by an `implement`
+node and a `review` node, each
 with its own tools, schema and instructions. W10 checks `params` as it checks `input`.
 `params` is evaluated with `input`, in the same activation (§7.4), and travels with it
 on the `activity.schedule` command; the host hands it to the action on every attempt
@@ -140,7 +141,7 @@ on the `activity.schedule` command; the host hands it to the action on every att
 before `params` existed. No other node kind carries it: it does not decode there.
 
 ```json
-"implement": {"kind": "activity", "action": "claude",
+"implement": {"kind": "activity", "action": "coder",
               "params": {"tools": ["Read", "Edit", "Bash"], "instructions": "Make the change."},
               "input": {"task": {"$get": ["input", "task"]}},
               "outcomes": {"ok": "review"}}

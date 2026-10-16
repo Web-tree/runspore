@@ -172,7 +172,7 @@ the same way, with the same operators (`$get`, `$literal`, `$if`, `$uuid`, `$jso
 
 ```json
 "implement": {
-  "action": "claude",
+  "action": "coder",
   "params": {
     "tools": ["Read", "Edit", "Bash"],
     "schema": {"$resultSchema": {}},
@@ -196,7 +196,7 @@ other key. `outcome` is an `enum` of the outcomes the node's action declares. `o
 is the outcome's `outputSchemas` entry when the action declares one outcome, and
 otherwise the `anyOf` of every outcome's entry, with `{}` (anything) for an outcome
 with no entry. The top level is an object, never an `anyOf`: model APIs that take a
-schema for structured output (`claude -p --json-schema`, strict structured outputs)
+schema for structured output (a `--json-schema` flag, strict structured outputs)
 refuse `anyOf`, `oneOf` and `allOf` at the top level. The schema does not tie an
 output to its outcome; the host checks the output against its own outcome's schema
 after the answer (host.md §2). A program given this schema can only answer with a
@@ -324,7 +324,7 @@ one entry per code with its severity (`problem` or `warning`), a title with no
 placeholders, a message, a fix, an optional why and explanation, and templates with
 `{name}` placeholders and no logic. `{action}`, `{step}`, `{file}` and `{workflow}` are
 filled from the place, and `{owner}` with the step or action it is in, such as
-`step "build"` or `action "claude"`, or `"onIntervention"` for a place in it. Wording a template cannot express is another code. Every code
+`step "build"` or `action "coder"`, or `"onIntervention"` for a place in it. Wording a template cannot express is another code. Every code
 has an example folder under `catalogue/examples/`, its expected text output, and the
 folder after its first fix under `catalogue/fixed/<code>/`; `spore explain <code>`
 shows them, and `docs/codes/<code>.md` is generated from them. The catalogue's tests
