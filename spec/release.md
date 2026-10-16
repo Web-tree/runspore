@@ -169,6 +169,9 @@ environment, which only `main` may deploy to.
 
 Merging the release PR is the release: the push of that merge makes release-please
 tag `v<version>` and create the GitHub release, with the PR's changelog as its notes.
+The release PR merges itself: each run puts GitHub's auto-merge on it, so it squash-merges
+as soon as its required checks pass, and every releasable change is released. To hold a
+release, turn auto-merge off on the PR; the next push to `main` turns it on again.
 
 ### The release workflow
 
@@ -179,7 +182,10 @@ the App made starts `release.yml` too, and that run skips every job. A tag `v*`
 pushed by hand also starts `release.yml`, for a release that has to be made again.
 
 With no tag, it builds each archive of §1 on a runner of its operating system and
-keeps them as workflow artifacts for 7 days; it signs and publishes nothing. A target
+keeps them as workflow artifacts for 7 days; it signs and publishes nothing. It runs on
+the release PR the same way, and its `archives` check is required, so a release PR whose
+archives fail to build cannot merge itself. Every other PR skips the build, and `archives`
+passes. A target
 that fails to build fails the run, so a broken target shows the day it breaks, not on
 release day.
 

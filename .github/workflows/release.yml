@@ -9,6 +9,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # The release PR builds the archives too: its `archives` check is required, so a
+  # target that fails to build stops the PR from merging itself. Other PRs skip the build.
+  pull_request:
   workflow_call:
     inputs:
       tag:
@@ -32,7 +35,9 @@ env:
 jobs:
   build:
     # The webtree-release App made this tag, and the release-please.yml run that made it publishes it.
-    if: ${{ !(github.ref_type == 'tag' && github.actor == 'webtree-release[bot]') }}
+    if: >-
+      ${{ !(github.ref_type == 'tag' && github.actor == 'webtree-release[bot]')
+       && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-please--')) }}
     strategy:
       matrix:
         include:
@@ -70,6 +75,16 @@ jobs:
           path: spore-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 7
+
+  # The required check: the archives built, or this run had none to build.
+  archives:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULT: ${{ needs.build.result }}
+        run: test "$RESULT" = success || test "$RESULT" = skipped
 
   publish:
     needs: build
