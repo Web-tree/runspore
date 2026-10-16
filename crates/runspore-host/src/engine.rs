@@ -45,7 +45,7 @@ mod steps;
 
 pub use cancel::{Cancelled, Stopped};
 pub use pressure::DISK_FULL;
-pub use slots::HeldSlot;
+pub use slots::{cut_off, CutOff, CutOffReason, HeldSlot};
 pub use steps::{AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState};
 
 /// Quarantine code of a run whose stored artifact cannot be read.

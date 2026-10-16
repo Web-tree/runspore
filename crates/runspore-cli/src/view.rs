@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use runspore_host::disk::DiskFull;
 use runspore_host::progress::{Change, Happened, Progress};
 use runspore_host::Cancelled;
-use runspore_host::{Arrival, Arrow, AsyncStep, HeldSlot, StepState};
+use runspore_host::{Arrival, Arrow, AsyncStep, CutOff, CutOffReason, HeldSlot, StepState};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{
     Disposition, EventRecord, InvocationStatus, InvocationView, RunCancel, RunKey, RunView,
@@ -170,10 +170,20 @@ impl Shown {
 }
 
 impl Shown {
-    /// What the run needs, `child` while it waits on a run it started.
+    /// What the run needs, `child` while it waits on a run it started, `driver` while
+    /// its try is cut off.
     pub fn needs(&self, view: &RunView) -> Option<&'static str> {
         let child_unfinished = self.unfinished_children().next().is_some();
-        needs_below(view, self.step.as_ref(), child_unfinished)
+        let needs = needs_below(view, self.step.as_ref(), child_unfinished);
+        needs_driver(needs, self.cut_off(view).as_ref())
+    }
+
+    /// The run's claimed try when nothing works it any more; never at an async step.
+    fn cut_off(&self, view: &RunView) -> Option<CutOff> {
+        match self.step {
+            Some(_) => None,
+            None => cut_off_of(view, &self.invocations, self.now_ms),
+        }
     }
 
     /// The runs the run started that have not ended.
@@ -335,6 +345,10 @@ impl Shown {
                     Vec::new(),
                 )
             }
+            Some("driver") => (
+                format!("run {run} at {node}: {}", cut_off_line(&s["running"])),
+                vec![format!("spore continue {run}")],
+            ),
             Some(_) => (
                 format!("run {run} is working at {node}"),
                 vec![format!("spore continue {run}")],
@@ -503,6 +517,60 @@ pub fn needs(view: &RunView, step: Option<&AsyncStep>) -> Option<&'static str> {
             None => "working",
         }),
     }
+}
+
+/// The try the run is at when it is claimed and nothing works it any more (spec/cli.md,
+/// What a run needs): `invocations` are the run's.
+pub fn cut_off_of(view: &RunView, invocations: &[InvocationView], now_ms: u64) -> Option<CutOff> {
+    let invocation = state(view)?.invocation?;
+    let stored = invocations
+        .iter()
+        .find(|i| i.invocation_id == invocation.invocation_id)?;
+    runspore_host::cut_off(stored, now_ms)
+}
+
+/// `driver` for a `working` run whose try is cut off: no worker will report it, and it
+/// waits for a driver to run it again (spec/cli.md, What a run needs).
+pub fn needs_driver(needs: Option<&'static str>, cut_off: Option<&CutOff>) -> Option<&'static str> {
+    match needs {
+        Some("working") if cut_off.is_some() => Some("driver"),
+        needs => needs,
+    }
+}
+
+/// Why a cut-off try's program does not run: `pid 31295 is gone`.
+fn cut_off_text(cut: &CutOff) -> String {
+    match cut.reason {
+        CutOffReason::ProcessGone => match cut.pid {
+            Some(pid) => format!("pid {pid} is gone"),
+            None => "its process is gone".to_string(),
+        },
+        CutOffReason::WorkerGone => match &cut.worker {
+            Some(worker) => format!("worker {worker} is gone"),
+            None => "its worker is gone".to_string(),
+        },
+        CutOffReason::Rebooted => match &cut.host {
+            Some(host) => format!("{host} has restarted since it started"),
+            None => "its machine has restarted since it started".to_string(),
+        },
+        CutOffReason::LeaseExpired => match cut.lease_until_ms {
+            Some(lease) => format!("its lease ran out at {} with no result", utc_text(lease)),
+            None => "its lease ran out with no result".to_string(),
+        },
+    }
+}
+
+/// `implement attempt 1 of 3 was cut off: pid 31295 is gone`, from `running`.
+fn cut_off_line(running: &Value) -> String {
+    let of = running["maxAttempts"]
+        .as_u64()
+        .map_or_else(String::new, |m| format!(" of {m}"));
+    format!(
+        "{} attempt {}{of} was cut off: {}",
+        running["nodeId"].as_str().unwrap_or_default(),
+        running["attempt"],
+        running["cutOff"]["message"].as_str().unwrap_or_default()
+    )
 }
 
 /// `needs`, but `child` for a run that waits for a signal while a run it started has
@@ -783,8 +851,9 @@ impl<'a> Stands<'a> {
 
     /// At an activity: its attempt, whether a worker or an actor holds it, and since
     /// when. A started try runs from its claim, with the worker and the pid of its
-    /// program; a queued one waits, from when it was due, for a worker with a free
-    /// slot, at its place in the queue; one in backoff waits until it is due.
+    /// program, or, cut off, with why nothing works it and the command that runs it
+    /// again; a queued one waits, from when it was due, for a worker with a free slot,
+    /// at its place in the queue; one in backoff waits until it is due.
     fn running(&self) -> Value {
         let Some(invocation) = &self.state.invocation else {
             return Value::Null;
@@ -800,12 +869,22 @@ impl<'a> Stands<'a> {
             .since_ms
             .max(stored.map(|i| i.not_before_ms));
         let claimed = stored.map(|i| i.status == InvocationStatus::Running);
+        // A worker's try whose program, worker or lease is gone; an async step's hold
+        // is the `step`'s to show.
+        let cut = stored
+            .filter(|_| self.shown.step.is_none())
+            .and_then(|i| runspore_host::cut_off(i, self.shown.now_ms));
         let state = match (claimed, due) {
+            (Some(true), _) if cut.is_some() => "cut-off",
             (Some(true), _) => "started",
             (_, Some(due)) if due > self.shown.now_ms => "backoff",
             _ => "queued",
         };
-        let started = stored.filter(|_| state == "started");
+        let started = stored.filter(|_| matches!(state, "started" | "cut-off"));
+        let cut_off = cut.as_ref().map_or(Value::Null, |cut| {
+            json!({"reason": cut.reason.as_str(), "message": cut_off_text(cut),
+                   "commands": [format!("spore continue {}", self.run_id)]})
+        });
         // A try claimed before the store recorded claims runs from when it was due.
         let (since, lasted) = self.since(started.and_then(|i| i.claimed_at_ms).or(due));
         // An actor's hold takes no slot; `step` shows it.
@@ -826,7 +905,8 @@ impl<'a> Stands<'a> {
                "invocationId": invocation.invocation_id, "attempt": invocation.attempt,
                "maxAttempts": package.map(|p| max_attempts(p, &invocation.action_id)),
                "claimed": claimed, "state": state, "worker": slot.map(|s| &s.worker),
-               "pid": pid, "queue": place, "sinceMs": since, "forMs": lasted})
+               "pid": pid, "queue": place, "cutOff": cut_off, "sinceMs": since,
+               "forMs": lasted})
     }
 }
 
@@ -920,8 +1000,12 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
             text += &error_text(error);
         }
         if let Some(p) = i.get("process").and_then(Value::as_object) {
+            let gone = match s["running"]["cutOff"]["reason"].as_str() {
+                Some("process-gone") => ", gone",
+                _ => "",
+            };
             text += &format!(
-                "process    group {} on {}\n",
+                "process    group {} on {}{gone}\n",
                 p["pgid"],
                 p["host"].as_str().unwrap_or_default()
             );
@@ -1045,12 +1129,21 @@ fn intervention_text(intervention: &Value, invocation: &Value) -> String {
     text + &commands_text("resolve", intervention)
 }
 
-/// The try, and whether its program runs, it waits for a slot (an `external` step: for
+/// The try, and whether its program runs, it was cut off, it waits for a slot (an `external` step: for
 /// an actor; a capability-missing one: for a spore that can run it) or it waits to
 /// retry.
 fn running_text(running: &Value, waits: Option<StepState>) -> String {
     if !running.is_object() {
         return String::new();
+    }
+    if running["state"] == "cut-off" {
+        return format!(
+            "running    {}; {} runs it again\n",
+            cut_off_line(running),
+            running["cutOff"]["commands"][0]
+                .as_str()
+                .unwrap_or_default()
+        );
     }
     let of = running["maxAttempts"]
         .as_u64()

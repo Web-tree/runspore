@@ -332,12 +332,26 @@ An **unfinished run** is one that has not completed, failed or been cancelled
 | --- | --- |
 | `quarantined` | The run is quarantined, whatever else holds |
 | `working` | A worker has something to do: the run has not taken its first turn, it has an event not yet applied (a signal already sent to the node it waits at, for one), or it is `running` at a step a worker runs |
+| `driver` | It would be `working`, but its try is cut off (`status` shows `running.state` `cut-off`): a worker claimed it and nothing works it any more, so its result never comes. `spore continue <runId>` works the run: it runs the step again once the try's lease is out of the way (§Coming back after a kill) |
 | `signal` | It waits at an await-signal node, with no signal for it stored |
 | `child` | It waits as for `signal`, while a run it started has not ended: that run, or one below it, sends the signal, as a build's ticket run signals the build when it is done (§Runs that start runs). Nobody decides it; the runs below it say what they need |
 | `stuck` | It needs intervention: a stuck step, or an unsafe step whose outcome is unknown |
 | `external-ready` | It is at an external step nobody holds (§Steps outside the worker) |
 | `held` | It is at an async step that is held: an external step an actor holds, or an async command whose started work has not reported |
 | `capability-missing` | It is at a step this `spore` cannot act on the way the run recorded (§Capabilities) |
+
+**Cut off.** A try a worker claimed is cut off when, though the store still shows it
+claimed, nothing works it any more. `status` and `list` look, on the machine its
+process record names (host.md §3, The process record), as the check before a lease
+expiry does, stopping nothing: the machine has booted since its program started; or no
+process of the recorded group runs, its leader checked with its start time, while the
+worker that claimed it is not known to run (a live worker may be about to report the
+result); or the worker that claimed it no longer runs. Anywhere, a try whose lease has
+run out with no result is cut off too. A try held outside the worker, by an actor or an
+async command's holder, is never cut off: its probe, its lease and its deadline say
+(§Steps outside the worker). From another machine, with no lease run out, a try is
+never called cut off: that cannot be told from there. kubectl shows a pod on an
+unreachable node as `Unknown` rather than `Running` for the same reason.
 
 **`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
 was created), one line each and not as a tree: the run, its workflow, its node, what
@@ -347,6 +361,7 @@ step, and a quarantine's code, details and release as in `list`:
 ```text
 run_9a…  coding-loop  review     signal              2m10s  ticket-148
 run_4f…  build        tickets    held                  12s  build  actor reviewer
+run_1a…  coding-loop  implement  driver             28s  ticket-150
 run_7c…  coding-loop  fix        quarantined         1h09m  ticket-73  host.files-unwritable: No space left on device  spore release run_7c…
 ```
 
@@ -407,7 +422,6 @@ With `<runId>`, or the one unfinished run, it:
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
    | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, the message when its watch said that the holder waits for a person, and `spore step abandon <runId>` | 6 |
    | at a `capability-missing` step | the step and what this `spore` lacks and what to restore, as `status` gives it in `step.missing`; no command | 6 |
-
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
 commands of the table in the order given; `commands` is empty for a finished run. The
@@ -997,13 +1011,21 @@ here is recorded for `status`: it is read from the state, the package and the st
   `spore resolve <runId> --retry`, one `--complete <o>` per outcome (with ` --output
   <json>` when it has a schema) and `--fail <message>`.
 - `running`, at an activity: `{"nodeId", "actionId", "invocationId", "attempt",
-  "maxAttempts", "claimed", "state", "worker", "pid", "queue", "sinceMs", "forMs"}`. `claimed`
+  "maxAttempts", "claimed", "state", "worker", "pid", "queue", "cutOff", "sinceMs",
+  "forMs"}`. `claimed`
   is whether a worker or an actor holds the attempt. `state` tells the kernel's one
   `scheduled` apart, as Temporal tells scheduled from started:
   - `started`: the attempt is claimed. `sinceMs` is when it was claimed (store.md
     §2); `worker` is the worker that claimed it, null for an actor's hold (`step`
     shows that); `pid` is the leader of the process group its program runs in, from
     the attempt's process record, null until the program has started.
+  - `cut-off`: **0.2.** the attempt is claimed, a worker's, and cut off (§What a run
+    needs): nothing works it any more. `sinceMs`, `worker` and `pid` are as for
+    `started`. `cutOff` says why: `{"reason", "message", "commands"}`, `reason` being
+    `process-gone`, `worker-gone`, `rebooted` or `lease-expired`, `message` the same
+    for a person (`pid 31295 is gone`, `worker <id> is gone`, `<host> has restarted
+    since it started`, `its lease ran out at <time> with no result`), and `commands`
+    `["spore continue <runId>"]`. The run needs `driver`.
   - `queued`: the try is due and nobody has claimed it: it waits for a worker with a
     free slot (`slots` below), or for any worker at all; at an external step, for an
     actor to claim it (`step`); at a `capability-missing` step, for a `spore` that
@@ -1017,7 +1039,8 @@ here is recorded for `status`: it is read from the state, the package and the st
   - `backoff`: the try is not due yet; `sinceMs` is when it will be, `forMs` is
     `"0"`.
 
-  For `queued` and `backoff`, `worker` and `pid` are null. An attempt claimed by a
+  For `queued` and `backoff`, `worker` and `pid` are null. `cutOff` is null in every
+  state but `cut-off`. An attempt claimed by a
   `spore` before 0.2 recorded claim times runs from when it was due.
 
 **0.2: worker slots.** A worker runs at most `worker.slots` steps at once (§Project
@@ -1030,7 +1053,10 @@ step an actor holds takes no slot and is not listed. A queued step whose worker 
 `limit` steps in `held` waits for one of them to end; one with an empty `held` waits
 for a worker to run.
 
-Text mode shows `running` as `started by <worker> since …, for …, pid <pid>`,
+Text mode shows a cut-off try as `running    implement attempt 1 of 3 was cut off: pid
+31295 is gone; spore continue <runId> runs it again`, and its process record as
+`process    group 31295 on <host>, gone` when its group is gone. Otherwise it shows
+`running` as `started by <worker> since …, for …, pid <pid>`,
 `queued for a free worker slot, 3rd of 16 waiting since …, for …` (at an external step `queued for an
 actor to claim it since …`, at a `capability-missing` step `queued for a spore that
 can run it since …`) or `waiting to retry, due …`. Under it, except at an external or
@@ -1150,9 +1176,11 @@ there. Nothing is replayed from the dead process.
 A driver that dies without a graceful shutdown records nothing: the try it was running
 keeps its lease, the guard or the next sweep stops the try's process group (host.md §3,
 The process record), and once the lease runs out the next driver expires the try and
-the action's effect decides (host.md §4). A driver stopped by SIGINT, SIGTERM or SIGHUP
-records the try as `unknown` (§Interrupts), so the next try needs no lease to run out.
-Either way a try that was cut off is no result: it counts against the action's
+the action's effect decides (host.md §4). Meanwhile `status` shows the try `cut-off`
+and `list` shows the run as needing a `driver` (§What a run needs), not as a try that
+runs. A driver stopped by SIGINT, SIGTERM or SIGHUP records the try as `unknown`
+(§Interrupts), so the next try needs no lease to run out. Either way a try that was
+cut off is no result: it counts against the action's
 `maxAttempts`, and changes no visit count and no loop count (kernel.md §7.4).
 
 The check is the reference coding loop, [examples/coding-loop/](../examples/coding-loop/):
@@ -1164,12 +1192,12 @@ point, the run is found as follows:
 | Killed | The run afterwards | `needs` | `continue` | What runs again | What does not |
 | --- | --- | --- | --- | --- | --- |
 | Before `start` returned | No run, or a run with no turn taken | none, or `working` | With no run, `nothing to continue` and the workflows (exit 0); else it works the run from its start node | The start node's first try | — |
-| During a try of `implement` before its last | `running` at `implement`, no result recorded | `working` | Works on: the next try, once the lease has run out | `implement`'s command, with `step.resumed` `true` and the same input | Recorded results, earlier visits, decisions, visit and loop counts |
-| During the last try of `implement` | `running` at `implement`; once the lease has run out, the next driver's sweep makes it `needs-intervention`, error `activity.attempts-exhausted` | `working`, then `stuck` | The step, its error and the three `spore resolve` forms (exit 4); after `--retry`, a fourth try | `implement`'s command, after `--retry` | As above |
+| During a try of `implement` before its last | `running` at `implement`, no result recorded, the try cut off | `driver` | Works on: the next try, once the lease has run out | `implement`'s command, with `step.resumed` `true` and the same input | Recorded results, earlier visits, decisions, visit and loop counts |
+| During the last try of `implement` | `running` at `implement`; once the lease has run out, the next driver's sweep makes it `needs-intervention`, error `activity.attempts-exhausted` | `driver`, then `stuck` | The step, its error and the three `spore resolve` forms (exit 4); after `--retry`, a fourth try | `implement`'s command, after `--retry` | As above |
 | After a result was recorded, before the next step started | `running`, the next step's try due | `working` | Starts the next step | Nothing | Everything recorded |
-| After a command returned, before its result was recorded | `running`, the try cut off | `working` | The next try, once the lease has run out | The command, which finds what its cut-off try left on disk | As above |
-| During a try of `test` | `running` at `test`, no result recorded | `working` | The next try, once the lease has run out | `test`'s command, from the start | `implement`'s result, the red count |
-| During the last try of `test` | As for `implement`, at `test` | `working`, then `stuck` | As for `implement` (exit 4) | `test`'s command, after `--retry` | As above |
+| After a command returned, before its result was recorded | `running`, the try cut off | `driver` once the lease has run out (the command's process record is cleared, so only the lease tells) | The next try, once the lease has run out | The command, which finds what its cut-off try left on disk | As above |
+| During a try of `test` | `running` at `test`, no result recorded, the try cut off | `driver` | The next try, once the lease has run out | `test`'s command, from the start | `implement`'s result, the red count |
+| During the last try of `test` | As for `implement`, at `test` | `driver`, then `stuck` | As for `implement` (exit 4) | `test`'s command, after `--retry` | As above |
 | While it waits at `approve` or `tests_stuck` | `waiting` | `signal` | The node, `spore step show` and one `spore signal` per outcome (exit 3) | Nothing | Everything |
 | After a signal was sent, before it was applied | `waiting`, the signal stored | `working` | Applies the stored signal and goes on; the same signal again with the same `--id` is a `duplicate` | Nothing | The decision |
 | After the run ended | `completed`, `failed` or `cancelled` | not listed | `nothing to continue` (exit 0); with the run ID, its end (exit 0, 1 or 7) | Nothing | — |

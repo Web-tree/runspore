@@ -358,11 +358,31 @@ fn a_dead_session_records_nothing_and_its_lease_runs_out() {
     let status = status(&dir, &run);
     assert_eq!(status["status"], "running", "{status}");
     assert_eq!(status["position"]["activationId"], "implement/1");
+    let running = &status["running"];
     assert_eq!(
-        status["running"]["state"], "started",
-        "the dead try still holds its lease"
+        running["state"], "cut-off",
+        "the dead try still holds its lease, and nothing works it: {status}"
     );
-    assert_eq!(needs(&dir), "working");
+    assert!(
+        matches!(
+            running["cutOff"]["reason"].as_str(),
+            Some("process-gone" | "worker-gone")
+        ),
+        "{status}"
+    );
+    assert_eq!(
+        running["cutOff"]["commands"],
+        json!([format!("spore continue {run}")])
+    );
+    assert_eq!(needs(&dir), "driver");
+    let text = spore(&dir, &["status", &run]).stdout;
+    assert!(
+        text.contains("running    implement attempt 1 of 3 was cut off: ")
+            && text.contains(&format!("; spore continue {run} runs it again\n")),
+        "{text}"
+    );
+    let listed = spore(&dir, &["list", "--unfinished"]).stdout;
+    assert!(listed.contains(" driver "), "{listed}");
     assert!(results(&dir, &run).is_empty(), "nothing recorded");
 
     let back = Instant::now();
@@ -420,7 +440,7 @@ fn three_cut_off_tries(dir: &Dir, run: &str, node: &str, started: impl Fn(usize)
         started(n);
         kill_session(session);
     }
-    assert_eq!(needs(dir), "working", "the last lease has not run out yet");
+    assert_eq!(needs(dir), "driver", "the last try was cut off");
     let (code, stuck) = json(dir, &["continue", run]);
     assert_eq!(code, Some(4), "{stuck}");
     assert_eq!(stuck["status"], "needs-intervention");
@@ -517,7 +537,7 @@ fn a_cut_off_test_run_is_not_a_red() {
     let status = status(&dir, &run);
     assert_eq!(status["position"]["activationId"], "test/3", "{status}");
     assert_eq!(status["streaks"]["test"]["count"], 2, "{status}");
-    assert_eq!(needs(&dir), "working");
+    assert_eq!(needs(&dir), "driver");
 
     // The third visit's second try is the third red, the fourth visit the exhausted one.
     let out = follow(&dir, &run);

@@ -55,8 +55,8 @@ One time the run is at a node; a loop-back makes a new visit. The spec calls it 
 _Avoid_: attempt, iteration
 
 **Try**:
-One go at a visit's work; a retry is another try of the same visit. The spec calls it an attempt.
-_Avoid_: visit, run
+One go at a visit's work; a retry is another try of the same visit. The spec calls it an attempt. A started try is **cut off** when nothing works it any more though it still holds its lease: on its machine its command, its worker or the machine's boot is gone, or its lease has run out. Its result never comes; the next driver runs it again.
+_Avoid_: visit, run; "running" or "stale" for a cut-off try
 
 **Retry**:
 Another try of the same visit after a try was lost or failed in a way that may be repeated, with the same effect key, up to the action's `retry.maxAttempts`.
@@ -135,7 +135,7 @@ The run whose step started another run, from inside that step: a build and the t
 _Avoid_: sub-workflow, nested run, caller
 
 **Unfinished run**:
-A run that has not completed, failed or been cancelled. A repository may have several at once. What it needs is one of: working, a signal, a run it started (that run sends the signal it waits for), a person for a stuck step, an actor to claim its external step, the actor holding that step or the work its async command started, or a release from quarantine; `spore list` shows these as `needs`: `working`, `signal`, `child`, `stuck`, `external-ready`, `held`, `quarantined`. `spore continue` does the next thing it needs, or says what a person must type.
+A run that has not completed, failed or been cancelled. A repository may have several at once. What it needs is one of: working, a driver to run its cut-off try again, a signal, a run it started (that run sends the signal it waits for), a person for a stuck step, an actor to claim its external step, the actor holding that step or the work its async command started, or a release from quarantine; `spore list` shows these as `needs`: `working`, `driver`, `signal`, `child`, `stuck`, `external-ready`, `held`, `quarantined`. `spore continue` does the next thing it needs, or says what a person must type.
 _Avoid_: open run, active run, pending run
 
 **Step description**:

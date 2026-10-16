@@ -229,7 +229,11 @@ One bounded pass. It never blocks on an activity.
    take a slot, those a worker claimed at a step that is not `external`, unfinished
    and with a lease that has not run out, each with its run, node, attempt, worker,
    claim time and the pid of its program; `spore status` shows them (cli.md,
-   `slots`).
+   `slots`). **0.2:** `cut_off(invocation, now)` says whether such a claimed try is
+   cut off, and why: on the machine its process record names, its group, its worker
+   or the boot it started in is gone, looked at as the check before a lease expiry
+   does (§3) but stopping nothing; or its lease has run out. `spore status` and `list`
+   show it (cli.md, What a run needs).
    **0.2:** with `files_dir` set, before the claim, the host makes or checks the
    step's files and its work folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
    no attempt is spent and no lease runs out on a try that never started.
