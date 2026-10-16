@@ -46,7 +46,7 @@ export PATH="$PWD/target/release:$PATH"
 demo=$(mktemp -d) && cp -R examples/hello examples/review-loop examples/unsafe-deploy "$demo" && cd "$demo"
 ```
 
-Run a workflow of two steps to completion. `spore` reads the folder, builds its artifact in memory and records it with the run. The database is `./runspore.db`. Run IDs are random, so yours differ.
+Run a workflow of two steps to completion. `spore` reads the folder, builds its artifact in memory and records it with the run. The database is `~/.spore/db/<folder>/runspore.db`, outside the folder; in a git repository it is `~/.spore/db/<repo key>/runspore.db`, shared by every worktree and clone, and `spore list --json` shows it. Run IDs are random, so yours differ.
 
 ```sh
 spore run hello --key hello-1

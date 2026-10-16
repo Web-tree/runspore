@@ -53,8 +53,9 @@ cp -R <runspore>/examples/coding-loop .spore/workflows/
 spore validate .spore/workflows/coding-loop
 ```
 
-`spore init` creates `.spore/`, its `workflows/` folder and a `.gitignore` that keeps
-the database out of git. `<runspore>` is a checkout of this repository. `validate`
+`spore init` creates `.spore/` and its `workflows/` folder. The runs live outside the
+checkout, in `~/.spore/db/<repo key>/runspore.db`, shared by every worktree of the
+repository. `<runspore>` is a checkout of this repository. `validate`
 prints `.spore/workflows/coding-loop is valid`.
 
 To try it without touching a real project, make a small one first, then run the three

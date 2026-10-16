@@ -12,7 +12,7 @@ marked **0.2** below are new since 0.1.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--db <path>` | `$RUNSPORE_DB`, else the project folder's database, else `./runspore.db` (§Project folder) | Database file |
+| `--db <path>` | `$RUNSPORE_DB`, else an existing `.spore/runspore.db` of the project folder, else the repository's shared `$SPORE_HOME/db/<repo key>/runspore.db` (§Project folder) | Database file |
 | `--json` | off | One JSON object on stdout instead of text |
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
 | `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
@@ -636,39 +636,73 @@ and `run`: in a folder as the diagnostic `schema.input-not-object` (beside
 
 ## Project folder (0.2)
 
-A repository keeps its workflows and its runs in one project folder, `.spore/`, at its
-root:
+A repository keeps its workflows in one project folder, `.spore/`, at its root, and
+its runs in one database outside the checkout, shared by every worktree and clone of
+the repository:
 
 ```text
-.spore/
-├── .gitignore              # written by spore
-├── settings.json           # the project's settings, optional, committed
-├── workflows/
-│   └── coding-loop/        # a workflow folder (dot.md), committed
-├── runspore.db             # not committed
-└── runspore.db.files/      # not committed
+.spore/                     # in the repository, committed
+├── settings.json           # the project's settings, optional
+└── workflows/
+    └── coding-loop/        # a workflow folder (dot.md)
+
+~/.spore/db/<repo key>/     # $SPORE_HOME/db/<repo key>/, outside the repository
+├── runspore.db             # with runspore.db-wal and runspore.db-shm beside it
+└── runspore.db.files/
 ```
+
+The **project root** is `<dir>`, the nearest folder at or above the current one that
+holds a `.spore/` directory, found by walking up. It comes from the current folder,
+never from the database's path, so the settings, the workflows by name and a run's
+base folder below hold wherever the database is.
 
 **Database.** Every command uses the first of:
 
 1. `--db`;
 2. `$RUNSPORE_DB`;
-3. `<dir>/.spore/runspore.db`, where `<dir>` is the nearest folder at or above the
-   current one that holds a `.spore/` directory;
-4. `./runspore.db`, when no `.spore/` exists up to the filesystem root.
+3. `<dir>/.spore/runspore.db`, when that file exists: the old place, kept so a
+   project that has its database there goes on using it. `status` says so (below);
+4. the shared database `$SPORE_HOME/db/<repo key>/runspore.db`.
 
-A relative path is taken from the current folder. Every command, from any subfolder of
-the repository, therefore reaches the same database. `status --json` and `list --json`
-print the database used as `"db"`, an absolute path.
+`$SPORE_HOME` is `~/.spore` when unset or empty, the way `CARGO_HOME` overrides
+`~/.cargo`; a relative one is taken from the current folder. Without a home folder
+and without `$SPORE_HOME`, a command that needs the shared database exits 2 with
+`project.no-home`. The **repo key** is a relative path, worked out from the project
+root, or from the current folder without one:
+
+- the `origin` remote (`git config remote.origin.url`), normalised to
+  `host/owner/name`: the scheme, the user, the password, the port and a trailing
+  `.git` are dropped and the host is lower case, so `git@github.com:Web-tree/runspore.git`
+  and `https://github.com/Web-tree/runspore` are both `github.com/Web-tree/runspore`.
+  An `origin` that is a local path, plain or `file://`, is that absolute path. Empty,
+  `.` and `..` parts are dropped;
+- without `origin`, the path of the git common dir (`git rev-parse --git-common-dir`),
+  which every worktree of one clone shares, with links resolved;
+- outside git, or when `git` cannot be run, the folder's own absolute path, with links
+  resolved.
+
+An absolute path as a key is the path without its root: `/home/me/repo/.git` is the
+key `home/me/repo/.git`. Two worktrees of one repository therefore list the same runs,
+a run started in one is worked by a `worker` in the other, and removing a worktree
+(`git worktree remove`) keeps its runs. A writing command creates the database's
+folder when it is missing.
+
+A relative `--db` or `$RUNSPORE_DB` is taken from the current folder. Every command,
+from any subfolder or worktree of the repository, therefore reaches the same database.
+`status --json`, `list --json` and the `--json` of `run` and `worker --run` print the
+database used as `"db"`, an absolute path, so a command always shows which file it
+used. On a database at the old place, `status --json` adds
+`"dbOldPlace": {"shared": <path or null>}`, the shared database the repository uses
+once the files are moved there, and `status` in text adds a `db` line naming both.
 
 **Base folder.** `start` and `run` record the run's base folder with the run (store
-§2 `create_run`). It is `<dir>` whenever the database path is
-`<dir>/.spore/runspore.db`, however that path was given: walk-up, `--db` or
-`$RUNSPORE_DB`. Otherwise it is the current folder. `--base-dir` overrides both. The
-recorded folder is absolute. Every dispatch of the run, by any later command started
-from any folder, runs the run's commands from it (host §2), so a run continued from a
-subfolder runs where its first try ran. A `start` whose key names an existing run keeps
-the folder recorded first.
+§2 `create_run`). It is the project root, else the current folder; `--base-dir`
+overrides both. The recorded folder is absolute. Every dispatch of the run, by any
+later command started from any folder or worktree, runs the run's commands from it
+(host §2), so a run continued from a subfolder runs where its first try ran. A `start`
+whose key names an existing run keeps the folder recorded first. When the recorded
+folder is gone, as a removed worktree's is, the run's next command step fails with
+`command.base-dir-missing`, naming the folder (host §3), rather than failing to spawn.
 
 **Settings.** `.spore/settings.json` holds the project's settings. It is optional;
 `spore init` does not write it. Today it holds two settings:
@@ -682,16 +716,17 @@ the folder recorded first.
 worker on the project's database, `run` and `worker`, and `status` shows it as the
 `slots` limit. `worker.diskFloorMb` is the free space, in MiB, the disk of the files
 folder must keep for a worker to take a step (§A full disk), a whole number from 0;
-without it, 1024; 0 never pauses. A command reads the settings of the project whose database it uses:
-the file beside `<dir>/.spore/runspore.db`, however that path was given, so a step's
-`spore` reaches the settings of its run's project. A database outside a project
-folder has no settings. Every command that opens the database refuses, with exit 2
+without it, 1024; 0 never pauses. A command reads the settings of the project root
+found by walking up from the current folder, whatever database it uses; a step runs
+from its run's base folder, so its `spore` reaches the settings of its run's project.
+A command outside a project folder has no settings. Every command that opens the
+database refuses, with exit 2
 and `project.settings-invalid`, a file that is not JSON, holds a key spore does not
 know, a slot count that is not a whole number from 1, or a disk floor that is not a
 whole number from 0; the message names the file and what is wrong.
 
-**`spore init`.** It creates `.spore/`, `.spore/workflows/` and `.spore/.gitignore` at
-the repository root: the nearest folder at or above the current one that holds `.git`
+**`spore init`.** It creates `.spore/` and `.spore/workflows/` at the repository
+root: the nearest folder at or above the current one that holds `.git`
 (a folder, or the file of a git worktree), or the current folder when there is none. It
 prints the root and the paths it created, `{"root", "created": [...]}`. It never
 overwrites a file, and running it twice changes nothing. It refuses with exit 2, and
@@ -702,16 +737,18 @@ creates nothing, when:
 - `project.legacy-database`: a 0.1 database (`runspore.db`, `runspore.db-wal`,
   `runspore.db-shm` or `runspore.db.files/`) exists at the root. The message says the
   file belongs to 0.1 and must be finished with the 0.1 binary or moved aside;
-- `project.unusable`: one of the three paths exists but is not of its kind (a file
-  where a folder belongs, or the reverse), or it cannot be created.
+- `project.unusable`: one of the two paths exists but is not a folder, or it cannot
+  be created.
 
 `init` opens no database and ignores `--db` and `$RUNSPORE_DB`; the first writing
-command creates the database.
+command creates the database. The database is outside the checkout, so `init` writes
+no ignore file.
 
-**The ignore file.** `.spore/.gitignore` must hold the lines `runspore.db`,
-`runspore.db-*` and `runspore.db.files/`. `init`, and every writing command whose
-database is `<dir>/.spore/runspore.db`, add whichever of these lines are missing, keep
-every other line, and create the file if it is absent.
+**The ignore file.** A database at `<dir>/.spore/runspore.db`, the old place or named
+by `--db` or `$RUNSPORE_DB`, must stay out of git: `.spore/.gitignore` must then hold
+the lines `runspore.db`, `runspore.db-*` and `runspore.db.files/`. Every writing
+command whose database is there adds whichever of these lines are missing, keeps every
+other line, and creates the file if it is absent.
 
 **Only writing commands create a database.** The writing commands are `start`, `run`,
 `worker`, `signal`, `resolve`, `release`, `continue` and `step` but `step show`. The
@@ -723,8 +760,8 @@ the file. `validate` and `init` open no database.
 
 **Steps reach the run's database.** Every program the host starts gets `RUNSPORE_DB`,
 the absolute path of the database the worker uses (host.md §3). A `spore` call from
-inside a step therefore reaches the run's own database, even in a git worktree with
-its own `.spore/`, because `$RUNSPORE_DB` comes before walk-up.
+inside a step therefore reaches the run's own database, even in a folder whose own
+lookup would find another one, because `$RUNSPORE_DB` comes first.
 
 **Step files and work folders.** The files folder is `<database path>.files`, beside
 the database, so `--db x.db` uses `x.db.files/` and the ignore rules above cover it.

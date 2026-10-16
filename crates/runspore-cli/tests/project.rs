@@ -1,6 +1,7 @@
 //! The project folder (spec/cli.md §Project folder) through the compiled binary:
-//! walk-up to one database, `init` and the ignore file, read-only commands that create
-//! nothing, workflows by name, the run's base folder, and `RUNSPORE_DB` for steps.
+//! walk-up to one database, the old place and the overrides, `init`, read-only
+//! commands that create nothing, workflows by name, the run's base folder, and
+//! `RUNSPORE_DB` for steps.
 
 mod common;
 
@@ -23,25 +24,41 @@ const FAST: [&str; 7] = [
     "100",
 ];
 
-/// `spore` in `cwd` with no `RUNSPORE_DB`, so it finds its database itself.
-fn spore(cwd: &Path, args: &[&str]) -> Out {
-    let mut cmd = Command::new(BIN);
-    cmd.current_dir(cwd)
-        .env_remove("RUNSPORE_DB")
-        .env_remove("RUNSPORE_FAILPOINTS")
-        .args(FAST)
-        .args(args)
-        .stdin(Stdio::null());
-    run(cmd)
+/// A scratch repository at `root`: a `.git` folder and the subfolders `a/b`, at its
+/// real path. Its `spore` keeps shared databases in `home`, beside it.
+struct Repo {
+    dir: Dir,
+    root: PathBuf,
+    home: PathBuf,
 }
 
-/// A scratch repository: a `.git` folder and the subfolders `a/b`, at its real path.
-fn repo(name: &str) -> (Dir, PathBuf) {
-    let dir = Dir::new(name);
-    let root = dir.path.canonicalize().unwrap();
-    std::fs::create_dir_all(root.join(".git")).unwrap();
-    std::fs::create_dir_all(root.join("a/b")).unwrap();
-    (dir, root)
+impl Repo {
+    fn new(name: &str) -> Self {
+        let dir = Dir::new(name);
+        let root = dir.path.join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        let root = root.canonicalize().unwrap();
+        let home = dir.file("home");
+        Self { dir, root, home }
+    }
+
+    /// `spore` in `cwd` with no `RUNSPORE_DB`, so it finds its database itself.
+    fn command(&self, cwd: &Path, args: &[&str]) -> Command {
+        let mut cmd = Command::new(BIN);
+        cmd.current_dir(cwd)
+            .env("SPORE_HOME", &self.home)
+            .env_remove("RUNSPORE_DB")
+            .env_remove("RUNSPORE_FAILPOINTS")
+            .args(FAST)
+            .args(args)
+            .stdin(Stdio::null());
+        cmd
+    }
+
+    fn spore(&self, cwd: &Path, args: &[&str]) -> Out {
+        run(self.command(cwd, args))
+    }
 }
 
 /// Writes a workflow folder at `folder` whose graph id is `name`: one command step,
@@ -78,43 +95,43 @@ fn ok(out: &Out) -> Value {
     serde_json::from_str(out.stdout.trim()).unwrap_or(Value::Null)
 }
 
+/// The database a `--json list` in `cwd` used.
+fn db_of(repo: &Repo, cwd: &Path) -> PathBuf {
+    let listed = ok(&repo.spore(cwd, &["--json", "list"]));
+    PathBuf::from(listed["db"].as_str().unwrap())
+}
+
 const IGNORED: &str = "runspore.db\nrunspore.db-*\nrunspore.db.files/\n";
 
 #[test]
 fn init_creates_the_project_folder_once() {
-    let (_dir, root) = repo("init");
-    let out = spore(&root.join("a/b"), &["--json", "init"]);
+    let repo = Repo::new("init");
+    let root = &repo.root;
+    let out = repo.spore(&root.join("a/b"), &["--json", "init"]);
     let created = ok(&out);
     let spore_dir = root.join(".spore");
     assert_eq!(
         created,
         json!({"format": "runspore.cli/0.2", "root": root,
-               "created": [spore_dir, spore_dir.join("workflows"), spore_dir.join(".gitignore")]})
+               "created": [spore_dir, spore_dir.join("workflows")]})
     );
     assert!(spore_dir.join("workflows").is_dir());
-    assert_eq!(read(&spore_dir.join(".gitignore")), IGNORED);
     assert!(
-        !spore_dir.join("runspore.db").exists(),
-        "init opened a database"
+        !spore_dir.join(".gitignore").exists(),
+        "the database is not in the project folder, so nothing needs ignoring"
     );
+    assert!(!repo.home.exists(), "init opened a database");
 
-    let again = ok(&spore(&root, &["--json", "init"]));
+    let again = ok(&repo.spore(root, &["--json", "init"]));
     assert_eq!(again["created"], json!([]));
-    assert_eq!(read(&spore_dir.join(".gitignore")), IGNORED);
-
-    std::fs::write(spore_dir.join(".gitignore"), "keep-me\nrunspore.db-*").unwrap();
-    ok(&spore(&root, &["--json", "init"]));
-    assert_eq!(
-        read(&spore_dir.join(".gitignore")),
-        "keep-me\nrunspore.db-*\nrunspore.db\nrunspore.db.files/\n"
-    );
 }
 
 #[test]
 fn init_refuses_a_nested_or_0_1_layout_and_creates_nothing() {
-    let (_dir, root) = repo("init-refuses");
+    let repo = Repo::new("init-refuses");
+    let root = &repo.root;
     std::fs::create_dir_all(root.join("a/.spore")).unwrap();
-    let nested = spore(&root.join("a/b"), &["--json", "init"]);
+    let nested = repo.spore(&root.join("a/b"), &["--json", "init"]);
     assert_eq!(
         (nested.code(), nested.json()["error"]["code"].clone()),
         (Some(2), json!("project.nested"))
@@ -125,7 +142,7 @@ fn init_refuses_a_nested_or_0_1_layout_and_creates_nothing() {
     for legacy in ["runspore.db", "runspore.db-wal", "runspore.db.files"] {
         let path = root.join(legacy);
         std::fs::write(&path, "").unwrap();
-        let out = spore(&root.join("a"), &["--json", "init"]);
+        let out = repo.spore(&root.join("a"), &["--json", "init"]);
         let error = &out.json()["error"];
         assert_eq!(
             (out.code(), error["code"].clone()),
@@ -139,74 +156,160 @@ fn init_refuses_a_nested_or_0_1_layout_and_creates_nothing() {
 
     std::fs::create_dir_all(root.join(".spore")).unwrap();
     std::fs::write(root.join(".spore/workflows"), "").unwrap();
-    let unusable = spore(&root, &["--json", "init"]);
+    let unusable = repo.spore(root, &["--json", "init"]);
     assert_eq!(
         (unusable.code(), unusable.json()["error"]["code"].clone()),
         (Some(2), json!("project.unusable"))
     );
-    assert!(!root.join(".spore/.gitignore").exists());
 }
 
 #[test]
-fn every_subfolder_reaches_one_database_and_read_only_commands_create_none() {
-    let (_dir, root) = repo("walk-up");
-    ok(&spore(&root, &["init"]));
-    let db = root.join(".spore/runspore.db");
+fn every_subfolder_reaches_one_shared_database_and_read_only_commands_create_none() {
+    let repo = Repo::new("walk-up");
+    let root = &repo.root;
+    ok(&repo.spore(root, &["init"]));
+    let db = db_of(&repo, root);
+    assert!(db.starts_with(repo.home.join("db")), "{}", db.display());
+    assert!(db.ends_with("runspore.db"));
     for cwd in [root.clone(), root.join("a/b")] {
-        let listed = ok(&spore(&cwd, &["--json", "list"]));
+        let listed = ok(&repo.spore(&cwd, &["--json", "list"]));
         assert_eq!(listed["db"], json!(db));
         assert_eq!(listed["runs"], json!([]));
         for read_only in [&["status", "run_x"][..], &["events", "run_x"]] {
-            let out = spore(&cwd, read_only);
+            let out = repo.spore(&cwd, read_only);
             assert_eq!(out.code(), Some(2), "{read_only:?}: {}", out.stderr);
         }
     }
-    assert!(!db.exists(), "a read-only command created the database");
-    let plain = Dir::new("walk-up-plain");
-    let listed = ok(&spore(&plain.path, &["--json", "list"]));
-    assert_eq!(listed["runs"], json!([]));
-    assert!(!plain.file("runspore.db").exists());
+    assert!(
+        !repo.home.exists(),
+        "a read-only command created the database"
+    );
 
-    std::fs::remove_file(root.join(".spore/.gitignore")).unwrap();
+    // A folder outside any project and outside git has a database of its own.
+    let plain = Dir::new("walk-up-plain");
+    let plain_db = db_of(&repo, &plain.path);
+    assert!(plain_db.starts_with(repo.home.join("db")));
+    assert_ne!(plain_db, db);
+
     workflow(&root.join("flow"), "flow", "true", None);
-    let started = ok(&spore(&root.join("a"), &["--json", "start", "../flow"]));
+    let started = ok(&repo.spore(&root.join("a"), &["--json", "start", "../flow"]));
     let run = started["runId"].as_str().unwrap();
     assert!(db.exists());
-    assert_eq!(
-        read(&root.join(".spore/.gitignore")),
-        IGNORED,
-        "a writing command keeps the ignore file"
-    );
+    assert!(!root.join(".spore/runspore.db").exists());
+    assert!(!root.join(".spore/.gitignore").exists());
     for cwd in [root.clone(), root.join("a"), root.join("a/b")] {
-        let listed = ok(&spore(&cwd, &["--json", "list"]));
+        let listed = ok(&repo.spore(&cwd, &["--json", "list"]));
         assert_eq!(listed["db"], json!(db));
         assert_eq!(listed["runs"][0]["runId"], json!(run));
-        let status = ok(&spore(&cwd, &["--json", "status", run]));
+        let status = ok(&repo.spore(&cwd, &["--json", "status", run]));
         assert_eq!(
             (status["db"].clone(), status["runId"].clone()),
             (json!(db), json!(run))
         );
+        assert_eq!(status.get("dbOldPlace"), None);
     }
 }
 
 #[test]
+fn an_existing_database_at_the_old_place_is_still_used_and_status_says_so() {
+    let repo = Repo::new("old-place");
+    let root = &repo.root;
+    ok(&repo.spore(root, &["init"]));
+    let shared = db_of(&repo, root);
+    let old = root.join(".spore/runspore.db");
+    workflow(&root.join("flow"), "flow", "true", None);
+    let started = ok(&repo.spore(
+        root,
+        &["--json", "--db", old.to_str().unwrap(), "start", "flow"],
+    ));
+    let run = started["runId"].as_str().unwrap();
+    assert_eq!(
+        read(&root.join(".spore/.gitignore")),
+        IGNORED,
+        "a writing command keeps the old place's ignore file"
+    );
+
+    let cwd = root.join("a/b");
+    let listed = ok(&repo.spore(&cwd, &["--json", "list"]));
+    assert_eq!(listed["db"], json!(old));
+    assert_eq!(listed["runs"][0]["runId"], json!(run));
+    let status = ok(&repo.spore(&cwd, &["--json", "status", run]));
+    assert_eq!(status["db"], json!(old));
+    assert_eq!(status["dbOldPlace"], json!({"shared": shared}));
+    let text = repo.spore(&cwd, &["status", run]);
+    assert_eq!(text.code(), Some(0), "{}", text.stderr);
+    let line = text
+        .stdout
+        .lines()
+        .find(|line| line.starts_with("db "))
+        .unwrap_or_else(|| panic!("no db line: {}", text.stdout));
+    assert!(line.contains(old.to_str().unwrap()), "{line}");
+    assert!(line.contains("old place"), "{line}");
+    assert!(line.contains(shared.to_str().unwrap()), "{line}");
+    assert!(!shared.exists(), "the shared database was not touched");
+}
+
+#[test]
+fn db_flag_then_runspore_db_then_the_old_place_then_spore_home() {
+    let repo = Repo::new("overrides");
+    let root = &repo.root;
+    ok(&repo.spore(root, &["init"]));
+    let shared = db_of(&repo, root);
+
+    let elsewhere = repo.dir.file("elsewhere");
+    let mut cmd = repo.command(root, &["--json", "list"]);
+    cmd.env("SPORE_HOME", &elsewhere);
+    let moved = PathBuf::from(ok(&run(cmd))["db"].as_str().unwrap());
+    assert_eq!(
+        moved.strip_prefix(&elsewhere).unwrap(),
+        shared.strip_prefix(&repo.home).unwrap(),
+        "SPORE_HOME moves the shared database and keeps its key"
+    );
+
+    // An existing database at the old place comes before the shared one.
+    let old = root.join(".spore/runspore.db");
+    workflow(&root.join("flow"), "flow", "true", None);
+    ok(&repo.spore(root, &["--db", old.to_str().unwrap(), "start", "flow"]));
+    assert_eq!(db_of(&repo, root), old);
+
+    let env_db = repo.dir.file("env.db");
+    let flag_db = repo.dir.file("flag.db");
+    let listed = |extra: &[&str]| {
+        let mut cmd = repo.command(root, &[extra, &["--json", "list"]].concat());
+        cmd.env("RUNSPORE_DB", &env_db);
+        ok(&run(cmd))["db"].clone()
+    };
+    assert_eq!(
+        listed(&[]),
+        json!(env_db),
+        "RUNSPORE_DB before the old place"
+    );
+    assert_eq!(
+        listed(&["--db", flag_db.to_str().unwrap()]),
+        json!(flag_db),
+        "--db before RUNSPORE_DB"
+    );
+}
+
+#[test]
 fn start_finds_a_workflow_by_its_graph_id() {
-    let (_dir, root) = repo("by-name");
-    let missing = spore(&root, &["--json", "start", "coding-loop"]);
+    let repo = Repo::new("by-name");
+    let root = &repo.root;
+    let missing = repo.spore(root, &["--json", "start", "coding-loop"]);
     assert_eq!(
         (missing.code(), missing.json()["error"]["code"].clone()),
         (Some(2), json!("workflow.not-found"))
     );
-    ok(&spore(&root, &["init"]));
+    ok(&repo.spore(root, &["init"]));
     let workflows = root.join(".spore/workflows");
     workflow(&workflows.join("loop"), "coding-loop", "true", None);
     workflow(&workflows.join("other"), "review", "true", None);
 
-    let started = ok(&spore(&root.join("a/b"), &["--json", "run", "coding-loop"]));
+    let started = ok(&repo.spore(&root.join("a/b"), &["--json", "run", "coding-loop"]));
     assert_eq!(started["status"], json!("completed"));
-    ok(&spore(&root.join("a"), &["--json", "validate", "review"]));
+    ok(&repo.spore(&root.join("a"), &["--json", "validate", "review"]));
 
-    let unknown = spore(&root, &["--json", "start", "loop"]);
+    let unknown = repo.spore(root, &["--json", "start", "loop"]);
     let error = &unknown.json()["error"];
     assert_eq!(
         (unknown.code(), error["code"].clone()),
@@ -218,7 +321,7 @@ fn start_finds_a_workflow_by_its_graph_id() {
         .contains("coding-loop, review"));
 
     workflow(&workflows.join("copy"), "review", "true", None);
-    let twice = spore(&root, &["--json", "start", "review"]);
+    let twice = repo.spore(root, &["--json", "start", "review"]);
     assert_eq!(
         (twice.code(), twice.json()["error"]["code"].clone()),
         (Some(2), json!("workflow.ambiguous"))
@@ -237,26 +340,29 @@ fn lines(path: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn a_run_works_in_the_base_folder_recorded_at_start() {
-    let (dir, root) = repo("base-dir");
-    ok(&spore(&root, &["init"]));
-    let log = dir.file("where.log");
-    where_flow(&root, &log);
+    let repo = Repo::new("base-dir");
+    let root = &repo.root;
+    ok(&repo.spore(root, &["init"]));
+    let log = repo.dir.file("where.log");
+    where_flow(root, &log);
 
     // Started from a subfolder, continued from another: both tries run at the root.
-    let started = ok(&spore(&root.join("a"), &["--json", "start", "where"]));
+    let started = ok(&repo.spore(&root.join("a"), &["--json", "start", "where"]));
     let run = started["runId"].as_str().unwrap();
-    let worked = spore(
+    let worked = repo.spore(
         &root.join("a/b"),
         &["--json", "worker", "--run", run, "--until-parked"],
     );
     assert_eq!(ok(&worked)["status"], json!("completed"));
-    assert_eq!(lines(&log), std::slice::from_ref(&root));
+    assert_eq!(lines(&log), std::slice::from_ref(root));
 
-    // `--db` into a `.spore/` from outside the repository uses its parent.
+    // The base folder comes from the current folder, not from the database's path:
+    // `--db` into a `.spore/` from outside the repository runs outside.
     let outside = Dir::new("base-dir-outside");
+    let outside_path = outside.path.canonicalize().unwrap();
     let db = root.join(".spore/runspore.db");
     let flow = root.join(".spore/workflows/where");
-    let out = spore(
+    let out = repo.spore(
         &outside.path,
         &[
             "--json",
@@ -268,24 +374,22 @@ fn a_run_works_in_the_base_folder_recorded_at_start() {
     );
     assert_eq!(ok(&out)["status"], json!("completed"));
     // `--base-dir` overrides it.
-    let out = spore(&root, &["--json", "run", "where", "--base-dir", "a/b"]);
+    let out = repo.spore(root, &["--json", "run", "where", "--base-dir", "a/b"]);
     assert_eq!(ok(&out)["status"], json!("completed"));
-    let bad = spore(
-        &root,
-        &["--json", "start", "where", "--base-dir", "nowhere"],
-    );
+    let bad = repo.spore(root, &["--json", "start", "where", "--base-dir", "nowhere"]);
     assert_eq!(bad.code(), Some(2));
-    assert_eq!(lines(&log), [root.clone(), root.clone(), root.join("a/b")]);
+    assert_eq!(lines(&log), [root.clone(), outside_path, root.join("a/b")]);
 }
 
 #[test]
 fn a_step_reaches_the_run_database_through_runspore_db() {
-    let (dir, root) = repo("step-db");
-    ok(&spore(&root, &["init"]));
+    let repo = Repo::new("step-db");
+    let root = &repo.root;
+    ok(&repo.spore(root, &["init"]));
     // The step works in a checkout with its own project folder, as a git worktree does.
     let inner = root.join("a/b");
     std::fs::create_dir_all(inner.join(".spore/workflows")).unwrap();
-    let seen = dir.file("seen.json");
+    let seen = repo.dir.file("seen.json");
     // The native kernel: compiling the Wasmtime one takes seconds in a debug build,
     // longer than the step's 500 ms lease when a heartbeat is slow.
     let script = format!("'{BIN}' --native-kernel --json list > '{}'", seen.display());
@@ -296,22 +400,23 @@ fn a_step_reaches_the_run_database_through_runspore_db() {
         Some("a/b"),
     );
 
-    let out = ok(&spore(&root, &["--json", "run", "nested"]));
+    let out = ok(&repo.spore(root, &["--json", "run", "nested"]));
     assert_eq!(out["status"], json!("completed"));
     let seen: Value = serde_json::from_str(&read(&seen)).unwrap();
-    assert_eq!(seen["db"], json!(root.join(".spore/runspore.db")));
+    assert_eq!(seen["db"], out["db"]);
     assert_eq!(seen["runs"][0]["runId"], out["runId"]);
     assert!(!inner.join(".spore/runspore.db").exists());
 }
 
 /// A ticket step of the dogfood build runs `cargo test` with the build's database in
-/// `RUNSPORE_DB`. Every `spore` a test starts names its own database or clears the
-/// variable, so the other tests here, run by a step, pass and leave the run's database
-/// holding only the run that started them.
+/// `RUNSPORE_DB`. Every `spore` a test starts names its own database, or clears the
+/// variable and names its own `SPORE_HOME`, so the other tests here, run by a step,
+/// pass and leave the run's database holding only the run that started them.
 #[test]
 fn tests_run_by_a_step_keep_off_the_run_database() {
-    let (_dir, root) = repo("step-tests");
-    ok(&spore(&root, &["init"]));
+    let repo = Repo::new("step-tests");
+    let root = &repo.root;
+    ok(&repo.spore(root, &["init"]));
     let tests = std::env::current_exe().unwrap();
     let script = format!(
         "'{}' --quiet --skip tests_run_by_a_step_keep_off",
@@ -319,9 +424,9 @@ fn tests_run_by_a_step_keep_off_the_run_database() {
     );
     workflow(&root.join(".spore/workflows/tests"), "tests", &script, None);
 
-    let out = ok(&spore(&root, &["--json", "run", "tests"]));
+    let out = ok(&repo.spore(root, &["--json", "run", "tests"]));
     assert_eq!(out["status"], json!("completed"), "{out}");
-    let listed = ok(&spore(&root, &["--json", "list"]));
+    let listed = ok(&repo.spore(root, &["--json", "list"]));
     assert_eq!(listed["runs"].as_array().unwrap().len(), 1, "{listed}");
     assert_eq!(listed["runs"][0]["runId"], out["runId"]);
 }

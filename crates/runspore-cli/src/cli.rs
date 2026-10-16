@@ -47,8 +47,9 @@ const EXIT_INTERRUPTED: u8 = 130;
 #[derive(Parser)]
 #[command(name = "spore", version, about = "Embedded durable workflow runtime")]
 pub struct Cli {
-    /// Database file. Without it and `$RUNSPORE_DB`, the `.spore/runspore.db` of the
-    /// nearest project folder at or above the current folder, else `./runspore.db`.
+    /// Database file. Without it and `$RUNSPORE_DB`, an existing `.spore/runspore.db` of
+    /// the nearest project folder at or above the current folder, else the repository's
+    /// shared `$SPORE_HOME/db/<repo>/runspore.db` (`$SPORE_HOME` is `~/.spore`).
     #[arg(long, global = true, env = "RUNSPORE_DB")]
     pub db: Option<PathBuf>,
     /// Print one JSON object on stdout instead of text.
@@ -391,12 +392,10 @@ fn warn(cli: &Cli, report: Option<&Report>) {
 pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     let cwd = std::env::current_dir()
         .map_err(|e| Fail::internal("cwd", format!("current folder: {e}")))?;
-    let given = cli.db.as_deref().filter(|db| !db.as_os_str().is_empty());
-    let db = project::database(given, &cwd);
     // A start is read in full before the database is opened, so a bad one creates nothing.
     let request = match &cli.command {
-        Command::Start(args) => Some(StartRequest::read("start", args, &db, &cwd)?),
-        Command::Run(args) => Some(StartRequest::read("run", args, &db, &cwd)?),
+        Command::Start(args) => Some(StartRequest::read("start", args, &cwd)?),
+        Command::Run(args) => Some(StartRequest::read("run", args, &cwd)?),
         _ => None,
     };
     if let Some(request) = &request {
@@ -429,6 +428,12 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             artifact: Some(path),
             ..
         } => return inspect_artifact(path),
+        _ => {}
+    }
+    let given = cli.db.as_deref().filter(|db| !db.as_os_str().is_empty());
+    let database = project::database(given, &cwd)?;
+    let db = database.path.clone();
+    match &cli.command {
         Command::Status { .. }
         | Command::List { .. }
         | Command::Events { .. }
@@ -444,14 +449,14 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         | Command::Events { .. }
         | Command::Inspect { .. }
         | Command::Step(StepCommand::Show { .. }) => {}
-        _ => project::before_write(&db)?,
+        _ => project::before_write(&database)?,
     }
     let base_dir = match &request {
         Some(request) => request.base_dir.clone(),
-        None => project::base_dir(None, &db, &cwd)?,
+        None => project::base_dir(None, &cwd)?,
     };
     let parent = request.as_ref().and_then(|r| r.parent.clone());
-    let engine = engine(cli, &db, base_dir, parent)?;
+    let engine = engine(cli, &db, &cwd, base_dir, parent)?;
     if let Command::Run(_) | Command::Worker { .. } | Command::Continue { .. } = &cli.command {
         engine.observe(progress(cli.json));
     }
@@ -510,7 +515,12 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
             let shown = Shown::read(&engine, &view).await?;
             let mut json = shown.json(&view);
             json["db"] = json!(db);
-            done(json, shown.text(&view))
+            let mut text = shown.text(&view);
+            if let project::Place::Old { shared } = &database.place {
+                json["dbOldPlace"] = json!({"shared": shared});
+                text += &old_place_text(&db, shared.as_deref());
+            }
+            done(json, text)
         }
         Command::List { unfinished } => list(&engine, &db, *unfinished).await,
         Command::Continue {
@@ -832,6 +842,22 @@ fn explain(code: Option<&str>) -> Result<Output, Fail> {
     )
 }
 
+/// The line `status` adds for a database at the old place, `.spore/runspore.db`
+/// (spec/cli.md §Project folder).
+fn old_place_text(db: &Path, shared: Option<&Path>) -> String {
+    let moved = match shared {
+        Some(shared) => format!(
+            "; moved with its -wal, -shm and .files to {}, every worktree of the repository shares it",
+            shared.display()
+        ),
+        None => String::new(),
+    };
+    format!(
+        "db         {} is the old place in the project folder{moved}\n",
+        db.display()
+    )
+}
+
 /// A read-only command, or `continue`, on a database that does not exist sees no runs,
 /// and leaves no file behind.
 fn missing_database(command: &Command, db: &Path, cwd: &Path) -> Result<Output, Fail> {
@@ -993,14 +1019,16 @@ async fn inspect_file(engine: &Engine, run: &str, path: &str) -> Result<Output, 
 }
 
 /// Opens the database, or refuses one another `spore` wrote with exit 10 and the fix
-/// (spec/cli.md, databases from another version), and builds the engine on it.
+/// (spec/cli.md, databases from another version), and builds the engine on it with
+/// the settings of the project folder above `cwd`.
 fn engine(
     cli: &Cli,
     db: &Path,
+    cwd: &Path,
     base_dir: PathBuf,
     parent: Option<RunParent>,
 ) -> Result<Engine, Fail> {
-    let settings = project::settings(db)?;
+    let settings = project::settings(cwd)?;
     let store = SqliteStore::open(db)
         .map_err(|f| Fail::internal(&f.code, format!("{}: {}", db.display(), f.message)))?;
     let mut config = EngineConfig {
@@ -1054,7 +1082,7 @@ struct StartRequest {
 }
 
 impl StartRequest {
-    fn read(command: &'static str, args: &StartArgs, db: &Path, cwd: &Path) -> Result<Self, Fail> {
+    fn read(command: &'static str, args: &StartArgs, cwd: &Path) -> Result<Self, Fail> {
         let source = Source::read(&project::workflow(&args.workflow, cwd)?)?;
         let input = match (&args.input, &args.input_file) {
             (Some(text), _) => parse_json("--input", text)?,
@@ -1078,7 +1106,7 @@ impl StartRequest {
             source,
             input,
             start_key: args.key.clone().unwrap_or_else(|| generated("key")),
-            base_dir: project::base_dir(args.base_dir.as_deref(), db, cwd)?,
+            base_dir: project::base_dir(args.base_dir.as_deref(), cwd)?,
             parent: parent_step(),
         })
     }
