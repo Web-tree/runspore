@@ -532,9 +532,10 @@ fn parked(view: &RunView) -> bool {
     }
 }
 
-/// Whether the run has no event left to apply, or is quarantined and applies none.
+/// Whether the run has no event left to apply, or has ended or is quarantined and
+/// applies none.
 fn applied(view: &RunView) -> bool {
-    view.quarantine.is_some() || view.applied_sequence + 1 >= view.next_sequence
+    view.ended() || view.quarantine.is_some() || view.applied_sequence + 1 >= view.next_sequence
 }
 
 fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
