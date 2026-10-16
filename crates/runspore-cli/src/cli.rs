@@ -1,7 +1,7 @@
 //! Argument parsing and the commands of spec/cli.md.
 
 use std::collections::hash_map::RandomState;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1312,12 +1312,32 @@ async fn continue_run(
     }
     let mut out = parked(&view, &shown, db, interrupted);
     if !interrupted {
-        let next = shown.next(&view);
+        let mut next = shown.next(&view);
+        if next.needs == Some("child") {
+            below_next(engine, &shown, &mut next).await?;
+        }
         out.json["needs"] = json!(next.needs);
         out.json["commands"] = json!(next.commands);
         out.text = next.text;
     }
     Ok(out)
+}
+
+/// For a run that waits on runs it started, what each unfinished run below it needs
+/// that is not itself such a wait, in `list`'s order: its text after the run's, and its
+/// commands as the run's, as `temporal workflow describe` lists pending children.
+async fn below_next(engine: &Engine, shown: &Shown, next: &mut view::Next) -> Result<(), Fail> {
+    let tree = &shown.children;
+    for row in &tree.rows {
+        if matches!(row.needs, None | Some("child")) {
+            continue;
+        }
+        let below = &tree.runs[row.index];
+        let below = Shown::read(engine, below).await?.next(below);
+        next.text += &below.text;
+        next.commands.extend(below.commands);
+    }
+    Ok(())
 }
 
 /// `continue` at a step another worker runs: which worker, its pid and for how long, and
@@ -1457,12 +1477,18 @@ async fn read_tree(
         .enumerate()
         .map(|(i, r)| (r.key.run.as_str(), i))
         .collect();
+    let waited_on: HashSet<&str> = runs
+        .iter()
+        .filter(|r| !r.ended())
+        .filter_map(|r| r.parent.as_ref().map(|p| p.run_id.as_str()))
+        .collect();
     let mut names = HashMap::new();
     let mut rows = Vec::new();
     for (run, depth) in view::tree(&runs, root) {
         let (node_id, since_ms) = whereabouts(engine, run).await?;
         let step = engine.async_step(run).await?;
-        let needs = view::needs(run, step.as_ref());
+        let child_unfinished = waited_on.contains(run.key.run.as_str());
+        let needs = view::needs_below(run, step.as_ref(), child_unfinished);
         let actor = step
             .filter(|_| matches!(needs, Some("external-ready" | "held")))
             .and_then(|s| s.actor);

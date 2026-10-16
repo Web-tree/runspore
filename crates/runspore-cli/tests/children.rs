@@ -246,3 +246,86 @@ fn a_child_step_names_its_parent_run() {
     let runs = dir.run(&args(&["--json", "list"])).json()["runs"].clone();
     assert_eq!(row(&runs, &build)["status"], "completed", "{runs}");
 }
+
+/// The ticket run of a build: it waits at `gate` for a person, then its last step
+/// signals its parent `child-done`.
+fn ticket() -> Value {
+    let report = format!(
+        "'{BIN}' --native-kernel signal \"$RUNSPORE_PARENT_RUN_ID\" child-done --outcome ok"
+    );
+    json!({
+        "format": "runspore.workflow/0.2", "name": "ticket", "start": "gate",
+        "actions": {"report": {"kind": "command", "effect": "idempotent", "output": "none",
+                               "argv": ["/bin/sh", "-c", report]}},
+        "nodes": {
+            "gate": {"kind": "await-signal", "signal": "go", "outcomes": {"go": "report"}},
+            "report": {"kind": "activity", "action": "report", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete"}
+        }
+    })
+}
+
+/// A build that starts `ticket` and waits for its `child-done`.
+fn build() -> Value {
+    let start = format!("'{BIN}' --json start ticket --key ticket-1 > /dev/null");
+    let mut build = parent();
+    build["actions"]["spawn"]["argv"] = json!(["/bin/sh", "-c", start]);
+    build["nodes"]["hold"] = json!({"kind": "await-signal", "signal": "child-done",
+                                    "outcomes": {"ok": "done"}});
+    build
+}
+
+/// `continue <parent> --wait` works the run it started too, and returns when that run
+/// needs a person: the parent's wait shows as waiting on its child, with the child's
+/// commands, never the parent's signal as a decision.
+#[test]
+fn continue_works_the_runs_a_run_started() {
+    let dir = Dir::new("continue-children");
+    dir.folder("build", &build());
+    dir.folder("ticket", &ticket());
+    let out = dir.run(&args(&["--json", "start", "build", "--key", "build"]));
+    let build = out.json()["runId"].as_str().unwrap().to_string();
+
+    let out = dir.run(&args(&["--json", "continue", &build, "--wait"]));
+    assert_eq!(out.code(), Some(0), "{}", out.stderr);
+    let parked = out.json();
+    assert_eq!(parked["status"], "waiting", "{parked}");
+    assert_eq!(parked["needs"], "child", "{parked}");
+    let ticket = parked["children"][0]["runId"].as_str().unwrap().to_string();
+    assert_eq!(parked["children"][0]["status"], "waiting", "{parked}");
+    assert_eq!(parked["children"][0]["needs"], "signal", "{parked}");
+    let commands: Vec<&str> = parked["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    assert_eq!(commands[0], format!("spore step show {ticket}"), "{parked}");
+    assert!(
+        commands[1].starts_with(&format!("spore signal {ticket} go")),
+        "{parked}"
+    );
+    assert!(
+        commands.iter().all(|c| !c.contains(&build)),
+        "the parent's wait is offered as a decision: {parked}"
+    );
+
+    let list = dir.run(&args(&["--json", "list"])).json();
+    assert_eq!(row(&list["runs"], &build)["needs"], "child", "{list}");
+    assert_eq!(row(&list["runs"], &ticket)["needs"], "signal", "{list}");
+    let text = dir.run(&args(&["continue", &build])).stdout;
+    let head = format!(
+        "run {build} waits at hold for signal child-done from run it started: {ticket}\n\
+         run {ticket} waits at gate for signal go\n"
+    );
+    assert!(text.starts_with(&head), "{text}");
+
+    let signal = dir.run(&args(&["signal", &ticket, "go", "--outcome", "go"]));
+    assert_eq!(signal.code(), Some(0), "{}", signal.stderr);
+    let out = dir.run(&args(&["--json", "continue", &build, "--wait"]));
+    assert_eq!(out.code(), Some(0), "{}", out.stderr);
+    let done = out.json();
+    assert_eq!(done["status"], "completed", "{done}");
+    assert_eq!(done["needs"], Value::Null, "{done}");
+    assert_eq!(done["children"][0]["status"], "completed", "{done}");
+}
