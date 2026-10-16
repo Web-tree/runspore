@@ -946,6 +946,82 @@ impl<'a> Checks<'a> {
                 self.mapping(&at, output, None, id, &ROOTS);
             }
         }
+        if kind == "activity" {
+            self.argv_paths(id, &entry);
+        }
+    }
+
+    /// The `$get` paths into `input` and `params` in the `argv` of step `id`'s action,
+    /// and of its probe's, watch's and stop's, against what the step's own mappings give
+    /// (spec/host.md §3): a path that surely names nothing there fails the step each time
+    /// it starts.
+    fn argv_paths(&mut self, id: &str, entry: &Value) {
+        let Some(action) = entry.get("action").and_then(Value::as_str) else {
+            return;
+        };
+        let here = pointer("/nodes", id);
+        let action_at = pointer("/actions", action);
+        let Some(raw) = self.value.pointer(&action_at) else {
+            return;
+        };
+        let mut argvs = Vec::new();
+        if raw.get("kind").and_then(Value::as_str) == Some("command") {
+            argvs.push(pointer(&action_at, "argv"));
+        }
+        for program in ["probe", "watch", "stop"] {
+            argvs.push(format!("{action_at}/async/{program}/command/argv"));
+        }
+        let mut gets = Vec::new();
+        for at in argvs {
+            if let (false, Some(Value::Array(argv))) =
+                (self.broken.touches(&at), self.value.pointer(&at))
+            {
+                for (i, item) in argv.iter().enumerate() {
+                    evaluated_gets(&pointer(&at, &i.to_string()), item, &mut gets);
+                }
+            }
+        }
+        for (get_at, path) in gets {
+            let Some(field) = path.first().and_then(Value::as_str) else {
+                continue;
+            };
+            // An absent `input` gives `null`, absent `params` `{}` (host.md §3).
+            let given = match (field, entry.get(field)) {
+                ("input" | "params", Some(given)) => given.clone(),
+                ("input", None) => Value::Null,
+                ("params", None) => json!({}),
+                _ => continue,
+            };
+            let well_formed = path[1..]
+                .iter()
+                .all(|s| s.is_string() || s.as_u64().is_some());
+            if !well_formed || self.broken.touches(&pointer(&here, field)) {
+                continue;
+            }
+            let Some(i) = names_nothing(&given, &path[1..]) else {
+                continue;
+            };
+            let path_at = pointer(&get_at, GET);
+            let mut d = Diagnostic::new(
+                "mapping.missing-path",
+                At::value(pointer(&path_at, &(i + 1).to_string())),
+            )
+            .arg("path", Arg::Input(path_at))
+            .arg("root", Arg::computed(field))
+            .arg("step", Arg::Key(here.clone()));
+            // A key the step's input lacks is most likely the run's own.
+            let plain = |m: &Map<String, Value>| !m.keys().any(|k| k.starts_with('$'));
+            let open = entry
+                .get("input")
+                .is_none_or(|input| input.as_object().is_some_and(plain));
+            if let (0, "input", true, Some(key)) = (i, field, open, path[1].as_str()) {
+                d = d.fix(Fix::review(vec![Edit::Set {
+                    at: pointer(&pointer(&here, "input"), key),
+                    value: json!({ GET: ["input", key] }),
+                }]));
+            }
+            self.push(d);
+        }
     }
 
     /// Fixes giving a step the field its kind needs.
@@ -1886,6 +1962,71 @@ impl<'a> Checks<'a> {
 /// The operator named `key` among [`OPERATORS`].
 fn operator(key: &str) -> Option<Operator> {
     OPERATORS.into_iter().find(|(name, ..)| *name == key)
+}
+
+/// The `$get`s of the mapping at `at` that are evaluated whenever it is, each with its
+/// pointer and path: not one under `$literal`, in a branch of `$if`, or with a
+/// `default`.
+fn evaluated_gets(at: &str, value: &Value, gets: &mut Vec<(String, Vec<Value>)>) {
+    match value {
+        Value::Object(map) if map.contains_key(GET) => {
+            if let (1, Some(Value::Array(path))) = (map.len(), map.get(GET)) {
+                gets.push((at.to_string(), path.clone()));
+            }
+        }
+        Value::Object(map) if map.contains_key(LITERAL) => {}
+        Value::Object(map) if map.contains_key("$if") => {
+            let op = pointer(at, "$if");
+            if let Some(cond) = map["$if"].get(0) {
+                evaluated_gets(&pointer(&op, "0"), cond, gets);
+            }
+        }
+        Value::Object(map) => {
+            for (key, member) in map {
+                if !key.starts_with('$') || operator(key).is_some() {
+                    evaluated_gets(&pointer(at, key), member, gets);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (i, item) in items.iter().enumerate() {
+                evaluated_gets(&pointer(at, &i.to_string()), item, gets);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Where a path into what `mapping` gives surely names nothing: the index of the first
+/// step that finds nothing, or `None` when the path resolves or only the run can tell.
+fn names_nothing(mapping: &Value, steps: &[Value]) -> Option<usize> {
+    let mut value = mapping;
+    let mut literal = false;
+    for (i, step) in steps.iter().enumerate() {
+        if let (false, Value::Object(map)) = (literal, value) {
+            if let Some(inner) = map.get(LITERAL) {
+                value = inner;
+                literal = true;
+            } else if map.keys().any(|k| k.starts_with('$')) {
+                // `$uuid`, `$join` and `$json` give a string; the rest only the run knows.
+                let text = ["$uuid", "$join", "$json"];
+                return text.iter().any(|k| map.contains_key(*k)).then_some(i);
+            }
+        }
+        let next = match (step, value) {
+            (Value::String(key), Value::Object(map)) => map.get(key),
+            (Value::Number(n), Value::Array(items)) => n
+                .as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .and_then(|n| items.get(n)),
+            _ => None,
+        };
+        match next {
+            Some(next) => value = next,
+            None => return Some(i),
+        }
+    }
+    None
 }
 
 /// The schema of a result-mode answer (host.md §2) for a step that ends with

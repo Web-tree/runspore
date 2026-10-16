@@ -1,0 +1,10 @@
+── "$get" path in "argv" that the step does not give ── mapping.missing-path/settings.json:6  mapping.missing-path
+The "argv" of action "build" reads ["input", "target"], which step "build" does not give, so the step fails each time it starts.
+
+  6 │       "argv": ["make", { "$get": ["input", "target"] }],
+    │                                            ^^^^^^^^
+
+To fix: map it in the "input" of step "build", or give the "$get" a "default".
+Why: a "$get" without a "default" that finds nothing stops the run.
+
+1 problem in release. Nothing was run.

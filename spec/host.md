@@ -643,7 +643,9 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
   is stuck or takes its `failed` route (kernel §7.4). An `argv[0]` asset path
   (below) is looked for after evaluation. `validate` checks every mapping item as a
   mapping (W10) and refuses a `$get` path that starts with anything but `input`,
-  `params`, `run` or `step`, and an item that is neither a string nor an object. A
+  `params`, `run` or `step`, an item that is neither a string nor an object, and a path
+  into `input` or `params` that a step running the action surely does not give
+  (dot.md §4, `mapping.missing-path`). A
   probe's, watch's or stop's `command.argv` takes the same items, which the build
   checks the same way, and, once the host runs it, gets the same roots, `step`
   included, for the try it looks after. `ActivityContext::scope(input)` gives these

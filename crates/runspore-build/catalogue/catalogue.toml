@@ -832,6 +832,16 @@ fix = '''use a key or a whole number here.'''
 args = { value = "input" }
 example = "mapping.path-step"
 
+[[code]]
+code = "mapping.missing-path"
+severity = "problem"
+title = '''"$get" path in "argv" that the step does not give'''
+message = '''The "argv" of action {action} reads {path}, which step {step} does not give, so the step fails each time it starts.'''
+fix = '''map it in the {root} of step {step}, or give the "$get" a "default".'''
+why = '''a "$get" without a "default" that finds nothing stops the run.'''
+args = { path = "input", root = "computed" }
+example = "mapping.missing-path"
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
