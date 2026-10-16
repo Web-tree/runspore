@@ -254,6 +254,11 @@ before it starts anything. It reads no database and needs no project folder:
 ```
 
 - `version`: the version of the `spore` binary, the one `spore --version` prints.
+  A build that is not a release is a pre-release named by its commit, such as
+  `0.4.0-dev+a65d8d1` (release.md §7).
+- `commitDate`: on a pre-release, the date of its commit, which `spore --version`
+  and the text output print after the version: `0.4.0-dev+a65d8d1 (2026-10-16)`.
+  A release has no `commitDate`.
 - `contracts`: the version of each specification it implements: the kernel
   ([kernel.md](kernel.md)), the host ([host.md](host.md)), the store
   ([store.md](store.md)), this command line, the DOT dialect ([dot.md](dot.md)), the
