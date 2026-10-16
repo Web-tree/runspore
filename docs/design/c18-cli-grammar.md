@@ -43,6 +43,8 @@ Rejected:
 
 **Decision.** These verbs make up the whole CLI. The kinds column is what the core registry allows; plugins may add kinds to the read verbs, never new meanings to a core verb (L7).
 
+The table shows each verb's targets and the flags this design renames or adds. Every other 0.2 argument and flag moves unchanged to the verb that replaces its command, and keeps its meaning: `--input`, `--input-file` and `--base-dir` on `start` and `execute`; `--retryable` on `fail`; `--short`, `--strict` and `--fix` on `validate`; `--composed` and `--strict` on `build`. One clash is renamed: `build -o <path>` becomes `build --out <path>`, since `-o` is the output format everywhere (L8).
+
 | Verb | Kinds | Replaces |
 |---|---|---|
 | `get <kind> [name…] [--unfinished]` | every kind | `list`, `list --unfinished`, `events`, `explain` (no code) |
@@ -60,12 +62,13 @@ Rejected:
 | `renew`, `complete`, `fail` `step/<run>:<node> --token <t>` | step | `step renew`, `step complete`, `step fail` |
 | `abandon step/<run>:<node>` | step | `step abandon` |
 | `serve [--slots] [--lease-ms] …` | — | `worker` |
-| `validate`, `build` `workflow/<path>` | workflow | `validate`, `build` |
+| `validate workflow/<name> \| <path>` | workflow, artifact | `validate` |
+| `build workflow/<name> \| <path>` | workflow | `build` |
 | `cat run/<id> <path>` | run | `inspect --run --file` |
 | `init` | — | `init` |
 | `version` | — | `capabilities` |
 
-`get` prints a table, one row per item, with columns from the kind's entry (L3); `-o wide` adds the low-priority columns. `describe` prints everything a person needs about one item: for a run, its status, position, the arrow into it, what it needs, the outstanding invocation, the commands that answer it, and whether a worker is alive. It is the one call that answers "what is this run doing and what do I do?" (`describe run/X -o json` gives the same as an object, which kubectl lacks.) `get events --run X` replaces `events`, as `get` with a parent (L6). `get runs --unfinished` keeps today's `list --unfinished`: only unfinished runs, newest first, filtered in the store rather than by the caller. `start` and `execute` take the same targets `start` and `run` take today: `workflow/<name>` for a workflow in the project folder, or a path to a workflow folder, its `workflow.dot` or a built artifact. A path is told apart from a name by containing a `/` or a `.`.
+`get` prints a table, one row per item, with columns from the kind's entry (L3); `-o wide` adds the low-priority columns. `describe` prints everything a person needs about one item: for a run, its status, position, the arrow into it, what it needs, the outstanding invocation, the commands that answer it, and whether a worker is alive. It is the one call that answers "what is this run doing and what do I do?" (`describe run/X -o json` gives the same as an object, which kubectl lacks.) `get events --run X` replaces `events`, as `get` with a parent (L6). `get runs --unfinished` keeps today's `list --unfinished`: only unfinished runs, newest first, filtered in the store rather than by the caller. `start` and `execute` take the same targets `start` and `run` take today: `workflow/<name>` for a workflow in the project folder, or a path to a workflow folder, its `workflow.dot` or a built artifact. As today, an existing path wins: a target that names an existing file or folder is that path, and only otherwise is it a workflow name in the project folder. `workflow/<name>` always means the name.
 
 Why settled: these are kubectl's read verbs (`get`, `describe`, `explain`, `wait`) and Temporal's run verbs (`start`, `execute`, `signal`, `cancel`), with spore's own `resolve`, `continue`, `claim` and the step-worker verbs kept as they are. `serve` is the usual name for a long-running process that does work for others; `worker` stays the kind it serves as (`get workers`). `version` follows `kubectl version`. `version -o json` keeps the whole handshake `capabilities` gives today, `actionKinds`, `asyncKinds` and `resultChannels` included, so a caller such as `ml-workflow` checks the host in one call before it starts anything. `get kinds -o wide` also shows action kinds as rows.
 
@@ -117,14 +120,14 @@ Why settled: Temporal names the same pair `start` and `execute` (`temporal workf
 - A target with a parent names it before a colon: `step/<run>:<node>`, `signal/<run>:<message-id>`, `event/<run>:<sequence>`, `invocation/<run>:<inv-id>`. `--run <id>` scopes a whole command instead (`get steps --run 9f3a1c`), as kubectl's `-n`.
 - `-o name` prints targets in this form, and every command takes them back, so the output of one command is input to the next.
 - IDs keep their kind prefixes (`run_`, `inv_`, `msg_`, `req_`). A prefixed ID of the wrong kind fails before any work.
-- `continue`, `claim` and `describe run` without a target still pick the only unfinished run, and fail listing the candidates when there are several.
+- `continue` and `describe run` without a target still pick the only unfinished run, and fail listing the candidates when there are several. `claim step` without a target keeps today's queue behaviour: it claims the oldest ready external step that matches, across every run in the database.
 - `resolve invocation/<run>:<inv-id>` answers that invocation only. If the run has moved on to another invocation, it fails with `resolve.not-applicable` and changes nothing, as `resolve <run> <inv>` does today. `resolve run/<id>` answers the outstanding one.
 
 Why settled: `TYPE/NAME` with plural, singular and short names is kubectl's form; prefix matching that refuses ambiguity is git's and Restate's. Start keys are unique per database (`UNIQUE (tenant, start_key)`, C16), so they are safe names.
 
 ### L7. Plugins add kinds, and verbs only where no core verb fits (standard practice)
 
-**Decision.** When the M6 plugin work lands (docs/17), a WebAssembly plugin ships a manifest with kind entries (L3) and exports `list` and `get` functions for them. The core then gives each plugin kind `get`, `describe`, `explain`, `wait`, `-o json|name|wide` and completion, with no output code in the plugin. A plugin may declare an action verb for its own kinds, with its arguments as a schema, and exports `invoke`: the core calls it with the verb, the target and the parsed arguments, and it returns the L8 result or error object (stable code, state, `retryable`, next commands). The core parses the arguments, prints the result and shows the verb in `get kinds -o wide`. The exact ABI of `list`, `get` and `invoke` is fixed with M6. A plugin can never redefine a core verb or kind, or add a core kind to its verb; a clash fails when the plugin loads. Plugin kinds and verbs show their owner in `get kinds`.
+**Decision.** When the M6 plugin work lands (docs/17), a WebAssembly plugin ships a manifest with kind entries (L3) and exports `list` and `get` functions for them. The core then gives each plugin kind `get`, `describe`, `explain`, `wait`, `-o json|name|wide` and completion, with no output code in the plugin. `wait --for=<condition>` reads conditions the Kubernetes way: an object reports `status.conditions`, a list of `{type, status: "True"|"False"|"Unknown", reason, message}`, and a condition the kind declares holds when its entry has `status: "True"`. Core kinds report their conditions the same way. A plugin may declare an action verb for its own kinds, with its arguments as a schema, and exports `invoke`: the core calls it with the verb, the target and the parsed arguments, and it returns the L8 result or error object (stable code, state, `retryable`, next commands). The core parses the arguments, prints the result and shows the verb in `get kinds -o wide`. The exact ABI of `list`, `get` and `invoke` is fixed with M6. A plugin can never redefine a core verb or kind, or add a core kind to its verb; a clash fails when the plugin loads. Plugin kinds and verbs show their owner in `get kinds`.
 
 0.3 builds the registry and puts the core kinds in it. Nothing loads plugins until M6. The clap tree becomes one built at start from the registry instead of a derive enum, so core and plugin kinds take the same path from the first day.
 
