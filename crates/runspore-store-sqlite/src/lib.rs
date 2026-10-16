@@ -680,9 +680,9 @@ impl SqliteStore {
     }
 
     /// Records that worker `worker_id` of this `spore`, process `pid` on `host`, uses
-    /// the file, with a heartbeat fresh for `lease_ms` from now. `migrate` refuses
+    /// the file, with a heartbeat fresh for `fresh_ms` from now. `migrate` refuses
     /// while a worker of another version has a fresh one (spec/store.md §3).
-    pub fn beat_worker(&self, worker_id: &str, host: &str, pid: u32, lease_ms: u64) -> R<()> {
+    pub fn beat_worker(&self, worker_id: &str, host: &str, pid: u32, fresh_ms: u64) -> R<()> {
         let mut conn = self.lock();
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -697,7 +697,7 @@ impl SqliteStore {
                 host,
                 pid,
                 i(now),
-                i(now.saturating_add(lease_ms))
+                i(now.saturating_add(fresh_ms))
             ],
         )
         .map_err(db)?;

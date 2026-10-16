@@ -821,9 +821,10 @@ exit 10 and `migrate.workers-live`, changing nothing, while a worker of another
 it finish, and migrate again. A worker of another `spore` is one whose record has a
 fresh heartbeat and another version, or, for a `spore` from before workers kept
 records, one still running a step under a live lease; the message then names the
-step and the run. `run`, `worker` and `continue` keep their record fresh every
-heartbeat (`--heartbeat-ms`) for one lease (`--lease-ms`) while they work, and remove
-it when they stop.
+step and the run. `run`, `worker` and `continue` keep their record fresh while they
+work, renewing it every 10 seconds for 30 on a connection of their own, so it never
+holds up a lease renewal, and remove it when they stop. A worker killed without its
+stop counts for up to 30 seconds more.
 
 `migrate` on a database that does not exist exits 2 with `db.not-found` and creates
 nothing. On a current database it changes nothing and says so. Its JSON output is

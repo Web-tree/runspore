@@ -51,6 +51,11 @@ const EXIT_INTERRUPTED: u8 = 130;
 const VERSION: &str = env!("SPORE_BUILD_VERSION");
 /// [`VERSION`] as `spore --version` prints it: with the commit's date on a pre-release.
 const VERSION_TEXT: &str = env!("SPORE_BUILD_VERSION_TEXT");
+/// How often a working `spore` renews its worker record, and how long each renewal
+/// keeps it fresh: three beats, so one that waits on a busy database does not let it
+/// lapse (spec/cli.md, Databases from another version).
+const WORKER_BEAT_MS: u64 = 10_000;
+const WORKER_FRESH_MS: u64 = 30_000;
 
 #[derive(Parser)]
 #[command(
@@ -482,11 +487,11 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         None => project::base_dir(None, &cwd)?,
     };
     let parent = request.as_ref().and_then(|r| r.parent.clone());
-    let (engine, store) = engine(cli, &db, &cwd, base_dir, parent, cli.migrate && !reads_only)?;
+    let engine = engine(cli, &db, &cwd, base_dir, parent, cli.migrate && !reads_only)?;
     let _beat = match &cli.command {
         Command::Run(_) | Command::Worker { .. } | Command::Continue { .. } => {
             engine.observe(progress(cli.json));
-            Some(Beat::start(store, engine.config())?)
+            Some(Beat::start(&db, engine.config())?)
         }
         _ => None,
     };
@@ -1060,9 +1065,9 @@ fn engine(
     base_dir: PathBuf,
     parent: Option<RunParent>,
     migrate: bool,
-) -> Result<(Engine, Arc<SqliteStore>), Fail> {
+) -> Result<Engine, Fail> {
     let settings = project::settings(cwd)?;
-    let store = Arc::new(open(db, migrate)?);
+    let store = open(db, migrate)?;
     let mut config = EngineConfig {
         base_dir,
         db_path: Some(db.to_path_buf()),
@@ -1080,8 +1085,12 @@ fn engine(
     if let Some(mb) = settings.disk_floor_mb {
         config.disk_floor = mb.saturating_mul(1 << 20);
     }
-    let engine = Engine::new(store.clone(), reducer(cli)?, registry(), config);
-    Ok((engine, store))
+    Ok(Engine::new(
+        Arc::new(store),
+        reducer(cli)?,
+        registry(),
+        config,
+    ))
 }
 
 /// Opens the database, or with `migrate` upgrades one an earlier 0.2 `spore` wrote
@@ -1140,7 +1149,8 @@ fn migrate(database: &project::Database) -> Result<Output, Fail> {
 
 /// The record of this process as a worker of the database, kept fresh while it works
 /// on runs so a `migrate` of another `spore` sees it, and removed when it stops
-/// (spec/cli.md, Databases from another version).
+/// (spec/cli.md, Databases from another version). It has its own connection, and beats
+/// far less often than leases are renewed, so it never holds up a renewal.
 struct Beat {
     store: Arc<SqliteStore>,
     worker_id: String,
@@ -1149,16 +1159,17 @@ struct Beat {
 }
 
 impl Beat {
-    fn start(store: Arc<SqliteStore>, config: &EngineConfig) -> Result<Self, Fail> {
+    fn start(db: &Path, config: &EngineConfig) -> Result<Self, Fail> {
+        let store = Arc::new(open(db, false)?);
         let host = runspore_host::process::host_name().unwrap_or_else(|_| "unknown".into());
         let pid = std::process::id();
-        let (worker_id, lease_ms) = (config.worker_id.clone(), config.lease_ms);
+        let worker_id = config.worker_id.clone();
         let beat = {
             let (store, worker_id) = (store.clone(), worker_id.clone());
-            move || store.beat_worker(&worker_id, &host, pid, lease_ms)
+            move || store.beat_worker(&worker_id, &host, pid, WORKER_FRESH_MS)
         };
         beat().map_err(|f| Fail::internal(&f.code, f.message))?;
-        let period = std::time::Duration::from_millis(config.heartbeat_ms.max(1));
+        let period = std::time::Duration::from_millis(WORKER_BEAT_MS);
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
         // A beat that fails is tried again next period; the work does not depend on it.
         let thread = std::thread::spawn(move || {

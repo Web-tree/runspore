@@ -393,8 +393,8 @@ quarantine. Read views show status `cancelled` and the cancel record.
   - a registered worker whose version is not this `spore`'s and whose heartbeat is
     fresh: `until_ms` in the `workers` table is still ahead. A process that works on
     runs (`spore run`, `worker`, `continue`) registers with its worker ID, version,
-    host and process ID, renews it every heartbeat for one lease, and removes it when
-    it stops;
+    host and process ID, renews it every 10 seconds, each time fresh for 30 seconds,
+    and removes it when it stops;
   - an attempt still `running` under a live lease whose owner is a worker ID
     (`worker-…`, host.md §3) that is not registered: a worker of a `spore` older than
     the `workers` table. The message names the worker and the step and run it runs.
