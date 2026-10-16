@@ -9,6 +9,6 @@
     "check": "./check.sh"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "1.38.0"
+    "@bytecodealliance/jco": "1.39.0"
   }
 }
