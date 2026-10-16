@@ -100,6 +100,20 @@ pub async fn settle(record: &ProcessRecord, grace: Duration) -> Leftover {
     }
 }
 
+/// Whether process `pid`, which started the group `record` names, is known to be gone:
+/// the record is of this machine, and the machine has booted since or no process `pid`
+/// runs. False when that cannot be told from here.
+pub fn starter_gone(record: &ProcessRecord, pid: i32) -> bool {
+    let Ok(machine) = machine() else {
+        return false;
+    };
+    if record.host != machine.host {
+        return false;
+    }
+    record.boot != machine.boot
+        || nix::sys::signal::kill(Pid::from_raw(pid), None) == Err(Errno::ESRCH)
+}
+
 /// Whether the group `pgid` running now is the one recorded with start time
 /// `started`: its leader is alive with that start time, or it has lost its leader and
 /// every member started at or after it. `Some(false)` when no process of the group

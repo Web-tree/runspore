@@ -355,14 +355,24 @@ With `<runId>`, or the one unfinished run, it:
 
 1. **Quarantined:** works nothing. It prints the quarantine's code and details and
    `spore release <runId>`, and exits 5.
-2. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
+2. **At a step another worker runs** (its attempt takes that worker's slot, as
+   `status` shows it in `running` and `slots`): works nothing, and says which worker
+   holds the step instead of waiting on it in silence, as `temporal workflow describe`
+   names the worker on each pending activity. It prints `fix attempt 1 is running on
+   worker <id> (pid <pid>, for 7m35s); waiting for it to finish`, leaving out the pid
+   or the time when the store does not know them, then `spore continue <runId>
+   --wait`, and exits 0. JSON: the `status` object with `needs` `working` and that
+   command in `commands`. A worker known to be gone (it ran on this machine and its
+   process no longer runs) runs nothing: its try waits for its lease to run out, as
+   §Coming back after a kill says, and `continue` works the run.
+3. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
    parked, printing its progress on stderr (§Progress). Like `run`, it works as a
    whole worker, so other runs of the database that fall due meanwhile move on too. On the way it sweeps attempts
    as a worker does: a held async step whose lease or deadline has passed is
    expired, and its action's effect decides. A held step is probed when its action has
    a probe this host runs (host.md §2); a `dead` answer expires it with reason
    `probe-dead`, and the run goes on.
-3. **Prints what is needed**, and exits as `run` does:
+4. **Prints what is needed**, and exits as `run` does:
 
    | The run | It prints | Exit |
    | --- | --- | --- |
@@ -384,9 +394,11 @@ interrupts: SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit 130.
 
 **`continue [<runId>] --wait`.** Follows the run until it needs a person or has
 ended, so a driver can start it in the background and act when it returns. It chooses
-the run, and treats a quarantined or finished run, as `continue` does, and it works
-the run the same way, except at a held async step, where `continue` would stop with
-exit 6 (host.md §2, `follow`):
+the run, and treats a quarantined or finished run, as `continue` does. At a step
+another worker runs it prints the line `continue` prints, as a progress line on stderr
+(§Progress, change `running-elsewhere`), and works the run, which waits for that
+worker's result. It works the run as `continue` does, except at a held async step,
+where `continue` would stop with exit 6 (host.md §2, `follow`):
 
 - **The step's action declares a watch.** It runs the watch, as `run` does, and goes
   on when the watch reports. When the attempt stops being held first (an actor's
@@ -744,6 +756,7 @@ With `--json` each line is one JSON object instead: `format`, `atMs`, `runId`,
 | `completed` | `nodeId` (null when not known) |
 | `failed` | `nodeId` (null when not known), `error: {code, message}` |
 | `quarantined` | `code`, `details` |
+| `running-elsewhere` | `nodeId`, `attempt`, `worker`, `pid`, `forMs` (`pid` and `forMs` null when not known); printed once by `continue --wait` before it waits on a step another worker runs (§What a run needs) |
 
 `message` is the first line of the error's message; `status` shows the whole error.
 Stdout is unchanged: `run` and `worker --until-parked` still print the run's status
@@ -786,7 +799,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Success. For `run`, `worker --until-parked` and `continue`: the run completed |
+| 0 | Success. For `run`, `worker --until-parked` and `continue`: the run completed; for `continue` without `--wait`, also a run at a step another worker runs |
 | 1 | The run failed |
 | 2 | Usage or validation error; for `validate`, a problem, or a warning with `--strict` |
 | 3 | The run is waiting for a signal |

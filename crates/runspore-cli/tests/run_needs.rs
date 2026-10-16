@@ -305,6 +305,66 @@ fn continue_on_a_quarantined_run_works_nothing_and_names_release() {
     assert_eq!(unfinished(&dir)[0]["needs"], "quarantined");
 }
 
+/// `spore worker` runs the step: `continue` names that worker, its pid and for how
+/// long, works nothing and exits 0; `continue --wait` says the same on stderr and
+/// follows the run past it.
+#[test]
+fn continue_at_a_step_another_worker_runs_names_the_worker() {
+    let dir = Dir::new("continue-elsewhere");
+    loop_folder(&dir.file("loop"), common::effect_argv("build", "sleep 3"));
+    let run = start(&dir, "loop", "k");
+    let mut worker = dir
+        .cmd(&args(&["worker"]))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    while dir.effects().is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let (code, out) = json(&dir, &["continue", &run]);
+    assert_eq!(code, Some(0), "{out}");
+    assert_eq!(out["needs"], "working");
+    assert_eq!(
+        out["commands"],
+        json!([format!("spore continue {run} --wait")])
+    );
+    let running = &out["running"];
+    assert_eq!(running["state"], "started", "{out}");
+    let (worker_id, pid) = (running["worker"].as_str().unwrap(), &running["pid"]);
+    assert!(pid.is_i64(), "{out}");
+    let text = dir.run(&args(&["continue", &run]));
+    assert_eq!(text.code(), Some(0), "{}", text.stderr);
+    let line = format!("build attempt 1 is running on worker {worker_id} (pid {pid}, for ");
+    assert!(text.stdout.starts_with(&line), "{}", text.stdout);
+    assert!(
+        text.stdout.contains(&format!(
+            "s); waiting for it to finish\n  spore continue {run} --wait\n"
+        )),
+        "{}",
+        text.stdout
+    );
+    assert_eq!(dir.effects().len(), 1, "continue ran no try of its own");
+
+    let followed = dir.run(&args(&["continue", &run, "--wait"]));
+    assert_eq!(followed.code(), Some(3), "{}", followed.stderr);
+    assert!(
+        followed.stderr.contains(&format!("  k  {line}")),
+        "{}",
+        followed.stderr
+    );
+    assert!(
+        followed
+            .stdout
+            .contains("waits at approve for signal approval"),
+        "{}",
+        followed.stdout
+    );
+    worker.kill().unwrap();
+    worker.wait().unwrap();
+}
+
 #[test]
 fn list_unfinished_gives_workflow_node_needs_since_and_actor_newest_first() {
     let dir = ok_loop("list-unfinished");
