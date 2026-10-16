@@ -18,7 +18,7 @@ The compiler parses source, validates contracts and topology, normalizes default
 
 ## Repository layout
 
-Use a new repository. Cargo contains workflow-types, workflow-ir, workflow-kernel, workflow-component, workflow-compiler, workflow-host, store-sqlite, store-postgres, and workflow-cli. TypeScript contains runtime, store-node-sqlite, store-bun-sqlite, store-postgres, adapter-browser, adapter-cloudflare, adapter-claude, and sdk. Separate directories contain wit, schemas, conformance, examples, and operational runbooks.
+Use a new repository. Cargo contains workflow-types, workflow-ir, workflow-kernel, workflow-component, workflow-compiler, workflow-host, store-sqlite, store-postgres, and workflow-cli. TypeScript contains runtime, store-node-sqlite, store-bun-sqlite, store-postgres, adapter-browser, adapter-cloudflare, and sdk. The Claude Code integration is not in this repository: it is the `ml-workflow` plugin in `max-skills`, and it uses only the `spore` CLI (C10 L1). Separate directories contain wit, schemas, conformance, examples, and operational runbooks.
 
 Generated bindings are checked or rebuilt deterministically in CI. Shared serialization, identifiers, retry calculations, decision validation, and canonical hashing belong in Rust and the Wasm kernel; JS host code handles async orchestration and its platform APIs. Reference Rust execution uses Wasmtime and the same component as JS lowering. A native Rust fast path is a later optimization requiring differential testing.
 

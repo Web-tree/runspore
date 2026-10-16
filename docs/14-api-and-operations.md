@@ -2,11 +2,11 @@
 
 Design revision 0.1 — 2026-10-05. Proposed architecture; implementation and production qualification are pending. Numbered research references resolve in [Sources](sources.md).
 
-Expose register_package, start, get_run, list_runs, signal, cancel, events, resume, and export. Administrative reconcile, migrate, and abandon operations require stronger permissions and an expected revision. Start accepts a client idempotency key; signal accepts a message ID; retries with conflicting payloads return a conflict. Return receipts containing run ID, accepted sequence or revision, and whether the operation was newly applied or deduplicated.
+Expose register_package, start, get_run, list_runs, signal, cancel, events, resume, and export. Administrative reconcile, migrate, and abandon operations require stronger permissions and an expected revision. That is the target for a multi-user host: in 0.2 anyone who can write the database may run `spore step abandon`, `resolve` or `cancel` (see [11](11-security.md), Approvals and authorization). Start accepts a client idempotency key; signal accepts a message ID; retries with conflicting payloads return a conflict. Return receipts containing run ID, accepted sequence or revision, and whether the operation was newly applied or deduplicated.
 
 The Rust and TS SDKs provide embedded Engine construction with a Store, ActivityRegistry, PolicyProvider, BlobProvider, TelemetryProvider, and host limits. Engine.tick performs bounded work; Engine.serve runs until cancellation with graceful drain. Neither starts a hidden network listener. Add a CLI worker and a separately enabled control server for users who need them.
 
-CLI operations include validate, compile, inspect-package, run, worker, status, events, signal, cancel, replay, reconcile, export, import, and doctor. Replay is read-only by default and uses recorded events and artifacts with all effects disabled. A repair creates explicit events or a new run; it never silently edits past history. JSON output is versioned for plugin integration.
+CLI operations include validate, build, inspect, run, worker, status, events, signal, cancel, replay, reconcile, export, import, and doctor; [spec/cli.md](../spec/cli.md) lists the ones `spore` 0.2 has. Replay is read-only by default and uses recorded events and artifacts with all effects disabled. A repair creates explicit events or a new run; it never silently edits past history. JSON output is versioned for plugin integration.
 
 ## Recovery and operations
 

@@ -27,3 +27,15 @@ Research checked on 5 October 2026. Product documentation changes; pin implement
 23. Claude Agent SDK session storage. https://code.claude.com/docs/en/agent-sdk/session-storage
 24. Claude Agent SDK file checkpointing. https://code.claude.com/docs/en/agent-sdk/file-checkpointing
 25. Claude Agent SDK structured output. https://code.claude.com/docs/en/agent-sdk/structured-outputs
+
+## Sources the decision records cite
+
+Added on 16 October 2026 for the records in `docs/design/` and `docs/research/` (C02–C17). The records summarise these pages as read during the Claude Code map; re-read them before relying on a detail.
+
+26. Attractor, a DOT-based pipeline specification. https://github.com/strongdm/attractor
+27. herdr, the terminal pane manager an interactive step runs in, as documented with the version the records name (C07, C11).
+28. Claude Code plugins documentation and changelog. https://code.claude.com/docs/en/plugins and https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+29. Temporal workflow and activity execution: run IDs, workflow IDs, cancel and terminate, activity retries. https://docs.temporal.io/workflow-execution and https://docs.temporal.io/activity-execution
+30. AWS Step Functions error handling and StopExecution. https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html and https://docs.aws.amazon.com/step-functions/latest/apireference/API_StopExecution.html
+31. Stripe idempotent requests. https://docs.stripe.com/api/idempotent_requests
+32. W02 agent-boundary typing notes, skills repository branch `research/w02-agent-boundary-typing`. https://github.com/Max-Levitskiy/skills/tree/research/w02-agent-boundary-typing

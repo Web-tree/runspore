@@ -441,6 +441,14 @@ C02's open thread (c02:284) worried that uncommitted "bundle" edits to `CONTEXT.
   - C16 the run-ID source (h.5).
   - C17 `invocation.state` showing `stuck` (c.15).
 
+## 7. How §3 and §4 were resolved (R28, 2026-10-16)
+
+The records themselves (§2.1) are left as written: they are dated decisions, and the spec wins where they differ.
+
+**§3, terms used two ways.** Every row is settled in `CONTEXT.md`: runtime dir → **Work folder**; bundle → avoided in every sense (Workflow folder, Workflow artifact, Composed artifact, Kernel component, Step files); artifact → reserved for workflow and composed artifacts (**Workflow artifact**, **Kernel component**); package → the canonical document only (**Package**); frontmatter → **Node parameters**; in-session/headless → **Interactive step**, **Background step**; `steps/` → **Workflow folder** (`instructions/`) vs **Step files** (`<database>.files/steps/`); integration/profile → **Integration**; cancel → **Cancel** (terminate, not the target's request); read-only → **Effect class**; heartbeat → **Renew**; watch → **Watch** vs **Following a run**; what a run needs → **Unfinished run** (`needs` values); session → **Session**; decision → **Decision** vs answer; holder handle/process record → **Holder handle**, **Process record**; graph-embedded component → **Composed artifact**; owner → **Driver**, **Token**; try/visit → **Visit**, **Try**, **Retry**; ADR → **Decision record**. The 27 missing terms are all defined.
+
+**§4, stale docs.** CONTEXT.md:68 kept (generically true). CONTEXT.md:76, 121–123, 133–135 fixed. docs/01:7, 23, 30; docs/03:21; docs/04:5, 7; docs/05:5; docs/06:5, 33, 41 (three items); docs/08:14, 15; docs/11:30 and docs/14:5 (authorization moved to the target architecture, U7); docs/14:9; docs/13:5, 7 (two), 9 (two), 15, 21–30, 32, each marked *Superseded* or *Out of scope* in place; docs/17:13, 19; docs/sources.md (record sources added); work/tasks.md:30 (H6 kept its number, U9), 55, 57; README.md and examples/README.md (rewritten for workflow folders and `spore cancel`, the JSON examples replaced by folders); docs/research/claude-code-mods.md:231–239 and cli-name.md:57 marked superseded. The supported setup (U13) is in `spec/store.md` §3 and `spec/README.md`.
+
 [c01]: https://github.com/Web-tree/runspore/blob/research/workflow-map-carryover/docs/research/workflow-map-carryover.md
 [c02]: ../design/c02-dot-format.md
 [c03]: ../design/c03-in-session-hand-off.md

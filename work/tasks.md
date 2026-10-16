@@ -27,7 +27,8 @@ Questions that need Max collect in [questions/](questions/README.md).
 - **H**: spec/host.md sections 2 and 3 are implemented; evidence H1 to H5 passes.
 - **X**: all golden traces and a generated corpus give identical bytes natively,
   through Wasmtime, in Node, and in Bun.
-- **E**: every command of spec/cli.md works; evidence H6 passes against the real binary;
+- **E**: every command of spec/cli.md works; evidence H6 (crash at every failpoint; it kept
+  its number in 0.2) passes against the real binary;
   the README quickstart runs as written.
 
 ## Log
@@ -52,9 +53,9 @@ Questions that need Max collect in [questions/](questions/README.md).
 All packages are done. No open questions in `questions/`.
 
 Left for later, in rough priority:
-1. Cancellation (spec decision M12).
+1. Cancellation (spec decision M12). Done in 0.2: `spore cancel`, M12 superseded.
 2. Timers, then fork and join.
-3. A JS host and SDK on the already verified kernel bundle; PostgreSQL store on the existing conformance suite.
+3. A JS host and SDK on the already verified kernel component; PostgreSQL store on the existing conformance suite.
 4. Kernel: budgets bound what is committed, not the work done; move the three kernel-local failure codes into `runspore-types`.
 5. Trace crate: a public `replay`; failure details in compiled traces.
 6. Engine: `run_until_parked` after `shutdown` never returns for a run that still needs an activity; a missing package fails the whole tick instead of quarantining one run.
