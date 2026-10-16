@@ -408,10 +408,10 @@ fn a_step_reaches_the_run_database_through_runspore_db() {
     assert!(!inner.join(".spore/runspore.db").exists());
 }
 
-/// A ticket step of the dogfood build runs `cargo test` with the build's database in
-/// `RUNSPORE_DB`. Every `spore` a test starts names its own database, or clears the
-/// variable and names its own `SPORE_HOME`, so the other tests here, run by a step,
-/// pass and leave the run's database holding only the run that started them.
+/// A step that runs `cargo test` gets its run's database in `RUNSPORE_DB`. Every
+/// `spore` a test starts names its own database, or clears the variable and names its
+/// own `SPORE_HOME`, so the other tests here, run by a step, pass and leave the run's
+/// database holding only the run that started them.
 #[test]
 fn tests_run_by_a_step_keep_off_the_run_database() {
     let repo = Repo::new("step-tests");
