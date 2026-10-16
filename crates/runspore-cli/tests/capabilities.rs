@@ -22,12 +22,69 @@ fn json(dir: &Dir, extra: &[&str]) -> (Option<i32>, Value) {
     (out.code(), out.json())
 }
 
+/// `git <args>` in this repository, trimmed.
+fn git(args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(env!("CARGO_MANIFEST_DIR"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}");
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// The version this checkout builds and the date `spore --version` adds to it: the
+/// release on the commit its tag names, else a pre-release of the next minor version
+/// named by its commit and dated by it.
+fn built() -> (String, Option<String>) {
+    let release = env!("CARGO_PKG_VERSION");
+    let tag = format!("v{release}");
+    if git(&["tag", "--points-at", "HEAD"])
+        .lines()
+        .any(|t| t == tag)
+    {
+        return (release.to_string(), None);
+    }
+    let mut parts = release.split('.');
+    let (major, minor): (u64, u64) = (
+        parts.next().unwrap().parse().unwrap(),
+        parts.next().unwrap().parse().unwrap(),
+    );
+    let commit = git(&["rev-parse", "--short=7", "HEAD"]);
+    let date = git(&["log", "-1", "--format=%cs", "HEAD"]);
+    (format!("{major}.{}.0-dev+{commit}", minor + 1), Some(date))
+}
+
+#[test]
+fn a_build_that_is_not_a_release_says_so_with_its_commit_and_date() {
+    let dir = Dir::new("version");
+    let (version, date) = built();
+    let text = match &date {
+        Some(date) => format!("{version} ({date})"),
+        None => version.clone(),
+    };
+    assert_eq!(
+        dir.run(&["--version"]).stdout.trim(),
+        format!("spore {text}")
+    );
+    let (code, out) = json(&dir, &["capabilities"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert_eq!(out["version"], version);
+    assert_eq!(out.get("commitDate"), date.map(Value::from).as_ref());
+    let human = dir.run(&["capabilities"]).stdout;
+    assert!(
+        human.starts_with(&format!("version         {text}\n")),
+        "{human}"
+    );
+}
+
 #[test]
 fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database() {
     let dir = Dir::new("capabilities");
     let (code, out) = json(&dir, &["capabilities"]);
     assert_eq!(code, Some(0), "{out}");
-    assert_eq!(out["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(out["version"], built().0);
     assert_eq!(
         out["contracts"],
         json!({"artifact": "0.1", "cli": "0.2", "dot": "0.2", "host": "0.2",

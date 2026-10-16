@@ -44,8 +44,18 @@ const CONTRACTS: [(&str, &str); 7] = [
 /// `run` and `worker --until-parked` when the run had not parked yet.
 const EXIT_INTERRUPTED: u8 = 130;
 
+/// The version of this `spore` (build.rs): the release's on the commit its tag names,
+/// else a pre-release of the next minor version named by its commit.
+const VERSION: &str = env!("SPORE_BUILD_VERSION");
+/// [`VERSION`] as `spore --version` prints it: with the commit's date on a pre-release.
+const VERSION_TEXT: &str = env!("SPORE_BUILD_VERSION_TEXT");
+
 #[derive(Parser)]
-#[command(name = "spore", version, about = "Embedded durable workflow runtime")]
+#[command(
+    name = "spore",
+    version = VERSION_TEXT,
+    about = "Embedded durable workflow runtime"
+)]
 pub struct Cli {
     /// Database file. Without it and `$RUNSPORE_DB`, an existing `.spore/runspore.db` of
     /// the nearest project folder at or above the current folder, else the repository's
@@ -682,22 +692,23 @@ fn capabilities() -> Result<Output, Fail> {
         .iter()
         .map(|(name, version)| (name.to_string(), json!(version)))
         .collect();
-    let version = env!("CARGO_PKG_VERSION");
     let line = |label: &str, items: &[String]| format!("{label:<15} {}\n", items.join(", "));
     let contract_text: Vec<String> = CONTRACTS
         .iter()
         .map(|(name, version)| format!("{name} {version}"))
         .collect();
-    let text = format!("{:<15} {version}\n", "version")
+    let text = format!("{:<15} {VERSION_TEXT}\n", "version")
         + &line("contracts", &contract_text)
         + &line("action kinds", &set.action_kinds)
         + &line("async kinds", &set.async_kinds)
         + &line("result channels", &set.result_channels);
-    done(
-        json!({"version": version, "contracts": contracts, "actionKinds": set.action_kinds,
-               "asyncKinds": set.async_kinds, "resultChannels": set.result_channels}),
-        text,
-    )
+    let mut object = json!({"version": VERSION, "contracts": contracts,
+                            "actionKinds": set.action_kinds, "asyncKinds": set.async_kinds,
+                            "resultChannels": set.result_channels});
+    if let Some(date) = option_env!("SPORE_BUILD_DATE") {
+        object["commitDate"] = json!(date);
+    }
+    done(object, text)
 }
 
 /// The options of `validate`.

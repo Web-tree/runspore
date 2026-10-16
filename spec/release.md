@@ -147,6 +147,15 @@ only when the release key signed them.
 `cargo install --git https://github.com/Web-tree/runspore --locked runspore-cli`
 builds and installs `spore` from the repository, with no signature checks.
 
+Only a build of the commit a release tag names is that release. The build asks git:
+when the tag `v<version>` of the workspace version points at `HEAD`, `spore --version`
+prints `spore <version>`. Any other build is a pre-release of the next minor version,
+named by its commit and dated by the commit, as rustc names a nightly: on `main`
+after 0.3.0, `spore 0.4.0-dev+a65d8d1 (2026-10-16)`. A build outside a git checkout
+knows no commit and prints `spore 0.4.0-dev`. A pre-release sorts after the release
+it follows, so a minimum of 0.3.0 accepts it, and it never equals a release, so a
+doctor or a bug report can tell the two apart.
+
 ## 8. The release cycle
 
 ### The release PR

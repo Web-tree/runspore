@@ -55,9 +55,11 @@ jobs:
       CC_aarch64_unknown_linux_musl: musl-gcc
       CC_x86_64_unknown_linux_musl: musl-gcc
     steps:
+      # Checking out the tag by name fetches it, and a build is that release only when
+      # the tag points at HEAD (spec/release.md section 7).
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.sha }}
+          ref: ${{ env.TAG || github.sha }}
       - if: endsWith(matrix.target, '-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       # The first cargo call installs the toolchain rust-toolchain.toml pins.
