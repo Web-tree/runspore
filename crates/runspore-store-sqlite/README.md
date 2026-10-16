@@ -48,7 +48,7 @@ name the version that wrote the file and the fix (spec/store.md §3).
 | `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null; `holder` the canonical holder handle or null; `deadline_ms` the deadline `lease_until_ms` never passes, or null |
 | `receipts` | `(tenant, run_id, request_id)` | one applied mutation per request ID |
 | `audit` | `audit_id` | append-only; `kind` is `late-evidence` or `attempt.expired` |
-| `workers` | `worker_id` | one row per worker that uses the file: its `spore` version, host, process ID, last heartbeat (`beat_at_ms`) and the time it stays fresh until (`until_ms`); written by `beat_worker`, removed by `end_worker` |
+| `workers` | `worker_id` | one row per worker that uses the file: its `spore` version, host, process ID, last heartbeat (`beat_at_ms`) and the time it stays fresh until (`until_ms`); written by `beat_worker` with `synchronous = OFF`, since the record is advisory and its fsync would hold the write lock while workers renew leases; removed by `end_worker` |
 
 A receipt stores the operation name, request digest, and the canonical JSON
 (`canonical::encode`) of the returned value. A replay decodes those bytes, so it returns

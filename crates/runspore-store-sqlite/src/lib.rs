@@ -682,26 +682,34 @@ impl SqliteStore {
     /// Records that worker `worker_id` of this `spore`, process `pid` on `host`, uses
     /// the file, with a heartbeat fresh for `fresh_ms` from now. `migrate` refuses
     /// while a worker of another version has a fresh one (spec/store.md §3).
+    /// The record is advisory: a beat a crash loses costs nothing, so it is committed
+    /// without waiting for the disk and never holds the write lock through an fsync
+    /// while workers renew their leases.
     pub fn beat_worker(&self, worker_id: &str, host: &str, pid: u32, fresh_ms: u64) -> R<()> {
         let mut conn = self.lock();
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
+        conn.pragma_update(None, "synchronous", "OFF").map_err(db)?;
+        let beat = (|| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(db)?;
+            let now = self.clock.now_ms();
+            tx.execute(
+                "INSERT OR REPLACE INTO workers (worker_id, version, host, pid, beat_at_ms, until_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    worker_id,
+                    WRITER,
+                    host,
+                    pid,
+                    i(now),
+                    i(now.saturating_add(fresh_ms))
+                ],
+            )
             .map_err(db)?;
-        let now = self.clock.now_ms();
-        tx.execute(
-            "INSERT OR REPLACE INTO workers (worker_id, version, host, pid, beat_at_ms, until_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                worker_id,
-                WRITER,
-                host,
-                pid,
-                i(now),
-                i(now.saturating_add(fresh_ms))
-            ],
-        )
-        .map_err(db)?;
-        tx.commit().map_err(db)
+            tx.commit().map_err(db)
+        })();
+        conn.pragma_update(None, "synchronous", "FULL").map_err(db)?;
+        beat
     }
 
     /// Removes the record of a worker that stopped.
