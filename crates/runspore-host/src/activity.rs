@@ -83,6 +83,9 @@ pub struct ActivityContext {
     pub base_dir: PathBuf,
     /// The database's absolute path, given to every program as `RUNSPORE_DB`.
     pub db: Option<PathBuf>,
+    /// The run ID of the run's parent, given to every program as
+    /// `RUNSPORE_PARENT_RUN_ID`; none for a run with no parent.
+    pub parent_run: Option<String>,
     /// The step's files, given to every program as `RUNSPORE_STEP_FILES` and
     /// `RUNSPORE_INSTRUCTIONS`; none for a run without an artifact or `files_dir`.
     pub files: Option<StepFiles>,
@@ -118,6 +121,7 @@ impl std::fmt::Debug for ActivityContext {
             .field("params", &self.params)
             .field("base_dir", &self.base_dir)
             .field("db", &self.db)
+            .field("parent_run", &self.parent_run)
             .field("files", &self.files)
             .field("work_dir", &self.work_dir)
             .field("guard", &self.guard)
@@ -151,6 +155,7 @@ impl ActivityContext {
             params: Value::Object(serde_json::Map::new()),
             base_dir,
             db: None,
+            parent_run: None,
             files: None,
             work_dir: None,
             guard: crate::guard::own_executable(),

@@ -42,6 +42,8 @@ pub(super) struct HeldAttempt {
     outcomes: Vec<String>,
     visit: u32,
     base_dir: PathBuf,
+    /// The run ID of the run's parent, `None` when it has none.
+    parent_run: Option<String>,
     package: Arc<Package>,
 }
 
@@ -127,6 +129,7 @@ impl Inner {
                 .base_dir
                 .as_ref()
                 .map_or_else(|| self.config.base_dir.clone(), PathBuf::from),
+            parent_run: view.parent.as_ref().map(|p| p.run_id.clone()),
             package,
         })
     }
@@ -154,6 +157,7 @@ impl Inner {
             ctx.params = params.clone();
         }
         ctx.db = self.config.db_path.clone();
+        ctx.parent_run = held.parent_run.clone();
         ctx.files = files.files.clone();
         ctx.work_dir = files.work_dir.clone();
         ctx.guard = self.config.guard.clone();

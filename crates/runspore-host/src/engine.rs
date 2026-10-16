@@ -222,6 +222,8 @@ struct Runnable {
     package: Arc<Package>,
     /// The result channel the run recorded for the action, `None` when it recorded none.
     result_channel: Option<String>,
+    /// The run ID of the run's parent, `None` when it has none.
+    parent_run: Option<String>,
 }
 
 /// What `dispatch` did with a due invocation.
@@ -1936,6 +1938,7 @@ impl Inner {
                 base_dir,
                 package,
                 result_channel,
+                parent_run,
             }) => {
                 let mut ctx = ActivityContext::new(
                     attempt.key.clone(),
@@ -1952,6 +1955,7 @@ impl Inner {
                     ctx.params = params;
                 }
                 ctx.db = self.config.db_path.clone();
+                ctx.parent_run = parent_run;
                 ctx.files = delivery.files.clone();
                 ctx.work_dir = delivery.work_dir.clone();
                 ctx.guard = self.config.guard.clone();
@@ -2109,6 +2113,7 @@ impl Inner {
             )
         })?;
         let result_channel = view.result_channels.get(&claim.action_id).cloned();
+        let parent_run = view.parent.map(|p| p.run_id);
         let base_dir = view
             .base_dir
             .map_or_else(|| self.config.base_dir.clone(), PathBuf::from);
@@ -2121,6 +2126,7 @@ impl Inner {
             base_dir,
             package,
             result_channel,
+            parent_run,
         })
     }
 }

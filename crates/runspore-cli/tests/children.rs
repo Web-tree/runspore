@@ -195,3 +195,54 @@ fn the_parent_comes_from_the_step_environment() {
         .collect();
     assert_eq!(below, [(middle.as_str(), 0), (bottom.as_str(), 1)]);
 }
+
+/// A child run's steps get the parent's run ID as `RUNSPORE_PARENT_RUN_ID`, so its last
+/// step signals the parent with no input naming it. The steps of a run with no parent
+/// get none, also when the worker was started with one set.
+#[test]
+fn a_child_step_names_its_parent_run() {
+    let dir = Dir::new("parent-run-id");
+    let spawn = format!(
+        "printf %s \"${{RUNSPORE_PARENT_RUN_ID-unset}}\" > top-parent; \
+         '{BIN}' --json start reporter --key ticket-1 > /dev/null"
+    );
+    let mut parent = parent();
+    parent["actions"]["spawn"]["argv"] = json!(["/bin/sh", "-c", spawn]);
+    dir.folder("parent", &parent);
+    let report =
+        format!("'{BIN}' --native-kernel signal \"$RUNSPORE_PARENT_RUN_ID\" go --outcome go");
+    dir.folder(
+        "reporter",
+        &json!({
+            "format": "runspore.workflow/0.2", "name": "reporter", "start": "gate",
+            "actions": {"report": {"kind": "command", "effect": "idempotent", "output": "none",
+                                   "argv": ["/bin/sh", "-c", report]}},
+            "nodes": {
+                "gate": {"kind": "await-signal", "signal": "go", "outcomes": {"go": "report"}},
+                "report": {"kind": "activity", "action": "report", "outcomes": {"ok": "done"}},
+                "done": {"kind": "complete"}
+            }
+        }),
+    );
+    let mut cmd = dir.cmd(&args(&["--json", "run", "parent", "--key", "build"]));
+    cmd.env("RUNSPORE_PARENT_RUN_ID", "run_stale");
+    let out = common::run(cmd);
+    assert_eq!(out.code(), Some(3), "{}", out.stderr);
+    let build = out.json()["runId"].as_str().unwrap().to_string();
+    let top_parent = std::fs::read_to_string(dir.file("top-parent")).unwrap();
+    assert_eq!(top_parent, "unset", "a run with no parent names none");
+
+    let list = dir.run(&args(&["--json", "list"])).json();
+    let ticket = list["runs"].as_array().unwrap()[1]["runId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let signal = dir.run(&args(&["signal", &ticket, "go", "--outcome", "go"]));
+    assert_eq!(signal.code(), Some(0), "{}", signal.stderr);
+    let worked = dir.run(&args(&["worker", "--run", &ticket, "--until-parked"]));
+    assert_eq!(worked.code(), Some(0), "{}", worked.stderr);
+    let worked = dir.run(&args(&["worker", "--run", &build, "--until-parked"]));
+    assert_eq!(worked.code(), Some(0), "{}", worked.stderr);
+    let runs = dir.run(&args(&["--json", "list"])).json()["runs"].clone();
+    assert_eq!(row(&runs, &build)["status"], "completed", "{runs}");
+}
