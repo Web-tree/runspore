@@ -262,8 +262,9 @@ on every tick so a run started meanwhile joins. Their ticks coordinate and dispa
 all of them, and it returns only when nothing of them is in flight and each of them
 has stopped as above: a parent waiting for the signal its child sends goes on while the
 child can be worked, as Temporal's worker runs a workflow's child workflows with it.
-Once the run itself has ended, nothing below it is taken up anew, and it returns when
-nothing of them is in flight.
+Once the run itself has ended, nothing below it is taken up anew, but the runs below
+still take turns, so a step of theirs that finishes is applied; it returns when nothing
+of them is in flight and none of them has an event left to apply.
 
 **0.2:** `follow(key)` ticks as `run_until_parked` does, but goes on past a held async
 step whose holder does not wait for a person: it returns only when the run is

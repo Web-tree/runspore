@@ -532,6 +532,11 @@ fn parked(view: &RunView) -> bool {
     }
 }
 
+/// Whether the run has no event left to apply, or is quarantined and applies none.
+fn applied(view: &RunView) -> bool {
+    view.quarantine.is_some() || view.applied_sequence + 1 >= view.next_sequence
+}
+
 fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
     let descriptor = reducer.describe();
     Identity {
@@ -1160,12 +1165,17 @@ impl Engine {
     /// One bounded pass: sweep expired leases, coordinate ready runs, dispatch due
     /// invocations. Never waits for an activity.
     pub async fn tick(&self) -> Result<TickReport, HostError> {
-        self.tick_for(None).await
+        self.tick_for(None, None).await
     }
 
-    /// `tick`, coordinating and dispatching only the runs of `only` when given: the sweep
-    /// still covers every run, but no other run takes a turn or has an attempt claimed.
-    async fn tick_for(&self, only: Option<&[RunKey]>) -> Result<TickReport, HostError> {
+    /// `tick`, coordinating only the runs of `turns` and dispatching only those of
+    /// `claims` when given: the sweep still covers every run, but no other run takes a
+    /// turn or has an attempt claimed.
+    async fn tick_for(
+        &self,
+        turns: Option<&[RunKey]>,
+        claims: Option<&[RunKey]>,
+    ) -> Result<TickReport, HostError> {
         let inner = &self.inner;
         let mut report = TickReport::default();
         inner.reap();
@@ -1182,7 +1192,7 @@ impl Engine {
         loop {
             let page = retry(false, || inner.store.scan_ready(cursor.clone(), PAGE)).await?;
             for key in &page.items {
-                if only.is_none_or(|only| only.contains(key)) {
+                if turns.is_none_or(|turns| turns.contains(key)) {
                     inner.coordinate(key, &mut report).await?;
                 }
             }
@@ -1199,8 +1209,8 @@ impl Engine {
             return Ok(report);
         }
         let mut due = inner.scan_due().await?;
-        if let Some(only) = only {
-            due.retain(|item| matches!(item, DueItem::Outbox { key, .. } if only.contains(key)));
+        if let Some(claims) = claims {
+            due.retain(|item| matches!(item, DueItem::Outbox { key, .. } if claims.contains(key)));
         }
         for (key, invocation_id) in inner.queue(due).await {
             if full() {
@@ -1263,7 +1273,8 @@ impl Engine {
     /// is terminal, `waiting`, `needs-intervention` or quarantined, or waits at an async
     /// step this engine does not watch (or whose watch says that its holder waits for a
     /// person), with no pending event and nothing of them in flight; or until the run
-    /// itself has ended and nothing of them is in flight. It works only these runs, so
+    /// itself has ended, nothing of them is in flight and none has an event left to
+    /// apply. It works only these runs, so
     /// returning leaves no other run's attempt claimed and cut off when the caller exits.
     pub async fn run_until_parked(&self, key: &RunKey) -> Result<RunView, HostError> {
         self.until(key, false).await
@@ -1281,21 +1292,25 @@ impl Engine {
         let inner = &self.inner;
         let mut tree = self.tree(key).await?;
         loop {
-            // Once the run has ended, nothing below it is taken up anew.
-            let scope: Vec<RunKey> = match tree[0].ended() {
-                true => vec![key.clone()],
-                false => tree.iter().map(|view| view.key.clone()).collect(),
+            // Once the run has ended, nothing below it is taken up anew, but the runs
+            // below still take turns, so a step of theirs that finishes is applied.
+            let turns: Vec<RunKey> = tree.iter().map(|view| view.key.clone()).collect();
+            let claims = match tree[0].ended() {
+                true => &turns[..1],
+                false => &turns[..],
             };
-            let report = self.tick_for(Some(&scope)).await?;
+            let report = self.tick_for(Some(&turns), Some(claims)).await?;
             tree = self.tree(key).await?;
             let busy = lock(&inner.inflight)
                 .iter()
                 .any(|(k, _)| tree.iter().any(|view| &view.key == k));
             let mut stops = true;
-            if !tree[0].ended() {
-                for view in &tree {
-                    stops = stops && self.stops(view, follow).await?;
-                }
+            for view in &tree {
+                stops = stops
+                    && match tree[0].ended() {
+                        true => applied(view),
+                        false => self.stops(view, follow).await?,
+                    };
             }
             if !busy && stops {
                 return Ok(tree.swap_remove(0));
