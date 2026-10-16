@@ -670,6 +670,11 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
   `RUNSPORE_WORK_DIR` (Step files and work folders, below), after `env`. One of them
   the step does not have is removed from the environment, so a value the worker
   inherited never reaches the step.
+- **0.2:** in a run with a parent recorded (store.md §2 `create_run`; cli.md §Runs
+  that start runs), it also gets `RUNSPORE_PARENT_RUN_ID`, the parent's run ID, after
+  `env`, so a child's step can signal its parent with no input naming it, as Temporal
+  gives a child workflow its parent's execution. In a run with no parent it is
+  removed, like the three above.
 - **0.2:** an `argv[0]` of the form `./<p>`, where `<p>` is the path of an asset of the
   action, runs the step files' copy: the host replaces it with the absolute path of
   `<p>` in the step files. Any other `./…` keeps its 0.1 meaning, relative to `cwd`, so

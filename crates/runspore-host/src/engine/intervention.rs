@@ -239,11 +239,14 @@ impl Inner {
                 }
             },
         };
-        let base_dir = match retry(false, || self.store.get_run(&notice.key)).await {
-            Ok(Some(view)) => view.base_dir.map(PathBuf::from),
-            _ => None,
-        }
-        .unwrap_or_else(|| self.config.base_dir.clone());
+        let (base_dir, parent_run) = match retry(false, || self.store.get_run(&notice.key)).await {
+            Ok(Some(view)) => (
+                view.base_dir.map(PathBuf::from),
+                view.parent.map(|p| p.run_id),
+            ),
+            _ => (None, None),
+        };
+        let base_dir = base_dir.unwrap_or_else(|| self.config.base_dir.clone());
         let invocation_id = notice.invocation_id();
         let (stop, stop_rx) = watch::channel(false);
         let mut ctx = ActivityContext::new(
@@ -259,6 +262,7 @@ impl Inner {
         );
         ctx.params = params;
         ctx.db = self.config.db_path.clone();
+        ctx.parent_run = parent_run;
         ctx.guard = self.config.guard.clone();
         ctx.stop_grace = Duration::from_millis(self.config.stop_grace_ms);
         let run = runner.run(&ctx, action, &notice.input);

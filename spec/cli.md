@@ -284,6 +284,14 @@ a run has no parent. A `start` whose key names an existing run keeps the parent
 recorded first (store.md §2 `create_run`). Because a step's `spore` reaches the run's
 own database (§Project folder), parent and child share one.
 
+Every step of a child run gets the parent's run ID as `RUNSPORE_PARENT_RUN_ID`
+(host.md §3), so a child's last step tells its parent it is done with no input naming
+the parent:
+
+```sh
+spore signal "$RUNSPORE_PARENT_RUN_ID" ticket-done --outcome ok
+```
+
 `list` prints the runs as a tree: each run, then the runs it started, indented below
 it, and theirs below them; siblings in the order they were created. A run whose parent
 is not in the database is at the top. Each line shows the run, its status, its node

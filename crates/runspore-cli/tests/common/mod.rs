@@ -59,6 +59,7 @@ impl Dir {
             .env_remove("RUNSPORE_FAILPOINTS")
             .env_remove("RUNSPORE_RUN_ID")
             .env_remove("RUNSPORE_NODE_ID")
+            .env_remove("RUNSPORE_PARENT_RUN_ID")
             .args(args)
             .stdin(Stdio::null());
         cmd

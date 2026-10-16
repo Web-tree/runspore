@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -240,11 +241,16 @@ fn prepare(command: &mut Command, ctx: &ActivityContext, cwd: &Path, env: &[(Str
     // After `env` too; one the step lacks is removed, so a value the worker inherited
     // never reaches it.
     let files = ctx.files.as_ref();
-    let instructions = files.and_then(|f| f.instructions.as_ref());
+    let instructions = files.and_then(|f| f.instructions.as_deref());
+    let work_dir = ctx.work_dir.as_deref();
     for (name, value) in [
-        ("RUNSPORE_STEP_FILES", files.map(|f| &f.dir)),
-        ("RUNSPORE_INSTRUCTIONS", instructions),
-        ("RUNSPORE_WORK_DIR", ctx.work_dir.as_ref()),
+        ("RUNSPORE_STEP_FILES", files.map(|f| f.dir.as_os_str())),
+        ("RUNSPORE_INSTRUCTIONS", instructions.map(Path::as_os_str)),
+        ("RUNSPORE_WORK_DIR", work_dir.map(Path::as_os_str)),
+        (
+            "RUNSPORE_PARENT_RUN_ID",
+            ctx.parent_run.as_deref().map(OsStr::new),
+        ),
     ] {
         match value {
             Some(path) => command.env(name, path),
