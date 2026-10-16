@@ -649,6 +649,11 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
   the run's base folder (**0.2**; 0.1: `base_dir`), recorded at `start`, so every
   dispatch of a run uses one folder whichever engine runs it. A run with no recorded
   folder uses `base_dir`. The child inherits the engine's environment plus `env`.
+  **0.2:** when the folder the command would run in is under the run's base folder
+  and that base folder no longer exists, as a removed git worktree's does, the step is
+  `Failure`, `command.base-dir-missing`, not retryable, details `{"baseDir"}`, with a
+  message naming the folder. Nothing is started. An absolute `cwd` outside the base
+  folder does not need it.
 - **0.2: `cwd` from input.** `cwd` is a string, as in 0.1, or
   `{"fromInput": "<JSON Pointer>"}` (RFC 6901); the build refuses one that is not a
   pointer (`command.cwd-not-pointer`, dot.md §6). That form reads the folder from the
@@ -746,6 +751,7 @@ Result mapping, in order:
 
 | What happened | Runner output |
 | --- | --- |
+| **0.2.** The run's base folder is gone, and the command's folder is under it | `Failure`, `command.base-dir-missing`, not retryable, details `{baseDir}` |
 | **0.2.** A `cwd` from input that names no existing folder | `Failure`, `command.cwd-invalid`, not retryable, details `{pointer, cwd?}` |
 | **0.2.** An `argv` mapping that gives no string, or does not evaluate | `Failure`, `command.argv-invalid`, not retryable, details `{index, value}`; or the kernel's mapping code |
 | Could not be spawned, or its program could not be run | `Failure`, `command.spawn`, retryable |
@@ -764,7 +770,7 @@ The last row holds for every `command` in every output mode, so an undeclared ou
 never reaches the kernel.
 
 **0.2: the ends of the streams.** Every `Failure` and `Unknown` above of a program that
-ran (every row but `cwd-invalid`, `argv-invalid` and `spawn`) carries in its details
+ran (every row but `base-dir-missing`, `cwd-invalid`, `argv-invalid` and `spawn`) carries in its details
 `stdoutTail` and `stderrTail`, the last 4 KiB of each stream, decoded as UTF-8, lossy,
 and cut on a character boundary. Stdout's end is kept even when the stream passes
 64 KiB. Some programs write their errors to stdout (one prints

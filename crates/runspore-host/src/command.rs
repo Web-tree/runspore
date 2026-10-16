@@ -376,16 +376,31 @@ fn is_pointer(pointer: &str) -> bool {
 }
 
 /// The folder the command runs in: `cwd` against the run's base folder. A `cwd` from
-/// input must name an existing folder, else `command.cwd-invalid`.
+/// input must name an existing folder, else `command.cwd-invalid`. A folder under a
+/// base folder that is gone, as a removed worktree's is, is `command.base-dir-missing`.
 fn working_folder(
     cwd: Option<&Cwd>,
     base: &Path,
     input: &Value,
 ) -> Result<PathBuf, ActivityOutput> {
+    let gone = |folder: &Path| !folder.is_dir() && folder.starts_with(base) && !base.is_dir();
+    let missing = || {
+        let message = format!(
+            "the run's base folder {} no longer exists; was its worktree removed?",
+            base.display()
+        );
+        failure(
+            "command.base-dir-missing",
+            message,
+            json!({ "baseDir": base }),
+            false,
+        )
+    };
     let pointer = match cwd {
-        None => return Ok(base.to_path_buf()),
-        Some(Cwd::Path(path)) => return Ok(base.join(path)),
         Some(Cwd::FromInput(pointer)) => pointer,
+        Some(Cwd::Path(path)) if !gone(&base.join(path)) => return Ok(base.join(path)),
+        None if !gone(base) => return Ok(base.to_path_buf()),
+        _ => return Err(missing()),
     };
     let invalid = |message: String, cwd: Option<&str>| {
         let mut details = json!({ "pointer": pointer });
@@ -403,6 +418,8 @@ fn working_folder(
             let folder = base.join(path);
             if folder.is_dir() {
                 Ok(folder)
+            } else if gone(&folder) {
+                Err(missing())
             } else {
                 let message = format!("`cwd` {} is not an existing folder", folder.display());
                 Err(invalid(message, Some(path)))

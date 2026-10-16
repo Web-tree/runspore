@@ -11,7 +11,8 @@ use crate::cli::{Fail, Output};
 
 /// The project folder, at a repository's root.
 pub const FOLDER: &str = ".spore";
-/// The database's file name, in the project folder or, without one, the current folder.
+/// The database's file name: in the repository's folder under `$SPORE_HOME`, or, at
+/// the old place, in the project folder.
 pub const DATABASE: &str = "runspore.db";
 const WORKFLOWS: &str = "workflows";
 /// The project's settings file, in the project folder.
@@ -37,14 +38,155 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     std::path::absolute(&joined).unwrap_or(joined)
 }
 
-/// The database a command uses: `given` (`--db`, else `$RUNSPORE_DB`), else the
-/// project folder's found by walking up, else `./runspore.db`. Always absolute.
-pub fn database(given: Option<&Path>, cwd: &Path) -> PathBuf {
-    match (given, find(cwd)) {
-        (Some(path), _) => absolute(cwd, path),
-        (None, Some(root)) => root.join(FOLDER).join(DATABASE),
-        (None, None) => cwd.join(DATABASE),
+/// The database a command uses, and where it was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Database {
+    /// The database file. Always absolute.
+    pub path: PathBuf,
+    pub place: Place,
+}
+
+/// Where a command found its database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Place {
+    /// `--db` or `$RUNSPORE_DB`.
+    Given,
+    /// The old place: an existing `<dir>/.spore/runspore.db` found by walking up.
+    /// `shared` is the database the repository would share without it, when that can
+    /// be worked out.
+    Old { shared: Option<PathBuf> },
+    /// The repository's database under `$SPORE_HOME`, shared by its worktrees and
+    /// clones.
+    Shared,
+}
+
+/// The database a command uses: `given` (`--db`, else `$RUNSPORE_DB`), else an existing
+/// `.spore/runspore.db` of the project folder found by walking up, else the database
+/// every worktree and clone of the repository shares under `$SPORE_HOME`.
+pub fn database(given: Option<&Path>, cwd: &Path) -> Result<Database, Fail> {
+    if let Some(path) = given {
+        return Ok(Database {
+            path: absolute(cwd, path),
+            place: Place::Given,
+        });
     }
+    let shared = shared(cwd);
+    if let Some(old) = find(cwd)
+        .map(|root| root.join(FOLDER).join(DATABASE))
+        .filter(|db| db.exists())
+    {
+        return Ok(Database {
+            path: old,
+            place: Place::Old {
+                shared: shared.ok(),
+            },
+        });
+    }
+    Ok(Database {
+        path: shared?,
+        place: Place::Shared,
+    })
+}
+
+/// `$SPORE_HOME/db/<repository key>/runspore.db`, `$SPORE_HOME` being `~/.spore` when
+/// unset.
+fn shared(cwd: &Path) -> Result<PathBuf, Fail> {
+    let home = match std::env::var_os("SPORE_HOME").filter(|home| !home.is_empty()) {
+        Some(home) => absolute(cwd, Path::new(&home)),
+        None => std::env::home_dir()
+            .filter(|home| !home.as_os_str().is_empty())
+            .ok_or_else(|| {
+                Fail::usage(
+                    "project.no-home",
+                    "no home folder to keep the database in: set SPORE_HOME, or name the database with --db",
+                )
+            })?
+            .join(FOLDER),
+    };
+    Ok(home
+        .join("db")
+        .join(repository_key(find(cwd).unwrap_or(cwd)))
+        .join(DATABASE))
+}
+
+/// The key of the repository `dir` belongs to, as a relative path: its `origin`
+/// remote as `host/owner/name`, else the path of its git common dir, which every
+/// worktree of one clone shares, else, outside git, `dir`'s own path.
+fn repository_key(dir: &Path) -> PathBuf {
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|out| out.status.success())?;
+        let text = String::from_utf8(out.stdout).ok()?;
+        Some(text.trim_end().to_string()).filter(|text| !text.is_empty())
+    };
+    let Some(common) = git(&["rev-parse", "--git-common-dir"]) else {
+        return path_key(&real(dir));
+    };
+    git(&["config", "--get", "remote.origin.url"])
+        .and_then(|url| origin_key(&url, dir))
+        .unwrap_or_else(|| path_key(&real(&dir.join(common))))
+}
+
+/// `path` with its links resolved, else as it is.
+fn real(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// An absolute path as a key: its parts below the root.
+fn path_key(path: &Path) -> PathBuf {
+    path.components()
+        .filter_map(|part| match part {
+            std::path::Component::Normal(part) => Some(part),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An `origin` URL as `host/owner/name`: `git@github.com:Web-tree/runspore.git` and
+/// `https://github.com/Web-tree/runspore` are both `github.com/Web-tree/runspore`. The
+/// user, password, port and a trailing `.git` are left out, and the host is lower
+/// case. A local path, plain or `file://`, is that path, taken from `dir` when
+/// relative. None when nothing is left.
+fn origin_key(url: &str, dir: &Path) -> Option<PathBuf> {
+    let host_of = |authority: &str| {
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        let host = match host.strip_prefix('[') {
+            Some(v6) => v6.split_once(']').map_or(v6, |(address, _)| address),
+            None => host.split_once(':').map_or(host, |(name, _)| name),
+        };
+        host.to_ascii_lowercase()
+    };
+    let (host, path) = if let Some((_, rest)) = url.split_once("://") {
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        (host_of(authority), path.to_string())
+    } else if let Some((authority, path)) = url
+        .split_once(':')
+        .filter(|(authority, _)| !authority.is_empty() && !authority.contains('/'))
+    {
+        (host_of(authority), path.to_string())
+    } else {
+        let local = real(&dir.join(url));
+        (String::new(), local.to_string_lossy().into_owned())
+    };
+    let mut parts: Vec<&str> = std::iter::once(host.as_str())
+        .chain(path.split('/'))
+        .filter(|part| !matches!(*part, "" | "." | ".."))
+        .collect();
+    let last = parts.pop()?;
+    let last = last.strip_suffix(".git").unwrap_or(last);
+    if !last.is_empty() {
+        parts.push(last);
+    }
+    (!parts.is_empty()).then(|| parts.into_iter().collect())
 }
 
 /// The folder of step files and work folders: `<database path>.files`.
@@ -61,7 +203,7 @@ pub fn root_of(db: &Path) -> Option<&Path> {
     named.then(|| folder.parent()).flatten()
 }
 
-/// The project's settings, from `settings.json` in the database's project folder.
+/// The project's settings, from `settings.json` in the project folder.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `worker.slots`: how many steps one worker runs at once.
@@ -71,12 +213,12 @@ pub struct Settings {
     pub disk_floor_mb: Option<u64>,
 }
 
-/// The settings of the project whose database is `db`: none when `db` is not a project
-/// folder's or the folder has no `settings.json`. A file that is not JSON, holds a key
-/// spore does not know, a slot count that is not a whole number from 1, or a disk floor
-/// that is not a whole number from 0 is refused with exit 2.
-pub fn settings(db: &Path) -> Result<Settings, Fail> {
-    let Some(root) = root_of(db) else {
+/// The settings of the project folder found by walking up from `cwd`: none without one
+/// or when it has no `settings.json`. A file that is not JSON, holds a key spore does
+/// not know, a slot count that is not a whole number from 1, or a disk floor that is
+/// not a whole number from 0 is refused with exit 2.
+pub fn settings(cwd: &Path) -> Result<Settings, Fail> {
+    let Some(root) = find(cwd) else {
         return Ok(Settings::default());
     };
     let path = root.join(FOLDER).join(SETTINGS);
@@ -143,9 +285,9 @@ pub fn settings(db: &Path) -> Result<Settings, Fail> {
     })
 }
 
-/// A run's base folder: `given` (`--base-dir`), else the folder holding the database's
-/// project folder, else the current folder. Always absolute.
-pub fn base_dir(given: Option<&Path>, db: &Path, cwd: &Path) -> Result<PathBuf, Fail> {
+/// A run's base folder: `given` (`--base-dir`), else the folder holding the project
+/// folder found by walking up from `cwd`, else `cwd`. Always absolute.
+pub fn base_dir(given: Option<&Path>, cwd: &Path) -> Result<PathBuf, Fail> {
     match given {
         Some(dir) => {
             let dir = absolute(cwd, dir);
@@ -155,14 +297,22 @@ pub fn base_dir(given: Option<&Path>, db: &Path, cwd: &Path) -> Result<PathBuf, 
             }
             Ok(dir)
         }
-        None => Ok(root_of(db).unwrap_or(cwd).to_path_buf()),
+        None => Ok(find(cwd).unwrap_or(cwd).to_path_buf()),
     }
 }
 
-/// Before a command writes the database: when it is a project folder's, keep that
-/// folder's ignore file current.
-pub fn before_write(db: &Path) -> Result<(), Fail> {
-    let Some(root) = root_of(db) else {
+/// Before a command writes the database: create the shared database's folder, and,
+/// for a database at `<dir>/.spore/runspore.db`, keep that folder's ignore file current.
+pub fn before_write(db: &Database) -> Result<(), Fail> {
+    if let (Place::Shared, Some(folder)) = (&db.place, db.path.parent()) {
+        std::fs::create_dir_all(folder).map_err(|e| {
+            Fail::internal(
+                "project.database-folder",
+                format!("{}: {e}", folder.display()),
+            )
+        })?;
+    }
+    let Some(root) = root_of(&db.path) else {
         return Ok(());
     };
     let folder = root.join(FOLDER);
@@ -170,17 +320,16 @@ pub fn before_write(db: &Path) -> Result<(), Fail> {
         return Ok(());
     }
     keep_ignore_file(&folder)
-        .map(|_| ())
         .map_err(|e| Fail::internal("project.ignore-file", format!("{}: {e}", folder.display())))
 }
 
 /// Appends the missing ignore lines to `folder/.gitignore`, creating it when absent and
-/// keeping every other line. Returns whether the file was new.
-fn keep_ignore_file(folder: &Path) -> io::Result<bool> {
+/// keeping every other line.
+fn keep_ignore_file(folder: &Path) -> io::Result<()> {
     let path = folder.join(IGNORE_FILE);
-    let (text, new) = match std::fs::read_to_string(&path) {
-        Ok(text) => (text, false),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => (String::new(), true),
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
     let missing: Vec<&str> = IGNORED
@@ -188,7 +337,7 @@ fn keep_ignore_file(folder: &Path) -> io::Result<bool> {
         .filter(|line| !text.lines().any(|kept| kept.trim() == *line))
         .collect();
     if missing.is_empty() {
-        return Ok(false);
+        return Ok(());
     }
     let mut lines = String::new();
     if !text.is_empty() && !text.ends_with('\n') {
@@ -202,8 +351,7 @@ fn keep_ignore_file(folder: &Path) -> io::Result<bool> {
         .create(true)
         .append(true)
         .open(&path)?
-        .write_all(lines.as_bytes())?;
-    Ok(new)
+        .write_all(lines.as_bytes())
 }
 
 /// `spore init`: the project folder at the repository root, or a refusal that creates
@@ -241,16 +389,12 @@ pub fn init(cwd: &Path) -> Result<Output, Fail> {
     }
     let folder = root.join(FOLDER);
     let workflows = folder.join(WORKFLOWS);
-    let ignore = folder.join(IGNORE_FILE);
     let unusable = |path: &Path, message: String| {
         Fail::usage("project.unusable", format!("{}: {message}", path.display()))
     };
-    for (path, folder_kind) in [(&folder, true), (&workflows, true), (&ignore, false)] {
-        if let Ok(meta) = path.metadata() {
-            if meta.is_dir() != folder_kind {
-                let kind = if folder_kind { "a folder" } else { "a file" };
-                return Err(unusable(path, format!("exists but is not {kind}")));
-            }
+    for path in [&folder, &workflows] {
+        if path.metadata().is_ok_and(|meta| !meta.is_dir()) {
+            return Err(unusable(path, "exists but is not a folder".into()));
         }
     }
     let mut created = Vec::new();
@@ -259,9 +403,6 @@ pub fn init(cwd: &Path) -> Result<Output, Fail> {
             std::fs::create_dir(dir).map_err(|e| unusable(dir, e.to_string()))?;
             created.push(dir.clone());
         }
-    }
-    if keep_ignore_file(&folder).map_err(|e| unusable(&ignore, e.to_string()))? {
-        created.push(ignore);
     }
     let text = if created.is_empty() {
         format!("project folder {} is ready", folder.display())
@@ -370,4 +511,44 @@ pub fn workflows(cwd: &Path) -> Vec<(String, PathBuf)> {
         .collect();
     found.sort();
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_origin_is_host_owner_name_however_it_is_written() {
+        let dir = Path::new("/work/repo");
+        for url in [
+            "git@github.com:Web-tree/runspore.git",
+            "https://github.com/Web-tree/runspore",
+            "https://github.com/Web-tree/runspore.git/",
+            "https://user:token@GitHub.com/Web-tree/runspore",
+            "ssh://git@github.com:22/Web-tree/runspore.git",
+            "github.com:Web-tree/runspore",
+        ] {
+            assert_eq!(
+                origin_key(url, dir),
+                Some(PathBuf::from("github.com/Web-tree/runspore")),
+                "{url}"
+            );
+        }
+        let local = Some(PathBuf::from("srv/git/runspore"));
+        assert_eq!(origin_key("/srv/git/runspore.git", dir), local);
+        assert_eq!(origin_key("file:///srv/git/runspore.git", dir), local);
+        assert_eq!(
+            origin_key("https://example.com/../../etc", dir),
+            Some(PathBuf::from("example.com/etc"))
+        );
+        assert_eq!(origin_key("https://", dir), None);
+    }
+
+    #[test]
+    fn a_path_key_is_the_path_below_the_root() {
+        assert_eq!(
+            path_key(Path::new("/home/me/repo/.git")),
+            PathBuf::from("home/me/repo/.git")
+        );
+    }
 }

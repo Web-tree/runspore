@@ -27,10 +27,12 @@ const DOT: &str = r#"digraph "worktree" {
 }
 "#;
 
-/// `spore` in `cwd` with no `RUNSPORE_DB`, so it finds its database itself.
-fn spore(cwd: &Path, args: &[&str]) -> Out {
+/// `spore` in the repository `root` with no `RUNSPORE_DB`, so it finds its database
+/// itself, in the `SPORE_HOME` beside the repository.
+fn spore(root: &Path, args: &[&str]) -> Out {
     let mut cmd = Command::new(BIN);
-    cmd.current_dir(cwd)
+    cmd.current_dir(root)
+        .env("SPORE_HOME", root.parent().unwrap().join("home"))
         .env_remove("RUNSPORE_DB")
         .env_remove("RUNSPORE_FAILPOINTS")
         .args(FAST)
@@ -104,11 +106,7 @@ fn a_step_runs_in_the_folder_an_earlier_step_returned() {
         // From the worktree, with its own `.spore/`, `spore` reached the run's database.
         let listed: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.file("list.json")).unwrap()).unwrap();
-        assert_eq!(
-            listed["db"],
-            json!(root.join(".spore/runspore.db")),
-            "{name}"
-        );
+        assert_eq!(listed["db"], status["db"], "{name}");
         assert_eq!(listed["runs"][0]["runId"], status["runId"], "{name}");
         assert!(!wt.join(".spore/runspore.db").exists(), "{name}");
     }

@@ -54,7 +54,8 @@ fn project(name: &str) -> Dir {
     dir
 }
 
-/// `spore` in the project, on the project's own database, with `bin/` first on `PATH`.
+/// `spore` in the project, on the project's own database under a scratch
+/// `SPORE_HOME`, with `bin/` first on `PATH`.
 fn command(dir: &Dir, extra: &[&str]) -> Command {
     let path = format!(
         "{}:{}",
@@ -64,6 +65,7 @@ fn command(dir: &Dir, extra: &[&str]) -> Command {
     let mut cmd = Command::new(BIN);
     cmd.current_dir(&dir.path)
         .env("PATH", path)
+        .env("SPORE_HOME", dir.file("spore-home"))
         .env_remove("RUNSPORE_DB")
         .env_remove("RUNSPORE_RUN_ID")
         .env_remove("RUNSPORE_NODE_ID")
