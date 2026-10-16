@@ -524,6 +524,7 @@ fn holder_handle(
 }
 
 /// Reads a result-mode stdout: `{"outcome", "output"}` or `{"error", "retryable"}`.
+/// A missing `output` is `{}`.
 pub(crate) fn result_output(stdout: &[u8]) -> Result<ActivityOutput, String> {
     let value = canonical::parse(stdout).map_err(|e| e.to_string())?;
     let shape = "expected {\"outcome\", \"output\"} or {\"error\", \"retryable\"}";
@@ -533,13 +534,13 @@ pub(crate) fn result_output(stdout: &[u8]) -> Result<ActivityOutput, String> {
     let mut keys: Vec<&str> = fields.keys().map(String::as_str).collect();
     keys.sort_unstable();
     match keys.as_slice() {
-        ["outcome", "output"] => {
+        ["outcome"] | ["outcome", "output"] => {
             let outcome = fields["outcome"]
                 .as_str()
                 .ok_or("`outcome` must be a string")?;
             Ok(ActivityOutput::Success {
                 outcome: outcome.to_string(),
-                output: fields["output"].clone(),
+                output: fields.get("output").cloned().unwrap_or_else(|| json!({})),
             })
         }
         ["error", "retryable"] => {

@@ -330,12 +330,25 @@ async fn result_mode_success_and_failure() {
 }
 
 #[tokio::test]
+async fn result_mode_output_defaults_to_an_empty_object() {
+    let out = run(result_mode(r#"printf '{"outcome":"red"}'"#), json!({})).await;
+    assert_eq!(
+        out,
+        ActivityOutput::Success {
+            outcome: "red".into(),
+            output: json!({})
+        }
+    );
+}
+
+#[tokio::test]
 async fn result_mode_rejects_any_other_stdout_on_exit_zero() {
     for stdout in [
         "",
         "ok",
-        r#"{"outcome":"ok"}"#,
+        r#"{"outcome":"ok","extra":1}"#,
         r#"{"outcome":"ok","output":null,"extra":1}"#,
+        r#"{"outcome":1}"#,
         r#"{"outcome":1,"output":null}"#,
         r#"{"error":{"code":"x"},"retryable":true}"#,
         r#"{"error":{"code":"x","message":"m"},"retryable":"yes"}"#,

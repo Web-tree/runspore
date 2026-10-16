@@ -735,6 +735,7 @@ stdout must be canonical-domain JSON of one of two shapes:
 | `{"outcome": "<o>", "output": <json>}` | `Success { outcome, output }` |
 | `{"error": {"code": "<c>", "message": "<m>"}, "retryable": <bool>}` | `Failure { error, retryable }` |
 
+`output` may be left out: `{"outcome": "<o>"}` is `Success { outcome, output: {} }`.
 `error` may also carry `details`, any JSON. Any other stdout on exit 0 (other keys,
 wrong types, not JSON) is `Failure`, `command.malformed-output`, not retryable. A
 non-zero exit maps through the table above as in every mode, so `exitOutcomes` still
