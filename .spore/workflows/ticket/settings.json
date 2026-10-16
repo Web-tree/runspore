@@ -59,6 +59,26 @@
         "ok"
       ]
     },
+    "fix": {
+      "kind": "command",
+      "argv": [
+        "python3",
+        "work/build-0-2/bin/ticket-step",
+        "implement"
+      ],
+      "output": "json",
+      "effect": "idempotent",
+      "priority": 1,
+      "retry": {
+        "maxAttempts": 3,
+        "backoffMs": "30000",
+        "maxBackoffMs": "600000"
+      },
+      "timeoutMs": "7200000",
+      "outcomes": [
+        "ok"
+      ]
+    },
     "test": {
       "kind": "command",
       "argv": [
@@ -67,6 +87,7 @@
         "test"
       ],
       "effect": "read-only",
+      "priority": 1,
       "retry": {
         "maxAttempts": 2,
         "backoffMs": "30000",
@@ -89,6 +110,7 @@
         "ship"
       ],
       "effect": "idempotent",
+      "priority": 2,
       "retry": {
         "maxAttempts": 5,
         "backoffMs": "30000",
@@ -168,7 +190,7 @@
       }
     },
     "fix": {
-      "action": "implement",
+      "action": "fix",
       "instructions": "steps/implement.md",
       "input": {
         "ticket": {

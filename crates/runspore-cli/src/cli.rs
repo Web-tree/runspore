@@ -1425,6 +1425,7 @@ impl Shown {
             children: read_tree(engine, runs, Some(&view.key.run)).await?,
             slots: engine.held_slots(now).await?,
             slot_limit: engine.config().max_concurrent_activities,
+            queue: engine.queue().await?,
             paused: engine.disk_full(),
             now_ms: now,
         })

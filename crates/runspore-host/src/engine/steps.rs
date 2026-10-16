@@ -457,7 +457,8 @@ impl Engine {
     }
 
     /// Pending invocations that may be external steps: the run's, or the tenant's in
-    /// `scan_due` order, oldest `notBeforeMs` first.
+    /// the order they are taken: highest action `priority` first, then oldest
+    /// `notBeforeMs` first.
     async fn ready_steps(&self, run: Option<&str>) -> Result<Vec<(RunKey, String)>, HostError> {
         if let Some(run) = run {
             let key = self.key(run);
@@ -476,17 +477,13 @@ impl Engine {
                 .collect());
         }
         let tenant = &self.inner.config.tenant;
+        let due = self.inner.scan_due().await?;
         Ok(self
             .inner
-            .scan_due()
-            .await?
+            .queue(due)
+            .await
             .into_iter()
-            .filter_map(|item| match item {
-                DueItem::Outbox { key, invocation_id } if &key.tenant == tenant => {
-                    Some((key, invocation_id))
-                }
-                _ => None,
-            })
+            .filter(|(key, _)| &key.tenant == tenant)
             .collect())
     }
 

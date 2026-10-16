@@ -9,7 +9,7 @@ use runspore_host::Cancelled;
 use runspore_host::{Arrival, Arrow, AsyncStep, HeldSlot, StepState};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{
-    Disposition, EventRecord, InvocationStatus, InvocationView, RunCancel, RunView,
+    Disposition, EventRecord, InvocationStatus, InvocationView, RunCancel, RunKey, RunView,
     STATUS_CANCELLED,
 };
 use serde_json::{json, Value};
@@ -126,8 +126,9 @@ fn streaks_json(state: &State, package: Option<&Value>) -> Value {
 /// What `status` shows of a run beside its view: the arrow into its position and when
 /// it came to stand there, its package as JSON, its invocations and external step, the
 /// payload of the latest `activity.result` of its outstanding invocation, the runs
-/// below it, the steps that take workers' slots and how many slots a worker has, and
-/// the time the command read it all.
+/// below it, the steps that take workers' slots and how many slots a worker has, the
+/// steps that wait for a slot in the order a worker takes them, and the time the
+/// command read it all.
 pub struct Shown {
     pub arrival: Arrival,
     pub package: Option<Value>,
@@ -137,6 +138,9 @@ pub struct Shown {
     pub children: Tree,
     pub slots: Vec<HeldSlot>,
     pub slot_limit: usize,
+    /// The steps waiting for a worker's free slot, by run and invocation ID, in the
+    /// order a worker takes them.
+    pub queue: Vec<(RunKey, String)>,
     /// The worker's disk when it is under the floor: no step is taken.
     pub paused: Option<DiskFull>,
     pub now_ms: u64,
@@ -780,7 +784,7 @@ impl<'a> Stands<'a> {
     /// At an activity: its attempt, whether a worker or an actor holds it, and since
     /// when. A started try runs from its claim, with the worker and the pid of its
     /// program; a queued one waits, from when it was due, for a worker with a free
-    /// slot; one in backoff waits until it is due.
+    /// slot, at its place in the queue; one in backoff waits until it is due.
     fn running(&self) -> Value {
         let Some(invocation) = &self.state.invocation else {
             return Value::Null;
@@ -811,12 +815,18 @@ impl<'a> Stands<'a> {
             .iter()
             .find(|s| s.key.run == self.run_id && s.invocation_id == invocation.invocation_id);
         let pid = started.and_then(|i| i.process.as_ref()).map(|p| p.pgid);
+        let queue = &self.shown.queue;
+        let place = queue
+            .iter()
+            .position(|(k, i)| k.run == self.run_id && i == &invocation.invocation_id)
+            .filter(|_| state == "queued")
+            .map(|n| json!({"place": n + 1, "of": queue.len()}));
         let package = self.shown.package.as_ref();
         json!({"nodeId": invocation.node_id, "actionId": invocation.action_id,
                "invocationId": invocation.invocation_id, "attempt": invocation.attempt,
                "maxAttempts": package.map(|p| max_attempts(p, &invocation.action_id)),
                "claimed": claimed, "state": state, "worker": slot.map(|s| &s.worker),
-               "pid": pid, "sinceMs": since, "forMs": lasted})
+               "pid": pid, "queue": place, "sinceMs": since, "forMs": lasted})
     }
 }
 
@@ -1061,13 +1071,36 @@ fn running_text(running: &Value, waits: Option<StepState>) -> String {
             format!("queued for a spore that can run it{since}")
         }
         _ if waits.is_some() => format!("queued for an actor to claim it{since}"),
-        _ => format!("queued for a free worker slot{since}"),
+        _ => format!(
+            "queued for a free worker slot{}{since}",
+            place_text(&running["queue"])
+        ),
     };
     format!(
         "running    {} attempt {}{of}, {stands}\n",
         running["nodeId"].as_str().unwrap_or_default(),
         running["attempt"],
     )
+}
+
+/// `, 3rd of 16 waiting`: the step's place in the queue for a worker's slot.
+fn place_text(queue: &Value) -> String {
+    match (queue["place"].as_u64(), queue["of"].as_u64()) {
+        (Some(place), Some(of)) => format!(", {} of {of} waiting", ordinal(place)),
+        _ => String::new(),
+    }
+}
+
+/// `1st`, `2nd`, `3rd`, `4th`, `11th`, `21st`.
+fn ordinal(n: u64) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
 }
 
 fn pid_text(pid: &Value) -> String {

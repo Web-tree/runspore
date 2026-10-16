@@ -960,7 +960,7 @@ here is recorded for `status`: it is read from the state, the package and the st
   `spore resolve <runId> --retry`, one `--complete <o>` per outcome (with ` --output
   <json>` when it has a schema) and `--fail <message>`.
 - `running`, at an activity: `{"nodeId", "actionId", "invocationId", "attempt",
-  "maxAttempts", "claimed", "state", "worker", "pid", "sinceMs", "forMs"}`. `claimed`
+  "maxAttempts", "claimed", "state", "worker", "pid", "queue", "sinceMs", "forMs"}`. `claimed`
   is whether a worker or an actor holds the attempt. `state` tells the kernel's one
   `scheduled` apart, as Temporal tells scheduled from started:
   - `started`: the attempt is claimed. `sinceMs` is when it was claimed (store.md
@@ -972,7 +972,11 @@ here is recorded for `status`: it is read from the state, the package and the st
     actor to claim it (`step`); at a `capability-missing` step, for a `spore` that
     can act on it (`step`). `sinceMs` is when the try
     was due: the later of the transition that scheduled it and the end of its
-    backoff.
+    backoff. **0.2:** `queue` is the step's place among the steps of the database
+    that wait for a worker's slot, `{"place", "of"}`, `place` 1 being the step a
+    worker takes next: the highest action `priority` first, then the one due longest
+    (host.md §2, Dispatch). It is null at an external or `capability-missing` step,
+    and in every other state.
   - `backoff`: the try is not due yet; `sinceMs` is when it will be, `forMs` is
     `"0"`.
 
@@ -990,7 +994,7 @@ step an actor holds takes no slot and is not listed. A queued step whose worker 
 for a worker to run.
 
 Text mode shows `running` as `started by <worker> since …, for …, pid <pid>`,
-`queued for a free worker slot since …, for …` (at an external step `queued for an
+`queued for a free worker slot, 3rd of 16 waiting since …, for …` (at an external step `queued for an
 actor to claim it since …`, at a `capability-missing` step `queued for a spore that
 can run it since …`) or `waiting to retry, due …`. Under it, except at an external or
 `capability-missing` step, `slots` shows, per worker, `<n> of <limit> in use by <worker>` and one line per step it

@@ -112,7 +112,7 @@ own Rust types, published at
 ([settings.schema.json](settings.schema.json)). `settings.json` may name it as
 `"$schema"` so that an editor completes and checks it; the build checks every file
 against the same schema whether or not it does. An action takes only the fields the
-schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, and per kind: for
+schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, `priority`, and per kind: for
 `command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
 `native`, `function`; for `external` (0.2), `actor` and `async`), so a misspelt field
 is a problem rather than ignored. An action whose `effect` is `pure`, `read-only` or
@@ -128,6 +128,11 @@ must be smaller than its `timeoutMs` (default `"3600000"`), else
 `stop` are each `{"command": {"argv", "cwd", "env", "timeoutMs"}}`, `argv` required,
 or `{"component": {…}}`, and `channels` is a non-empty list of result channels
 (host.md §3, Async commands).
+**0.2:** `priority` is an integer from -1000 to 1000, default 0: which due step a
+worker or an actor takes first, a higher priority before a lower one and, among
+equals, the one due longest (host.md §2, Dispatch). It changes no result, only the
+order; give the steps that finish a run's work a higher priority than those that
+start new work, so that finished work does not wait behind it.
 **0.2:** each action is also checked against the capability set of the `spore` that
 builds it (host.md §2, The handshake): a `probe`, `watch` or `stop` in the `component`
 form, which no `spore` offers yet, is `action.component-unsupported`; `channels` that

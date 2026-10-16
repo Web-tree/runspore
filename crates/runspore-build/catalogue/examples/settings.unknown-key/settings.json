@@ -5,7 +5,7 @@
       "kind": "command",
       "argv": ["make"],
       "effect": "idempotent",
-      "priority": 3
+      "concurrency": 3
     }
   },
   "nodes": {
