@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.4.0](https://github.com/Web-tree/runspore/compare/v0.3.0...v0.4.0) (2026-10-16)
+
+
+### Features
+
+* **build:** validate checks argv $get paths against what the step gives ([#211](https://github.com/Web-tree/runspore/issues/211)) ([1c86325](https://github.com/Web-tree/runspore/commit/1c863250a408a4cc488360f75e65e7f5b6db030e)), closes [#200](https://github.com/Web-tree/runspore/issues/200)
+* **cli:** spore continue names the worker that holds the run's step ([#206](https://github.com/Web-tree/runspore/issues/206)) ([258ea01](https://github.com/Web-tree/runspore/commit/258ea0169ffcd4410b4de67bec29494bb2357c66)), closes [#199](https://github.com/Web-tree/runspore/issues/199)
+* **FE-202:** a child run's steps get RUNSPORE_PARENT_RUN_ID ([#210](https://github.com/Web-tree/runspore/issues/210)) ([ab5f3d7](https://github.com/Web-tree/runspore/commit/ab5f3d7d536646ecbebad0aeee938ff9ac6d8653))
+* **FF-217:** checkpoint F feedback: A worker takes the step that has waited longest, and a run that is fur… ([#220](https://github.com/Web-tree/runspore/issues/220)) ([a65d8d1](https://github.com/Web-tree/runspore/commit/a65d8d14e7fb149585a7c2fb32a7a280c2b97016))
+* **host:** a worker on a full disk pauses instead of counting the try ([#198](https://github.com/Web-tree/runspore/issues/198)) ([#209](https://github.com/Web-tree/runspore/issues/209)) ([401a3f6](https://github.com/Web-tree/runspore/commit/401a3f6d61e6a7544982bb30a23e6449684b8c55))
+* **R27:** the reference coding loop killed at every row of its table ([#193](https://github.com/Web-tree/runspore/issues/193)) ([6092199](https://github.com/Web-tree/runspore/commit/609219987a799ce8e658363e95f66b972630c141))
+* **R28:** reconcile docs and glossary with 0.2 ([#215](https://github.com/Web-tree/runspore/issues/215)) ([5ea8821](https://github.com/Web-tree/runspore/commit/5ea88211fd475513fd1eca689e294da7850acbed))
+
+
+### Bug Fixes
+
+* **build:** a repeatable action with no retry.maxAttempts gets three tries ([#212](https://github.com/Web-tree/runspore/issues/212)) ([aa610d8](https://github.com/Web-tree/runspore/commit/aa610d8c3e0dc7b6a5bb2f740cb81630ec244d93))
+* **cli:** a quarantined run shows quarantined as its status, with the reason and the release ([#207](https://github.com/Web-tree/runspore/issues/207)) ([c070a3c](https://github.com/Web-tree/runspore/commit/c070a3cd85d99d06888b004e63c7b74937ac6f47)), closes [#197](https://github.com/Web-tree/runspore/issues/197)
+* **host:** continue, run and worker --run work the runs a run started ([#219](https://github.com/Web-tree/runspore/issues/219)) ([2c35814](https://github.com/Web-tree/runspore/commit/2c3581455d08453f695ddfb27b59151f06a5b319)), closes [#218](https://github.com/Web-tree/runspore/issues/218)
+* **host:** result mode defaults a missing output to {} ([#208](https://github.com/Web-tree/runspore/issues/208)) ([8fcb443](https://github.com/Web-tree/runspore/commit/8fcb44345cd7162902d17a9a9763cb6ec8527f8b)), closes [#201](https://github.com/Web-tree/runspore/issues/201)
+* **host:** run, continue and worker --run work only their own run ([#214](https://github.com/Web-tree/runspore/issues/214)) ([902b31a](https://github.com/Web-tree/runspore/commit/902b31ad7aaf94460202dc5242c7cee124828d6d)), closes [#204](https://github.com/Web-tree/runspore/issues/204)
+* **R23:** spore continue --wait --json exits 0 when it printed the run's status ([#213](https://github.com/Web-tree/runspore/issues/213)) ([9849863](https://github.com/Web-tree/runspore/commit/984986316f7a5c5a60a94194c13c8daef39fff53))
+
 ## [0.3.0](https://github.com/Web-tree/runspore/compare/v0.2.0...v0.3.0) (2026-10-15)
 
 
