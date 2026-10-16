@@ -73,6 +73,7 @@ Every problem and warning `spore validate` can report, with its help page. `spor
 | [`input.marker-too-deep`](input.marker-too-deep.md) | problem | Marker copy nested too deep |
 | [`mapping.get-extra-key`](mapping.get-extra-key.md) | problem | "$get" with another key |
 | [`mapping.literal-extra-key`](mapping.literal-extra-key.md) | problem | "$literal" with another key |
+| [`mapping.missing-path`](mapping.missing-path.md) | problem | "$get" path in "argv" that the step does not give |
 | [`mapping.operator-extra-key`](mapping.operator-extra-key.md) | problem | Operator with another key |
 | [`mapping.operator-shape`](mapping.operator-shape.md) | problem | Operator with the wrong operands |
 | [`mapping.path-not-list`](mapping.path-not-list.md) | problem | "$get" path that is not a list |

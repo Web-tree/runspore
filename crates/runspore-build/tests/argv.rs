@@ -1,6 +1,7 @@
 //! A command's `argv` items may be mappings (spec/host.md §3): `spore validate` checks
 //! them as mappings whose paths start with `input`, `params`, `run` or `step`, in the
-//! action's `argv` and in its probe's, watch's and stop's.
+//! action's `argv` and in its probe's, watch's and stop's. A path into `input` or
+//! `params` is checked against what each step that runs the action gives it.
 
 use std::path::PathBuf;
 
@@ -14,6 +15,14 @@ struct Folder(PathBuf);
 
 impl Folder {
     fn new(action: Value) -> Self {
+        Self::with_step(
+            action,
+            json!({"action": "ask", "params": {"tools": ["Read"], "program": "claude"}}),
+        )
+    }
+
+    /// A folder whose step `ask` has the settings `step`.
+    fn with_step(action: Value, step: Value) -> Self {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
@@ -26,7 +35,7 @@ impl Folder {
         let settings = json!({
             "format": "runspore.workflow/0.2",
             "actions": {"ask": action},
-            "nodes": {"ask": {"action": "ask", "params": {"tools": ["Read"]}}},
+            "nodes": {"ask": step},
         });
         std::fs::write(dir.join("workflow.dot"), DOT).unwrap();
         std::fs::write(
@@ -205,4 +214,143 @@ fn a_mapped_program_is_not_looked_up_and_a_split_keeps_the_mappings() {
         settings["actions"]["ask"]["argv"],
         json!(["make", "-k", resume])
     );
+}
+
+/// A `$get` in `argv` that names nothing the step gives fails the step every time it
+/// starts (`mapping.missing-path`), so `spore validate` reports it with the step and
+/// the path.
+#[test]
+fn an_argv_path_the_step_does_not_give_is_reported_with_the_step() {
+    let item = json!({"$get": ["input", "x"]});
+    let checked =
+        Folder::with_step(command(json!(["make", item])), json!({"action": "ask"})).check();
+    assert!(checked.built.is_none(), "built");
+    assert_eq!(checked.report.codes(), ["mapping.missing-path"]);
+    let resolved = checked.report.resolved();
+    assert_eq!(
+        resolved[0].path.as_deref(),
+        Some("/actions/ask/argv/1/$get/1")
+    );
+    for words in [r#"step "ask""#, r#"action "ask""#, r#"["input", "x"]"#] {
+        assert!(
+            resolved[0].message.contains(words),
+            "{words}: {}",
+            resolved[0].message
+        );
+    }
+    // The fix maps the key from the run's input.
+    let (_, settings) = checked.report.with_fix(&resolved[0].fixes[0]).unwrap();
+    let settings: Value = serde_json::from_str(&settings).unwrap();
+    assert_eq!(
+        settings["nodes"]["ask"]["input"],
+        json!({"x": {"$get": ["input", "x"]}})
+    );
+}
+
+#[test]
+fn argv_paths_are_checked_against_the_steps_input_and_params() {
+    let reported = |step: &Value, item: &Value| {
+        let checked = Folder::with_step(command(json!(["make", item])), step.clone()).check();
+        checked
+            .report
+            .codes()
+            .iter()
+            .any(|c| c == "mapping.missing-path")
+    };
+    let missing = [
+        (json!({"input": {"y": 1}}), json!({"$get": ["input", "x"]})),
+        (
+            json!({"input": {"x": {"y": 1}}}),
+            json!({"$get": ["input", "x", "z"]}),
+        ),
+        (
+            json!({"input": {"x": [1]}}),
+            json!({"$get": ["input", "x", 1]}),
+        ),
+        (
+            json!({"input": {"x": "a"}}),
+            json!({"$get": ["input", "x", "y"]}),
+        ),
+        (
+            json!({"input": {"x": {"$literal": {"y": 1}}}}),
+            json!({"$get": ["input", "x", "z"]}),
+        ),
+        (
+            json!({"input": {"x": {"$json": {"y": 1}}}}),
+            json!({"$get": ["input", "x", "y"]}),
+        ),
+        (json!({}), json!({"$get": ["params", "tools"]})),
+        (
+            json!({"params": {"t": 1}}),
+            json!({"$join": [{"$get": ["params", "tools"]}, ","]}),
+        ),
+        // The condition of `$if` is always evaluated.
+        (
+            json!({}),
+            json!({"$if": [{"$get": ["input", "resume"]}, "-r", "-n"]}),
+        ),
+    ];
+    let given = [
+        (json!({"input": {"x": 1}}), json!({"$get": ["input", "x"]})),
+        (json!({}), json!({"$get": ["input"]})),
+        (json!({}), json!({"$get": ["input", "x"], "default": "."})),
+        // What another mapping gives is known only at run time.
+        (
+            json!({"input": {"$get": ["nodes", "a"]}}),
+            json!({"$get": ["input", "x"]}),
+        ),
+        (
+            json!({"input": {"x": {"$get": ["input", "x"]}}}),
+            json!({"$get": ["input", "x", "y"]}),
+        ),
+        (
+            json!({"input": {"x": {"$if": [true, {"y": 1}, {}]}}}),
+            json!({"$get": ["input", "x", "y"]}),
+        ),
+        (
+            json!({"input": {"x": {"$literal": {"y": 1}}}}),
+            json!({"$get": ["input", "x", "y"]}),
+        ),
+        (
+            json!({"input": {"x": ["a", "b"]}}),
+            json!({"$get": ["input", "x", 1]}),
+        ),
+        // A branch of `$if` is evaluated only when its condition picks it.
+        (
+            json!({"params": {}}),
+            json!({"$if": [true, {"$get": ["params", "a"]}, "b"]}),
+        ),
+        (json!({}), json!({"$get": ["step", "attempt"]})),
+    ];
+    for (mut step, item) in missing {
+        step["action"] = json!("ask");
+        assert!(reported(&step, &item), "{step} {item}: not reported");
+    }
+    for (mut step, item) in given {
+        step["action"] = json!("ask");
+        assert!(!reported(&step, &item), "{step} {item}: reported");
+    }
+}
+
+#[test]
+fn probe_watch_and_stop_argv_paths_are_checked_against_the_step() {
+    for program in ["probe", "watch", "stop"] {
+        let mut action = json!({"kind": "external", "effect": "unsafe"});
+        action["async"] = json!({
+            program: {"command": {"argv": ["check", {"$get": ["input", "id"]}]}}
+        });
+        let checked = Folder::with_step(action, json!({"action": "ask"})).check();
+        assert_eq!(
+            checked.report.codes(),
+            ["mapping.missing-path"],
+            "{program}"
+        );
+        let resolved = checked.report.resolved();
+        assert_eq!(
+            resolved[0].path,
+            Some(format!(
+                "/actions/ask/async/{program}/command/argv/1/$get/1"
+            ))
+        );
+    }
 }

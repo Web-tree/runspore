@@ -225,6 +225,14 @@ An item of a command's `argv`, and of an async `probe`'s, `watch`'s or `stop`'s
 Its mappings are checked as a step's are (W10), except that a `$get` path starts with
 `input`, `params`, `run` or `step` (`mapping.path-root` otherwise), and the markers
 are not allowed. An `argv[0]` that is a mapping is not looked up on the machine.
+A `$get` path into `input` or `params` that is evaluated whenever its item is (not
+under `$literal`, not in a branch of `$if`, without `default`) is also checked against
+each step that runs the action: when the step's own `input` or `params` surely gives
+nothing at that path, the step would fail with `mapping.missing-path` on every try, so
+the build reports `mapping.missing-path` naming the step and the path. An absent
+`input` gives `null` and absent `params` give `{}`; a part that a `$get` or `$if` of
+the step gives is known only at run time and is not checked. A missing key of the
+step's `input` gets a `needs-review` fix that maps it from the run's input.
 
 An action may also name a program in the folder for its async `probe`, `watch` or
 `stop` (`async.<name>.command.argv[0]`) as `./<path>`. That file is bundled as the
@@ -359,7 +367,7 @@ The codes, by family; [docs/codes](../docs/codes/README.md) lists each one:
 | `settings.*` | `settings.json`: JSON, values the package cannot hold, its shape against the schema, keys that are not steps |
 | `action.*`, `command.*` | Actions (W04, W07) and command actions |
 | `node.*` | Steps: the fields their kind takes, their action, signal, error, loop limits and output schemas (W11, W12, W13) |
-| `mapping.*`, `input.*` | Mappings (W10), their operators, and the `$outputSchemas` and `$resultSchema` markers |
+| `mapping.*`, `input.*` | Mappings (W10), their operators, `argv` paths a step does not give, and the `$outputSchemas` and `$resultSchema` markers |
 | `schema.*` | Schema files, schemas outside the subset, and an `inputSchema` whose root is not `"type": "object"` ([schema.md](schema.md)) |
 | `file.*` | File references (§4) |
 | `on-intervention.*` | `onIntervention`: the action it names (§4) |
