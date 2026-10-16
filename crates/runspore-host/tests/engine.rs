@@ -377,6 +377,46 @@ async fn a_start_key_names_one_run_per_store_and_run_ids_are_random() {
     assert_ne!(effects_a, effects_b);
 }
 
+/// H38: working one run claims none of another's due steps, so a caller that exits when
+/// its run parks cuts off no other run's try.
+#[tokio::test]
+async fn run_until_parked_claims_only_its_own_runs_steps() {
+    let store: Arc<SqliteStore> = Arc::new(SqliteStore::open(temp_db("only-its-own")).unwrap());
+    let count = Arc::new(AtomicUsize::new(0));
+    let engine = engine(
+        store.clone(),
+        one_step,
+        counting_echo(count.clone()),
+        EngineConfig::default(),
+    );
+    let other = engine
+        .start(WORKFLOW, json!({}), "other")
+        .await
+        .unwrap()
+        .key;
+    // An engine with no slot takes the other run's first turn: its step is due.
+    let no_slot = EngineConfig {
+        max_concurrent_activities: 0,
+        ..EngineConfig::default()
+    };
+    let coordinator = common::engine(store, one_step, NativeRunner::new(), no_slot);
+    coordinator.tick().await.unwrap();
+    let due = engine.list_invocations(&other).await.unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].status, InvocationStatus::Pending);
+
+    let mine = engine.start(WORKFLOW, json!({}), "mine").await.unwrap().key;
+    let view = engine.run_until_parked(&mine).await.unwrap();
+    assert_eq!(view.status, "completed");
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let due = engine.list_invocations(&other).await.unwrap();
+    assert_eq!(due[0].status, InvocationStatus::Pending);
+    assert!(due[0].attempt.is_none(), "the other run's step was claimed");
+    let view = engine.run_until_parked(&other).await.unwrap();
+    assert_eq!(view.status, "completed");
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_starts_with_one_key_end_on_one_run() {
     let path = temp_db("start-race");

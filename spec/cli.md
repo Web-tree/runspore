@@ -95,6 +95,8 @@ is `workflow.not-found`; two folders with it are `workflow.ambiguous`. Both exit
 and `workflow.not-found` lists the names that exist.
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
+**0.2:** the loop works its one run only (host.md §2, `run_until_parked`); other runs
+of the database wait for `spore worker` or their own `run`, `continue` or `worker --run`.
 The same key with another input or workflow is refused with the ways on (§Keys used
 again).
 While they work, `run` and `worker` print the changes of the runs they work on stderr
@@ -377,8 +379,11 @@ With `<runId>`, or the one unfinished run, it:
    process no longer runs) runs nothing: its try waits for its lease to run out, as
    §Coming back after a kill says, and `continue` works the run.
 3. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
-   parked, printing its progress on stderr (§Progress). Like `run`, it works as a
-   whole worker, so other runs of the database that fall due meanwhile move on too. On the way it sweeps attempts
+   parked, printing its progress on stderr (§Progress). Like `run`, it works that
+   run only: it takes no turn of another run and claims none of its steps, so
+   exiting when the run parks never cuts off another run's try or spends one it
+   never started (host.md §2, `run_until_parked`). `spore worker` works the other
+   runs. On the way it sweeps attempts
    as a worker does: a held async step whose lease or deadline has passed is
    expired, and its action's effect decides. A held step is probed when its action has
    a probe this host runs (host.md §2); a `dead` answer expires it with reason
