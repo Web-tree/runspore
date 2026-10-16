@@ -662,22 +662,24 @@ subfolder runs where its first try ran. A `start` whose key names an existing ru
 the folder recorded first.
 
 **Settings.** `.spore/settings.json` holds the project's settings. It is optional;
-`spore init` does not write it. Today it holds one setting:
+`spore init` does not write it. Today it holds two settings:
 
 ```json
-{"worker": {"slots": 8}}
+{"worker": {"slots": 8, "diskFloorMb": 1024}}
 ```
 
 `worker.slots` is how many steps one worker runs at once (host.md §2,
 `max_concurrent_activities`), a whole number from 1; without it, 4. It holds for every
 worker on the project's database, `run` and `worker`, and `status` shows it as the
-`slots` limit. A command reads the settings of the project whose database it uses:
+`slots` limit. `worker.diskFloorMb` is the free space, in MiB, the disk of the files
+folder must keep for a worker to take a step (§A full disk), a whole number from 0;
+without it, 1024; 0 never pauses. A command reads the settings of the project whose database it uses:
 the file beside `<dir>/.spore/runspore.db`, however that path was given, so a step's
 `spore` reaches the settings of its run's project. A database outside a project
 folder has no settings. Every command that opens the database refuses, with exit 2
 and `project.settings-invalid`, a file that is not JSON, holds a key spore does not
-know, or a slot count that is not a whole number from 1; the message names the file
-and what is wrong.
+know, a slot count that is not a whole number from 1, or a disk floor that is not a
+whole number from 0; the message names the file and what is wrong.
 
 **`spore init`.** It creates `.spore/`, `.spore/workflows/` and `.spore/.gitignore` at
 the repository root: the nearest folder at or above the current one that holds `.git`
@@ -759,8 +761,11 @@ error code and the first line of its message; a node's outcome and the arrow the
 took (`took exhausted` when the outcome used up a loop limit), one line per node the
 run left in that transition; waiting at an await-signal node, with the signal's name;
 needs intervention, with the reason (a stuck step's error, or an unknown outcome);
-completed, at its complete node; failed, with the error that ended it; and quarantined,
-with its code and details. A transition that goes round a loop of buffered signals
+completed, at its complete node; failed, with the error that ended it; quarantined,
+with its code and details; and paused, while the worker's disk is full (§A full disk):
+`paused: disk full (<free> free on <mount>)` for a run whose step it did not take,
+`paused at <node>: …` for a run whose try it set aside. Paused is told once per pause
+and is not a committed change: no event records it. A transition that goes round a loop of buffered signals
 shows each node it left once, with its last arrow. A result that comes too late to
 count changes nothing and prints nothing.
 
@@ -778,12 +783,54 @@ With `--json` each line is one JSON object instead: `format`, `atMs`, `runId`,
 | `failed` | `nodeId` (null when not known), `error: {code, message}` |
 | `quarantined` | `code`, `details` |
 | `running-elsewhere` | `nodeId`, `attempt`, `worker`, `pid`, `forMs` (`pid` and `forMs` null when not known); printed once by `continue --wait` before it waits on a step another worker runs (§What a run needs) |
+| `paused` | `nodeId` (null when no try was set aside), `reason` |
 
 `message` is the first line of the error's message; `status` shows the whole error.
 Stdout is unchanged: `run` and `worker --until-parked` still print the run's status
 there when they return, in JSON mode one object. A worker prints only what it commits
 itself; a run another worker moves shows on that worker's stderr. The planned `status --follow`
 is to print the same lines, found by replaying the run's events.
+
+## A full disk (0.2)
+
+A step whose machine is out of disk fails for a reason that is not in its code: `cargo
+test` gets `disk I/O error` from SQLite, a build cannot write its output. Counting that
+try as the step's red result sends the run round its fix loop for nothing. As GitHub
+Actions runners and the Kubernetes kubelet stop taking work on a node under disk
+pressure, a worker whose disk is full takes no new step until space returns (host.md
+§2, Disk pressure).
+
+The disk is the one holding the files folder (§Project folder), and it is **full**
+while its free space is under the project's floor, `worker.diskFloorMb`, 1024 MiB
+without it. Then:
+
+- `run`, `worker` and `continue` claim no step. Each run whose step waits shows
+  `paused: disk full (<free> free on <mount>)` in their progress (§Progress), once per
+  pause. They keep working everything else: signals, results, sweeps.
+- A try that ends while the disk is full is not counted. A repeatable step (`pure`,
+  `read-only`, `idempotent`) keeps its attempt, which the worker holds, and runs again
+  in it once there is space; its progress shows `paused at <node>: disk full (…)`.
+  An `unsafe` step is reported `unknown` with code `host.disk-full`, and waits for a
+  person, as any unsafe step whose outcome is unknown.
+- A step whose files cannot be written because the disk is full is not quarantined
+  with `host.files-unwritable`; it waits like the others.
+
+`status` of a run waiting for a worker (`needs: working`) and `list` show the pause as
+their first line, and in JSON as `paused`:
+
+```text
+paused: disk full (312 MiB free on /System/Volumes/Data)
+```
+
+```json
+"paused": {"reason": "disk-full", "message": "disk full (312 MiB free on /System/Volumes/Data)",
+           "freeBytes": "327155712", "floorBytes": "1073741824", "mount": "/System/Volumes/Data"}
+```
+
+`paused` is null while the disk is not full, and for a run that does not wait for a
+worker. `status` and `list` measure the disk when they run, so the line goes as soon
+as space returns. A worker that stops while it holds a set-aside try leaves the
+attempt to its lease, as after a crash.
 
 ## Keys used again (0.2)
 
@@ -966,7 +1013,7 @@ until it is released.
 
 **0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
 the absolute path of the database the command used (§Project folder). `list` prints
-`{"db", "runs": [...]}`.
+`{"db", "paused", "runs": [...]}`. Both carry `paused` (§A full disk).
 
 **0.2:** `streaks` is the kernel state's `streaks` (kernel.md §3), each entry with the
 node's `limit` for that outcome from its `loopLimits`: `test` above has routed `red`

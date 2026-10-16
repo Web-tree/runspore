@@ -82,6 +82,8 @@ process on its own.
 | `files_dir` | none | **0.2.** Folder of step files and work folders (§3, Step files and work folders). Required for a workflow artifact with `instructions` or `asset` entries |
 | `parent` | none | **0.2.** The run and node of the step this engine is started from, `{run_id, node_id}`; `start` records it as the parent of every run it creates. `spore` sets it from `RUNSPORE_RUN_ID` and `RUNSPORE_NODE_ID` (cli.md, `list`) |
 | `max_watches` | 16 | **0.2.** Watches the engine runs at once (§3, Async commands), apart from `max_concurrent_activities`. `spore` takes it from `--max-watches` |
+| `disk_floor` | 1 GiB | Free bytes the disk of `files_dir`, else of `base_dir`, must keep for a step to be claimed (Disk pressure, below); 0 never pauses. `spore` takes it from the project's settings, `worker.diskFloorMb` |
+| `disk` | the operating system's `statvfs` | How that disk's free space and mount point are read; tests give their own |
 
 ### Client operations
 
@@ -226,6 +228,8 @@ One bounded pass. It never blocks on an activity.
    **0.2:** with `files_dir` set, before the claim, the host makes or checks the
    step's files and its work folder (§3). When it cannot, it claims nothing and quarantines the run instead, so
    no attempt is spent and no lease runs out on a try that never started.
+   While the disk is full (Disk pressure, below), nothing is claimed, and a step whose
+   files cannot be written then is not quarantined.
 
 `serve(shutdown)` repeats `tick`, sleeping `poll_ms` when a tick did nothing. On
 shutdown it stops claiming and waits up to `shutdown_grace_ms` for in-flight attempts.
@@ -306,8 +310,38 @@ Progress).
 5. `finish_attempt` with request ID `finish/<attemptId>`. On `unavailable`, retry the
    identical request. On `lease.lost`, `record_late_evidence`.
 
-The host does not look at the action's `effect`. Reporting `unknown` honestly is its
-whole job; the kernel decides what an unknown outcome means.
+The host does not look at the action's `effect`, but to set aside a try that ended on a
+full disk (Disk pressure, below). Reporting `unknown` honestly is its whole job; the
+kernel decides what an unknown outcome means.
+
+### Disk pressure
+
+A try that fails because its machine is out of disk says nothing about the step. Like
+a kubelet that marks its node unhealthy on disk pressure and takes no new pod, the
+engine stops taking steps while its disk is full.
+
+`Engine::disk_full()` reads the free space of the disk holding `files_dir`, else
+`base_dir` (its nearest folder that exists), and its mount point, the topmost folder
+above it on the same device. The disk is **full** while the free space, the bytes a
+process that is not root may still write, is under `disk_floor`; it returns the free
+space, the mount and the floor, shown `disk full (<free> free on <mount>)`. A disk
+whose space cannot be read is not full. Then:
+
+1. **Dispatch** claims no invocation (§2 `tick`), and tells the observer `paused` once
+   per run per pause. A step whose files cannot be written while the disk is full is
+   left due rather than quarantined; out of space with the free space over the floor
+   (out of inodes, say) is still `host.files-unwritable`.
+2. **A try that ends** while the disk is full, by its runner's return with any output
+   but a holder handle, and with its lease kept and the engine not shutting down, is
+   not reported. The engine tells the observer `paused` at the node. When the
+   action's effect is repeatable, the engine keeps heartbeating the attempt, checks
+   the disk every `poll_ms`, and once it is no longer full runs the try again in the
+   same attempt: no attempt is spent and no result is recorded for the try set aside.
+   A lost lease or a shutdown meanwhile ends the wait, and the attempt is left to its
+   lease. An `unsafe` action's try is reported `Unknown`, code `host.disk-full`,
+   details `{"freeBytes", "floorBytes", "mount"}`: the kernel asks a person (kernel
+   §7.4), and never repeats an unsafe step itself.
+
 
 ### Steps outside the worker (0.2)
 

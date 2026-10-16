@@ -66,12 +66,15 @@ pub fn root_of(db: &Path) -> Option<&Path> {
 pub struct Settings {
     /// `worker.slots`: how many steps one worker runs at once.
     pub slots: Option<usize>,
+    /// `worker.diskFloorMb`: the free MiB a worker's disk must keep for it to take a
+    /// step; 0 never pauses.
+    pub disk_floor_mb: Option<u64>,
 }
 
 /// The settings of the project whose database is `db`: none when `db` is not a project
 /// folder's or the folder has no `settings.json`. A file that is not JSON, holds a key
-/// spore does not know, or a slot count that is not a whole number from 1 is refused
-/// with exit 2.
+/// spore does not know, a slot count that is not a whole number from 1, or a disk floor
+/// that is not a whole number from 0 is refused with exit 2.
 pub fn settings(db: &Path) -> Result<Settings, Fail> {
     let Some(root) = root_of(db) else {
         return Ok(Settings::default());
@@ -112,7 +115,7 @@ pub fn settings(db: &Path) -> Result<Settings, Fail> {
     let Value::Object(worker) = worker else {
         return Err(invalid("worker: expected an object".into()));
     };
-    unknown(worker, "worker.", &["slots"])?;
+    unknown(worker, "worker.", &["slots", "diskFloorMb"])?;
     let slots = match worker.get("slots") {
         None => None,
         Some(n) => Some(
@@ -126,7 +129,18 @@ pub fn settings(db: &Path) -> Result<Settings, Fail> {
                 })?,
         ),
     };
-    Ok(Settings { slots })
+    let disk_floor_mb = match worker.get("diskFloorMb") {
+        None => None,
+        Some(n) => Some(n.as_u64().ok_or_else(|| {
+            invalid(format!(
+                "worker.diskFloorMb: expected a whole number from 0, got {n}"
+            ))
+        })?),
+    };
+    Ok(Settings {
+        slots,
+        disk_floor_mb,
+    })
 }
 
 /// A run's base folder: `given` (`--base-dir`), else the folder holding the database's

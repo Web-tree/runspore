@@ -107,6 +107,9 @@ pub(crate) enum Unmade {
     Unreadable(String),
     /// The files folder could not be written: `host.files-unwritable`.
     Unwritable(String),
+    /// The files folder could not be written because its disk is full: the worker
+    /// pauses instead (spec/host.md §2, Disk pressure).
+    DiskFull(String),
     /// The artifact declares files and the engine has no files folder:
     /// `host.files-dir-missing`.
     DirMissing,
@@ -120,7 +123,10 @@ impl From<ArtifactError> for Unmade {
 
 impl From<io::Error> for Unmade {
     fn from(e: io::Error) -> Self {
-        Self::Unwritable(e.to_string())
+        match crate::disk::is_full(&e) {
+            true => Self::DiskFull(e.to_string()),
+            false => Self::Unwritable(e.to_string()),
+        }
     }
 }
 

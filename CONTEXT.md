@@ -46,6 +46,10 @@ _Avoid_: engine (the library inside it), runner (that performs one kind of actio
 One of the steps a worker may run at once; the project's settings say how many (`worker.slots`). A step whose try is due but finds every slot taken is **queued** until one frees; once a worker claims it, it is **started**.
 _Avoid_: thread, executor, "scheduled" for a queued step (the kernel's word for both)
 
+**Paused**:
+A worker is paused while its disk is full: free space under the project's floor (`worker.diskFloorMb`). It takes no new step, and a try that ends meanwhile is **set aside**, not counted as the step's result; a repeatable one runs again in the same attempt once space returns.
+_Avoid_: quarantined (a run's fault, lifted by `release`), stuck, failed
+
 **Driver**:
 Whoever keeps a run moving between steps by running `spore`: a session following the run, a separate process, or an outside agent that visits it. Several may act on one run at once; nothing has to run between their calls.
 _Avoid_: owner, controller, scheduler
