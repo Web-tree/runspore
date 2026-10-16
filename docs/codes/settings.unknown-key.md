@@ -10,13 +10,13 @@ A problem: the workflow does not build, and nothing runs.
 
 ```text
 ── Unknown key ────────────────── settings.unknown-key/settings.json:8  settings.unknown-key
-There is no key "priority" in "actions" → "build".
+There is no key "concurrency" in "actions" → "build".
 
   7 │       "effect": "idempotent",
-  8 │       "priority": 3
-    │       ^^^^^^^^^^
+  8 │       "concurrency": 3
+    │       ^^^^^^^^^^^^^
 
-To fix: remove it; the keys allowed here are "actor" | "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "kind" | "outcomes" | "output" | "result" | "retry" | "timeoutMs".
+To fix: remove it; the keys allowed here are "actor" | "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "kind" | "outcomes" | "output" | "priority" | "result" | "retry" | "timeoutMs".
 ```
 
 The fix changes:
@@ -24,7 +24,7 @@ The fix changes:
 ```text
 settings.unknown-key/settings.json:
   7 │-      "effect": "idempotent",
-  8 │-      "priority": 3
+  8 │-      "concurrency": 3
   7 │+      "effect": "idempotent"
 ```
 

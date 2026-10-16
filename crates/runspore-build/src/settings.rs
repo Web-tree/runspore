@@ -116,6 +116,11 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "Vec<FileRef>")]
     pub assets: Option<Vec<String>>,
+    /// Which ready step a worker or an actor takes first: a higher priority before a
+    /// lower one, and among equals the one ready longest. Default 0.
+    #[serde(default)]
+    #[schemars(with = "i32", range(min = -1000, max = 1000))]
+    pub priority: Option<i32>,
     /// `command`: the program and its arguments. No shell: each item is one word, or
     /// a mapping that gives one before each try.
     #[serde(default)]

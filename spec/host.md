@@ -214,6 +214,11 @@ One bounded pass. It never blocks on an activity.
    read back through `scan_due`, is dispatched.
 3. **Dispatch.** For each `Outbox` item, while fewer than `max_concurrent_activities`
    attempts are in flight: `claim_attempt`, then run the attempt as a background task.
+   **0.2:** the items are taken in _queue order_: the highest `priority` of their
+   action first (dot.md §4, default 0), and among equals in `scan_due` order, the
+   one due longest first. Temporal's task queues hand out tasks in the order they
+   were scheduled; Kubernetes schedules a pod of a higher priority class first.
+   0.1 took them in `scan_due` order alone.
    **0.2:** an invocation of an `external` action is skipped: an actor claims it.
    **0.2:** so is one whose action this host falls short of (The handshake, below):
    nothing is claimed, and the step is `capability-missing` until a host that has the
@@ -436,10 +441,11 @@ way.
   calls it unless asked not to (cli.md).
 - `claim_step(run, actor, holder)`: claims a ready external step whose action's label
   equals `actor` (both absent counts as equal). With a run, that run's step; without
-  one, the oldest matching ready step of the tenant: the first in `scan_due` order,
-  which is oldest `notBeforeMs` first. With a run whose external step is held, the
-  host first calls `probe_step`; after a `dead` answer it takes the run's next turns
-  (§2 `tick`, Coordinate), so a step the kernel makes ready again is claimed at once.
+  one, the oldest matching ready step of the tenant: the first in queue order (§2
+  `tick`, Dispatch), highest action `priority` first, then oldest `notBeforeMs`.
+  With a run whose external step is held, the host first calls `probe_step`; after a
+  `dead` answer it takes the run's next turns (§2 `tick`, Coordinate), so a step the
+  kernel makes ready again is claimed at once.
   None is `Ok(None)`. The `holder` handle is
   canonical JSON of at most 4 KiB (`invalid-input` / `holder.invalid` otherwise). Before
   the claim, the host makes or checks the step's files and work folder as for any
@@ -1190,3 +1196,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H35 | **0.2.** The handshake: `validate_workflow` and `start` with an action of an unregistered kind, an action of a kind the host does not run async carrying `async`, a `component` probe, and result channels the host does not offer; a run started with an external action listing `["nats", "store"]`; a run started by an engine that registers a runner and served by one that does not | Each is refused with its code, a message naming the action and the fix, and no run; the run records `store` and a claim returns it; the second engine claims nothing, the invocation stays pending with no attempt, `async_step` reports `capability-missing` with what to restore, and `run_until_parked` returns; an engine with the runner then completes the run |
 | H38 | **0.2.** Two runs with a step due each; `run_until_parked` on one, then on the other; and `spore continue <runId>` on one of two started runs | The first call runs only its run's step: the other's invocation stays pending with no attempt, and runs once on its own call; `continue` prints no change of the other run, which is still `created`, and its command has not run |
 | H39 | **0.2.** A waiting run that started a run, which started a third, each with a step due, and a run outside them with a step due; `run_until_parked` on the waiting run; and `spore continue <runId> --wait` on a build whose step starts a ticket run that waits for a person, then signals the build | The two runs below it complete and the call returns the run `waiting`; the run outside them is still `created`; `continue` returns with the ticket run at its wait and the build's `needs` `child`, with the ticket's commands and none of the build's; after the ticket's signal, `continue --wait` completes both |
+| H40 | **0.2.** A worker with one slot and three runs of `implement` then `ship`, started a moment apart, the first run's `implement` holding the slot; once with no `priority` and once with `ship` at priority 1 | `status` shows the other two runs queued 1st and 2nd of 2; without priority every `implement` runs before any `ship`, oldest run first; with it each run's `ship` runs before the next run's `implement` |

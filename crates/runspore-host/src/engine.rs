@@ -39,6 +39,7 @@ mod cancel;
 mod held;
 mod intervention;
 mod pressure;
+mod queue;
 mod slots;
 mod steps;
 
@@ -359,6 +360,8 @@ struct Inner {
     /// Invocations whose action this engine falls short of, which dispatch leaves for
     /// a host that has the capability.
     short: Mutex<HashSet<(RunKey, String)>>,
+    /// The `priority` of each due invocation's action, by run and invocation ID.
+    priorities: Mutex<HashMap<(RunKey, String), i64>>,
     tasks: Mutex<JoinSet<()>>,
     settled: Notify,
     /// Set by `shutdown`: no attempt is claimed from then on.
@@ -716,6 +719,7 @@ impl Engine {
                 async_swept: Mutex::new(None),
                 capabilities,
                 short: Mutex::new(HashSet::new()),
+                priorities: Mutex::new(HashMap::new()),
                 tasks: Mutex::new(JoinSet::new()),
                 settled: Notify::new(),
                 closing: AtomicBool::new(false),
@@ -1190,19 +1194,22 @@ impl Engine {
         if inner.closing.load(Ordering::SeqCst) {
             return Ok(report);
         }
-        for item in inner.scan_due().await? {
-            if lock(&inner.inflight).len() >= inner.config.max_concurrent_activities {
+        let full = || lock(&inner.inflight).len() >= inner.config.max_concurrent_activities;
+        if full() {
+            return Ok(report);
+        }
+        let mut due = inner.scan_due().await?;
+        if let Some(only) = only {
+            due.retain(|item| matches!(item, DueItem::Outbox { key, .. } if only.contains(key)));
+        }
+        for (key, invocation_id) in inner.queue(due).await {
+            if full() {
                 break;
             }
-            if let DueItem::Outbox { key, invocation_id } = item {
-                if only.is_some_and(|only| !only.contains(&key)) {
-                    continue;
-                }
-                match Inner::dispatch(inner, key, invocation_id).await? {
-                    Dispatched::Started => report.dispatched += 1,
-                    Dispatched::Quarantined => report.quarantined += 1,
-                    Dispatched::Not => {}
-                }
+            match Inner::dispatch(inner, key, invocation_id).await? {
+                Dispatched::Started => report.dispatched += 1,
+                Dispatched::Quarantined => report.quarantined += 1,
+                Dispatched::Not => {}
             }
         }
         Ok(report)

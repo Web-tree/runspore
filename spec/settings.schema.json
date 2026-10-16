@@ -103,6 +103,13 @@
           "$ref": "#/$defs/Output",
           "description": "`command`: how its output becomes the step's result. Default `text`."
         },
+        "priority": {
+          "description": "Which ready step a worker or an actor takes first: a higher priority before a\nlower one, and among equals the one ready longest. Default 0.",
+          "format": "int32",
+          "maximum": 1000,
+          "minimum": -1000,
+          "type": "integer"
+        },
         "result": {
           "$ref": "#/$defs/CommandResult",
           "description": "`command` with `\"output\": \"json\"`: the outcome and output, mapped from the\nparsed stdout on exit 0."

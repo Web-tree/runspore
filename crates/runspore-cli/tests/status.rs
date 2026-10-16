@@ -330,6 +330,8 @@ fn a_step_waiting_for_a_slot_shows_queued_and_who_holds_the_slots() {
         (&queued["running"]["claimed"], &queued["running"]["pid"]),
         (&json!(false), &Value::Null)
     );
+    assert_eq!(queued["running"]["queue"], json!({"place": 1, "of": 1}));
+    assert_eq!(started["running"]["queue"], Value::Null);
     let slots = &queued["slots"];
     assert_eq!(slots["limit"], 1, "{queued}");
     let held = slots["held"].as_array().unwrap();
@@ -347,7 +349,7 @@ fn a_step_waiting_for_a_slot_shows_queued_and_who_holds_the_slots() {
     let worker_id = held[0]["worker"].as_str().unwrap();
     let start_key = started["startKey"].as_str().unwrap();
     assert!(
-        text.contains("running    work attempt 1 of 2, queued for a free worker slot since "),
+        text.contains("running    work attempt 1 of 2, queued for a free worker slot, 1st of 1 waiting since "),
         "{text}"
     );
     assert!(

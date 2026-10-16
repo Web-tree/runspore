@@ -75,7 +75,7 @@ The process that moves runs forward: it asks the kernel for each next step, reco
 _Avoid_: engine (the library inside it), runner (that performs one kind of action), daemon
 
 **Slot**:
-One of the steps a worker may run at once; the project's settings say how many (`worker.slots`). A step whose try is due but finds every slot taken is **queued** until one frees; once a worker claims it, it is **started**.
+One of the steps a worker may run at once; the project's settings say how many (`worker.slots`). A step whose try is due but finds every slot taken is **queued** until one frees; once a worker claims it, it is **started**. Queued steps are taken by their action's **priority**, highest first, then the one queued longest.
 _Avoid_: thread, executor, "scheduled" for a queued step (the kernel's word for both)
 
 **Paused**:
