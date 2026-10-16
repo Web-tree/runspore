@@ -95,8 +95,9 @@ is `workflow.not-found`; two folders with it are `workflow.ambiguous`. Both exit
 and `workflow.not-found` lists the names that exist.
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
-**0.2:** the loop works its one run only (host.md §2, `run_until_parked`); other runs
-of the database wait for `spore worker` or their own `run`, `continue` or `worker --run`.
+**0.2:** the loop works its one run only, with the runs below it in `list`'s tree
+(§Runs that start runs; host.md §2, `run_until_parked`); other runs of the database
+wait for `spore worker` or their own `run`, `continue` or `worker --run`.
 The same key with another input or workflow is refused with the ways on (§Keys used
 again).
 While they work, `run` and `worker` print the changes of the runs they work on stderr
@@ -332,6 +333,7 @@ An **unfinished run** is one that has not completed, failed or been cancelled
 | `quarantined` | The run is quarantined, whatever else holds |
 | `working` | A worker has something to do: the run has not taken its first turn, it has an event not yet applied (a signal already sent to the node it waits at, for one), or it is `running` at a step a worker runs |
 | `signal` | It waits at an await-signal node, with no signal for it stored |
+| `child` | It waits as for `signal`, while a run it started has not ended: that run, or one below it, sends the signal, as a build's ticket run signals the build when it is done (§Runs that start runs). Nobody decides it; the runs below it say what they need |
 | `stuck` | It needs intervention: a stuck step, or an unsafe step whose outcome is unknown |
 | `external-ready` | It is at an external step nobody holds (§Steps outside the worker) |
 | `held` | It is at an async step that is held: an external step an actor holds, or an async command whose started work has not reported |
@@ -380,10 +382,13 @@ With `<runId>`, or the one unfinished run, it:
    §Coming back after a kill says, and `continue` works the run.
 3. Otherwise **works the run** exactly as `run` resumes it, until it is finished or
    parked, printing its progress on stderr (§Progress). Like `run`, it works that
-   run only: it takes no turn of another run and claims none of its steps, so
-   exiting when the run parks never cuts off another run's try or spends one it
-   never started (host.md §2, `run_until_parked`). `spore worker` works the other
-   runs. On the way it sweeps attempts
+   run only, with the runs below it in `list`'s tree: the runs it started, and theirs,
+   as Temporal's worker runs a workflow's child workflows. A parent that waits for its
+   child's signal is not parked while the child can be worked; it returns when each
+   run of the tree is finished or parked, or the run itself has ended. It takes no
+   turn of another run and claims none of its steps, so exiting when the run parks
+   never cuts off another run's try or spends one it never started (host.md §2,
+   `run_until_parked`). `spore worker` works the other runs. On the way it sweeps attempts
    as a worker does: a held async step whose lease or deadline has passed is
    expired, and its action's effect decides. A held step is probed when its action has
    a probe this host runs (host.md §2); a `dead` answer expires it with reason
@@ -396,6 +401,7 @@ With `<runId>`, or the one unfinished run, it:
    | failed | the error | 1 |
    | cancelled | the reason, when one was given | 7 |
    | waiting for a signal | the node and the signal, `spore step show <runId>`, and one `spore signal` per outcome the node routes, as `status` gives them | 3 |
+   | waiting on a run it started (`child`) | the node, the signal and the unfinished runs it started; then, for each unfinished run below it that is not itself waiting on a child, in `list`'s order, what that run needs as this table gives it, its commands among `commands`. It offers no `spore signal` to the run itself, as `temporal workflow describe` lists pending children instead of asking for their result | 3 |
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
@@ -405,7 +411,8 @@ With `<runId>`, or the one unfinished run, it:
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
 commands of the table in the order given; `commands` is empty for a finished run. The
-commands name the run and nothing else, as in `status`. `continue` takes `run`'s
+commands name the run and nothing else, as in `status`; for a run waiting on a child,
+they name the runs below it. `continue` takes `run`'s
 interrupts: SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit 130.
 
 **`continue [<runId>] --wait`.** Follows the run until it needs a person or has
@@ -432,6 +439,8 @@ where `continue` would stop with exit 6 (host.md §2, `follow`):
   or deadline, after which the action's effect decides, and probes the attempt at
   most every 30 s; a `dead` answer expires it at once.
 
+It works the runs below the run as `continue` does, each followed as the run is, and
+does not return while a run it waits on can still be worked.
 It returns, printing what is needed as `continue` does, only when the run has
 completed (exit 0), failed (1), waits for a signal (3), needs intervention (4), is
 quarantined (5), or is at a ready external step, at a held step whose holder waits for

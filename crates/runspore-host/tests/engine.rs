@@ -13,7 +13,7 @@ use runspore_types::canonical;
 use runspore_types::digest;
 use runspore_types::reducer::*;
 use runspore_types::store::{
-    Disposition, InvocationStatus, RunKey, StoreFailure, StoreFailureKind,
+    Disposition, InvocationStatus, RunKey, RunParent, StoreFailure, StoreFailureKind,
 };
 use serde_json::{json, Value};
 
@@ -415,6 +415,75 @@ async fn run_until_parked_claims_only_its_own_runs_steps() {
     let view = engine.run_until_parked(&other).await.unwrap();
     assert_eq!(view.status, "completed");
     assert_eq!(count.load(Ordering::SeqCst), 2);
+}
+
+/// `run.started` with input `{"wait": true}` leaves the run waiting for a signal; any
+/// other run takes `one_step`.
+fn waits_when_asked(request: &TransitionRequest) -> Result<Decision, Failure> {
+    let started: Value = serde_json::from_slice(&request.input_event.payload).unwrap();
+    if request.input_event.kind == "run.started" && started["input"]["wait"] == true {
+        return Ok(decision(request, "waiting", Vec::new()));
+    }
+    one_step(request)
+}
+
+/// H39: working a run works the runs it started and theirs, as Temporal's worker runs a
+/// workflow's child workflows, and still claims nothing of a run outside its tree.
+#[tokio::test]
+async fn run_until_parked_works_the_runs_below_the_run() {
+    let path = temp_db("below");
+    let count = Arc::new(AtomicUsize::new(0));
+    let engine = engine(
+        Arc::new(SqliteStore::open(&path).unwrap()),
+        waits_when_asked,
+        counting_echo(count.clone()),
+        EngineConfig::default(),
+    );
+    let parent = engine
+        .start(WORKFLOW, json!({"wait": true}), "parent")
+        .await
+        .unwrap()
+        .key;
+    let started_in = |run: &RunKey| {
+        let config = EngineConfig {
+            parent: Some(RunParent {
+                run_id: run.run.clone(),
+                node_id: "spawn".into(),
+            }),
+            ..EngineConfig::default()
+        };
+        common::engine(
+            Arc::new(SqliteStore::open(&path).unwrap()),
+            waits_when_asked,
+            counting_echo(count.clone()),
+            config,
+        )
+    };
+    let child = started_in(&parent)
+        .start(WORKFLOW, json!({}), "child")
+        .await
+        .unwrap()
+        .key;
+    let grandchild = started_in(&child)
+        .start(WORKFLOW, json!({}), "grandchild")
+        .await
+        .unwrap()
+        .key;
+    let other = engine
+        .start(WORKFLOW, json!({}), "other")
+        .await
+        .unwrap()
+        .key;
+
+    let view = engine.run_until_parked(&parent).await.unwrap();
+    assert_eq!(view.status, "waiting");
+    for below in [&child, &grandchild] {
+        let below = engine.get_run(below).await.unwrap().unwrap();
+        assert_eq!(below.status, "completed", "{}", below.key.run);
+    }
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    let view = engine.get_run(&other).await.unwrap().unwrap();
+    assert_eq!(view.status, "created", "a run outside the tree took a turn");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

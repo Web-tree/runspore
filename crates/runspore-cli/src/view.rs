@@ -166,6 +166,20 @@ impl Shown {
 }
 
 impl Shown {
+    /// What the run needs, `child` while it waits on a run it started.
+    pub fn needs(&self, view: &RunView) -> Option<&'static str> {
+        let child_unfinished = self.unfinished_children().next().is_some();
+        needs_below(view, self.step.as_ref(), child_unfinished)
+    }
+
+    /// The runs the run started that have not ended.
+    fn unfinished_children(&self) -> impl Iterator<Item = &RunView> {
+        self.children
+            .each()
+            .filter(|(v, r)| r.depth == 0 && !v.ended())
+            .map(|(v, _)| v)
+    }
+
     /// The pause, for a run that waits for a worker to take its step.
     fn paused_for(&self, view: &RunView) -> Option<&DiskFull> {
         let working = needs(view, self.step.as_ref()) == Some("working");
@@ -200,7 +214,7 @@ impl Shown {
     pub fn next(&self, view: &RunView) -> Next {
         let s = status_json(view, self);
         let run = &view.key.run;
-        let needs = needs(view, self.step.as_ref());
+        let needs = self.needs(view);
         let listed = |detail: &Value| -> Vec<String> {
             let commands = detail["commands"].as_array().into_iter().flatten();
             commands
@@ -248,6 +262,21 @@ impl Shown {
                 (
                     format!("run {run} waits at {node} for signal {signal}"),
                     commands,
+                )
+            }
+            Some("child") => {
+                let signal = text(&s["waiting"]["signal"]);
+                let below: Vec<&str> = self
+                    .unfinished_children()
+                    .map(|v| v.key.run.as_str())
+                    .collect();
+                let runs = if below.len() == 1 { "run" } else { "runs" };
+                (
+                    format!(
+                        "run {run} waits at {node} for signal {signal} from {runs} it started: {}",
+                        below.join(", ")
+                    ),
+                    Vec::new(),
                 )
             }
             Some("stuck") => {
@@ -469,6 +498,20 @@ pub fn needs(view: &RunView, step: Option<&AsyncStep>) -> Option<&'static str> {
             Some(StepState::CapabilityMissing) => "capability-missing",
             None => "working",
         }),
+    }
+}
+
+/// `needs`, but `child` for a run that waits for a signal while a run it started has
+/// not ended: that run, or one below it, sends the signal, so the wait is no person's
+/// decision (spec/cli.md, What a run needs).
+pub fn needs_below(
+    view: &RunView,
+    step: Option<&AsyncStep>,
+    child_unfinished: bool,
+) -> Option<&'static str> {
+    match needs(view, step) {
+        Some("signal") if child_unfinished => Some("child"),
+        needs => needs,
     }
 }
 

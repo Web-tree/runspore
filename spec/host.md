@@ -251,13 +251,22 @@ run. Another run takes no turn and has no attempt claimed, so a caller that exit
 its run parks leaves no other run's try cut off, or claimed and never started. As in
 Temporal's worker shutdown, a worker stops taking work before it lets go, and never
 fails work it did not start.
+**0.2:** "that run" is the run with the runs below it: the runs it started (their
+recorded parent is the run, cli.md §Runs that start runs), and theirs, looked up again
+on every tick so a run started meanwhile joins. Their ticks coordinate and dispatch
+all of them, and it returns only when nothing of them is in flight and each of them
+has stopped as above: a parent waiting for the signal its child sends goes on while the
+child can be worked, as Temporal's worker runs a workflow's child workflows with it.
+Once the run itself has ended, nothing below it is taken up anew, and it returns when
+nothing of them is in flight.
 
 **0.2:** `follow(key)` ticks as `run_until_parked` does, but goes on past a held async
 step whose holder does not wait for a person: it returns only when the run is
 terminal, `waiting`, `needs-intervention` or quarantined, or at an async step that
 needs someone: a ready external step, a step this host falls short of (The
 handshake, below), or a held step whose watch has said that its holder waits for a
-person. While the step is held it keeps ticking, sleeping `poll_ms` after a tick that
+person. It works the runs below the run as `run_until_parked` does, each of them
+stopping as the run does. While the step is held it keeps ticking, sleeping `poll_ms` after a tick that
 did nothing, so a report from elsewhere is applied within one poll; its sweep expires
 the attempt at its lease or deadline, and probes and watches it at most every 30 s
 (§2 `tick`). `async_step` reports a held step whose watch said so with that watch's
@@ -1180,3 +1189,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H37 | **0.2.** The reference coding loop (cli.md §Coming back after a kill) through the binary, with stand-in programs for `implement`'s command and `test`'s, driven by `continue --wait --exit-status` and killed at every row of that table: SIGKILL of the driver's process group and SIGHUP during a try, failpoints `host.attempt.after-effect` and `host.attempt.after-finish`, before the first turn, at a wait and after a signal; then four red tests in a row, keep-going, four more, a rejection and an approval; and `cancel` at `approve`, at `tests_stuck`, at a stuck step and after a kill | Each row's run state, `needs`, `continue` output and exit, and what runs again match the table; the fourth red takes `exhausted` to `tests_stuck`, keep-going allows three reds again, and the re-entered `implement` reads the hint and the rejection's reason through `from` and the last failing test through `nodes`; each cancelled run is left out of `list --unfinished`, `continue` on it exits 7, and no command runs again |
 | H35 | **0.2.** The handshake: `validate_workflow` and `start` with an action of an unregistered kind, an action of a kind the host does not run async carrying `async`, a `component` probe, and result channels the host does not offer; a run started with an external action listing `["nats", "store"]`; a run started by an engine that registers a runner and served by one that does not | Each is refused with its code, a message naming the action and the fix, and no run; the run records `store` and a claim returns it; the second engine claims nothing, the invocation stays pending with no attempt, `async_step` reports `capability-missing` with what to restore, and `run_until_parked` returns; an engine with the runner then completes the run |
 | H38 | **0.2.** Two runs with a step due each; `run_until_parked` on one, then on the other; and `spore continue <runId>` on one of two started runs | The first call runs only its run's step: the other's invocation stays pending with no attempt, and runs once on its own call; `continue` prints no change of the other run, which is still `created`, and its command has not run |
+| H39 | **0.2.** A waiting run that started a run, which started a third, each with a step due, and a run outside them with a step due; `run_until_parked` on the waiting run; and `spore continue <runId> --wait` on a build whose step starts a ticket run that waits for a person, then signals the build | The two runs below it complete and the call returns the run `waiting`; the run outside them is still `created`; `continue` returns with the ticket run at its wait and the build's `needs` `child`, with the ticket's commands and none of the build's; after the ticket's signal, `continue --wait` completes both |

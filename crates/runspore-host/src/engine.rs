@@ -1159,9 +1159,9 @@ impl Engine {
         self.tick_for(None).await
     }
 
-    /// `tick`, coordinating and dispatching only `only` when it names a run: the sweep
+    /// `tick`, coordinating and dispatching only the runs of `only` when given: the sweep
     /// still covers every run, but no other run takes a turn or has an attempt claimed.
-    async fn tick_for(&self, only: Option<&RunKey>) -> Result<TickReport, HostError> {
+    async fn tick_for(&self, only: Option<&[RunKey]>) -> Result<TickReport, HostError> {
         let inner = &self.inner;
         let mut report = TickReport::default();
         inner.reap();
@@ -1178,7 +1178,7 @@ impl Engine {
         loop {
             let page = retry(false, || inner.store.scan_ready(cursor.clone(), PAGE)).await?;
             for key in &page.items {
-                if only.is_none_or(|only| only == key) {
+                if only.is_none_or(|only| only.contains(key)) {
                     inner.coordinate(key, &mut report).await?;
                 }
             }
@@ -1195,7 +1195,7 @@ impl Engine {
                 break;
             }
             if let DueItem::Outbox { key, invocation_id } = item {
-                if only.is_some_and(|only| only != &key) {
+                if only.is_some_and(|only| !only.contains(&key)) {
                     continue;
                 }
                 match Inner::dispatch(inner, key, invocation_id).await? {
@@ -1252,44 +1252,95 @@ impl Engine {
         let _ = self.tick().await;
     }
 
-    /// Ticks until the run is terminal, `waiting`, `needs-intervention` or quarantined,
-    /// or waits at an async step this engine does not watch (or whose watch says that
-    /// its holder waits for a person), with no pending event and nothing of it in
-    /// flight. It works only this run, so returning leaves no other run's attempt
-    /// claimed and cut off when the caller exits.
+    /// Ticks the run and the runs below it (the runs it started, and theirs) until each
+    /// is terminal, `waiting`, `needs-intervention` or quarantined, or waits at an async
+    /// step this engine does not watch (or whose watch says that its holder waits for a
+    /// person), with no pending event and nothing of them in flight; or until the run
+    /// itself has ended and nothing of them is in flight. It works only these runs, so
+    /// returning leaves no other run's attempt claimed and cut off when the caller exits.
     pub async fn run_until_parked(&self, key: &RunKey) -> Result<RunView, HostError> {
         self.until(key, false).await
     }
 
     /// Ticks as `run_until_parked`, but goes on past a held async step whose holder does
-    /// not wait for a person: returns only when the run has ended, waits for a signal,
-    /// needs intervention or is quarantined, or is at an async step that needs someone
-    /// (spec/host.md §2, `follow`).
+    /// not wait for a person: returns only when the run has ended, or when each run of
+    /// its tree has ended, waits for a signal, needs intervention or is quarantined, or
+    /// is at an async step that needs someone (spec/host.md §2, `follow`).
     pub async fn follow(&self, key: &RunKey) -> Result<RunView, HostError> {
         self.until(key, true).await
     }
 
     async fn until(&self, key: &RunKey, follow: bool) -> Result<RunView, HostError> {
         let inner = &self.inner;
+        let mut tree = self.tree(key).await?;
         loop {
-            let report = self.tick_for(Some(key)).await?;
-            let busy = lock(&inner.inflight).iter().any(|(k, _)| k == key);
-            let view = self.get_run(key).await?.ok_or_else(|| {
-                HostError::invalid("run.not-found", format!("run {} does not exist", key.run))
-            })?;
-            let stops = parked(&view)
-                || match follow {
-                    true => self.needs_someone(&view).await?,
-                    false => self.waits_outside(&view).await?,
-                };
+            // Once the run has ended, nothing below it is taken up anew.
+            let scope: Vec<RunKey> = match tree[0].ended() {
+                true => vec![key.clone()],
+                false => tree.iter().map(|view| view.key.clone()).collect(),
+            };
+            let report = self.tick_for(Some(&scope)).await?;
+            tree = self.tree(key).await?;
+            let busy = lock(&inner.inflight)
+                .iter()
+                .any(|(k, _)| tree.iter().any(|view| &view.key == k));
+            let mut stops = true;
+            if !tree[0].ended() {
+                for view in &tree {
+                    stops = stops && self.stops(view, follow).await?;
+                }
+            }
             if !busy && stops {
-                return Ok(view);
+                return Ok(tree.swap_remove(0));
             }
             if !report.did_work() {
                 let poll = Duration::from_millis(inner.config.poll_ms);
                 let _ = tokio::time::timeout(poll, inner.settled.notified()).await;
             }
         }
+    }
+
+    /// Whether `until` stops at this run: it is parked, or with `follow` needs someone,
+    /// else waits outside this engine.
+    async fn stops(&self, view: &RunView, follow: bool) -> Result<bool, HostError> {
+        Ok(parked(view)
+            || match follow {
+                true => self.needs_someone(view).await?,
+                false => self.waits_outside(view).await?,
+            })
+    }
+
+    /// The run, then the runs below it as `spore list` shows them: each run whose
+    /// parent is the run or a run below it.
+    async fn tree(&self, key: &RunKey) -> Result<Vec<RunView>, HostError> {
+        let mut runs = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self.list_runs(cursor, PAGE).await?;
+            runs.extend(page.items);
+            cursor = page.next;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let root = runs
+            .iter()
+            .position(|view| &view.key == key)
+            .ok_or_else(|| {
+                HostError::invalid("run.not-found", format!("run {} does not exist", key.run))
+            })?;
+        let mut tree = vec![runs.swap_remove(root)];
+        let mut next = 0;
+        while next < tree.len() {
+            let parent = &tree[next].key.run;
+            let (below, rest) = runs.into_iter().partition::<Vec<_>, _>(|view| {
+                view.parent.as_ref().is_some_and(|p| &p.run_id == parent)
+            });
+            runs = rest;
+            tree.extend(below);
+            next += 1;
+        }
+        Ok(tree)
     }
 }
 
