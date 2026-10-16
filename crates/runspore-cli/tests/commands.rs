@@ -364,8 +364,36 @@ fn a_run_over_the_state_budget_is_quarantined_until_released() {
         (Some(5), json!("budget.state-bytes"))
     );
     let run_id = status["runId"].as_str().unwrap();
+    let release_command = format!("spore release {run_id}");
+    assert_eq!(status["quarantine"]["commands"], json!([release_command]));
     let listed = dir.run(&args(&["--json", "list"])).json();
     assert_eq!(listed["runs"][0]["quarantined"], true);
+
+    // In text the quarantine is the status, with its reason and the release beside it,
+    // and the run is not shown as queued for a worker's slot.
+    let text = dir.run(&args(&["status", run_id])).stdout;
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[2].starts_with("status     quarantined since ")
+            && lines[2].contains(": budget.state-bytes: "),
+        "{text}"
+    );
+    assert_eq!(lines[3], format!("release    {release_command}"), "{text}");
+    assert!(
+        !text.contains("queued for") && !text.contains("\nslots "),
+        "{text}"
+    );
+    for listing in [&["list"][..], &["list", "--unfinished"][..]] {
+        let listed = dir.run(&args(listing)).stdout;
+        let row = listed.lines().find(|l| l.contains(run_id)).unwrap();
+        assert!(
+            row.contains("quarantined")
+                && !row.contains("running")
+                && row.contains("budget.state-bytes")
+                && row.ends_with(&release_command),
+            "{listing:?}: {listed}"
+        );
+    }
 
     let release = dir.run(&args(&["--json", "release", run_id]));
     assert_eq!(

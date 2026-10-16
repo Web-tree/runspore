@@ -360,12 +360,13 @@ impl Tree {
                     .as_deref()
                     .map_or_else(String::new, |a| format!("  actor {a}"));
                 format!(
-                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}",
+                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}{}",
                     v.key.run,
                     r.workflow.as_deref().unwrap_or("-"),
                     r.node_id.as_deref().unwrap_or("-"),
                     r.needs.unwrap_or("-"),
-                    v.start_key
+                    v.start_key,
+                    quarantine_row_text(v)
                 )
             })
             .collect();
@@ -440,8 +441,33 @@ fn status_json(view: &RunView, shown: &Shown) -> Value {
             "nodeId": end.node_id, "from": arrow_json(end.from.as_ref())})),
         "nodes": field(|s| json!(s.nodes)),
         "quarantine": view.quarantine.as_ref().map(|q| json!({
-            "code": q.code, "details": q.details, "atMs": q.at_ms.to_string()})),
+            "code": q.code, "details": q.details, "atMs": q.at_ms.to_string(),
+            "commands": [release_command(view)]})),
         "cancel": view.cancel.as_ref().map(cancel_json),
+    })
+}
+
+/// The command that lifts a run's quarantine.
+fn release_command(view: &RunView) -> String {
+    format!("spore release {}", view.key.run)
+}
+
+/// The status a person reads: `quarantined` while the run is, whatever its kernel
+/// status, which `--json` keeps in `status`.
+fn status_shown(view: &RunView) -> &str {
+    if view.quarantine.is_some() {
+        "quarantined"
+    } else {
+        &view.status
+    }
+}
+
+/// What a `list` row shows beside a quarantined run: its code, the first line of its
+/// details and the release; nothing for a run that is not quarantined.
+fn quarantine_row_text(view: &RunView) -> String {
+    view.quarantine.as_ref().map_or_else(String::new, |q| {
+        let details = q.details.lines().next().unwrap_or_default();
+        format!("  {}: {details}  {}", q.code, release_command(view))
     })
 }
 
@@ -709,8 +735,25 @@ fn arrow_text(arrow: &Value) -> String {
 fn status_text(view: &RunView, shown: &Shown) -> String {
     let s = status_json(view, shown);
     let mut text = format!(
-        "run        {}\nstart key  {}\nstatus     {}\nrevision   {}\npackage    {}\n",
-        view.key.run, view.start_key, view.status, view.revision, view.package_digest
+        "run        {}\nstart key  {}\n",
+        view.key.run, view.start_key
+    );
+    match &view.quarantine {
+        Some(q) => {
+            text += &format!(
+                "status     quarantined since {}, for {}: {}: {}\n",
+                utc_text(q.at_ms),
+                duration_text(shown.now_ms.saturating_sub(q.at_ms)),
+                q.code,
+                q.details
+            );
+            text += &format!("release    {}\n", release_command(view));
+        }
+        None => text += &format!("status     {}\n", view.status),
+    }
+    text += &format!(
+        "revision   {}\npackage    {}\n",
+        view.revision, view.package_digest
     );
     if let Some(artifact) = &view.artifact_digest {
         text += &format!("artifact   {artifact}\n");
@@ -757,11 +800,13 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     text += &waiting_text(&s["waiting"]);
     text += &intervention_text(&s["intervention"], &s["invocation"]);
     // An external step waits for an actor, and a capability-missing one for a spore
-    // that can run it, not for a worker's slot.
+    // that can run it, not for a worker's slot; a quarantined run waits for a release.
     let waits = shown.step.as_ref().map(|step| step.state);
-    text += &running_text(&s["running"], waits);
-    if s["running"].is_object() && waits.is_none() {
-        text += &slots_text(&s["slots"]);
+    if view.quarantine.is_none() {
+        text += &running_text(&s["running"], waits);
+        if s["running"].is_object() && waits.is_none() {
+            text += &slots_text(&s["slots"]);
+        }
     }
     for (node, streak) in s["streaks"].as_object().into_iter().flatten() {
         text += &format!(
@@ -774,9 +819,6 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     if !s["result"].is_null() {
         text += &format!("result     {}\n", s["result"]);
         text += &tails_text(&s["result"]["error"], "");
-    }
-    if let Some(q) = &view.quarantine {
-        text += &format!("quarantine {}: {}\n", q.code, q.details);
     }
     if let Some(cancel) = &view.cancel {
         text += &format!(
@@ -1043,11 +1085,6 @@ fn tree_json(v: &RunView, run: &Row) -> Value {
 /// start key, and the parent's node that started it. `indent` levels go before every
 /// run; `width` is the width of the column of indented run IDs.
 fn tree_text(v: &RunView, run: &Row, indent: usize, width: usize, now_ms: u64) -> String {
-    let quarantined = if v.quarantine.is_some() {
-        " quarantined"
-    } else {
-        ""
-    };
     let node = run.node_id.as_deref().unwrap_or("-");
     let since = run.since_ms.map_or_else(
         || "-".to_string(),
@@ -1059,8 +1096,10 @@ fn tree_text(v: &RunView, run: &Row, indent: usize, width: usize, now_ms: u64) -
     };
     let head = format!("{:1$}{2}", "", 2 * (run.depth + indent), v.key.run);
     format!(
-        "{head:<width$}  {:<18}{quarantined}  {node:<12} {since:>7}  {}{from}",
-        v.status, v.start_key
+        "{head:<width$}  {:<18}  {node:<12} {since:>7}  {}{from}{}",
+        status_shown(v),
+        v.start_key,
+        quarantine_row_text(v)
     )
 }
 
