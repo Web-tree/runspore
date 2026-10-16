@@ -300,7 +300,9 @@ The node is where an unfinished run is, and the time is since the run came to st
 there as it stands: the `sinceMs` that `status` reports in `waiting`, `intervention`
 or `running`, found by the same replay of the run's events (§JSON output). A finished run, and a run that has not
 taken its first turn, is at no node, shown `-`. `list` therefore costs one transition
-per event of each unfinished run.
+per event of each unfinished run. A quarantined run shows `quarantined` as its status,
+and at the end of its line its quarantine's code, the first line of its details and
+`spore release <runId>`; JSON keeps the kernel status and sets `quarantined`.
 
 In JSON, each entry of `runs` is `{"runId", "startKey", "status", "revision",
 "quarantined", "parent", "depth", "nodeId", "sinceMs"}`, in the tree's order. `parent`
@@ -327,12 +329,13 @@ An **unfinished run** is one that has not completed, failed or been cancelled
 
 **`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
 was created), one line each and not as a tree: the run, its workflow, its node, what
-it needs, how long ago it last changed, its start key, and the actor of an external
-step:
+it needs, how long ago it last changed, its start key, the actor of an external
+step, and a quarantine's code, details and release as in `list`:
 
 ```text
 run_9a…  coding-loop  review     signal              2m10s  ticket-148
 run_4f…  build        tickets    held                  12s  build  actor reviewer
+run_7c…  coding-loop  fix        quarantined         1h09m  ticket-73  host.files-unwritable: No space left on device  spore release run_7c…
 ```
 
 Each row of `list`, with or without `--unfinished`, carries beside the fields of §Runs
@@ -934,6 +937,14 @@ string of milliseconds. `position`, `invocation`, `streaks` and `nodes` stay as 
 had them when it was cancelled; `waiting`, `intervention`, `running`, `step`, `result`
 and `end` are null. Text mode shows `cancelled  <time> UTC: <reason>`. `cancel` is null
 for every other run.
+
+**0.2:** a quarantined run keeps its kernel status in `status` and shows
+`quarantine: {"code", "details", "atMs", "commands"}`, `commands` being
+`["spore release <runId>"]`; `quarantine` is null for every other run. Text mode
+shows the quarantine as the status, in its first lines, as a person reads it: `status
+quarantined since …, for …: <code>: <details>` and under it `release  spore release
+<runId>`. It shows no `running` or `slots`, since nothing works a quarantined run
+until it is released.
 
 **0.2:** `status` (and so `run` and `worker --until-parked`) and `list` carry `"db"`,
 the absolute path of the database the command used (§Project folder). `list` prints
