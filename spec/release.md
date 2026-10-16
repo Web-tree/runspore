@@ -169,6 +169,9 @@ environment, which only `main` may deploy to.
 
 Merging the release PR is the release: the push of that merge makes release-please
 tag `v<version>` and create the GitHub release, with the PR's changelog as its notes.
+The release PR merges itself: each run puts GitHub's auto-merge on it, so it squash-merges
+as soon as its required checks pass, and every releasable change is released. To hold a
+release, turn auto-merge off on the PR; the next push to `main` turns it on again.
 
 ### The release workflow
 

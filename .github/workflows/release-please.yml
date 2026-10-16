@@ -14,12 +14,17 @@ permissions:
 jobs:
   # As the webtree-release App, so the release PR gets its pull_request checks. Its
   # credentials come through AWS_ROLE, a secret of the release environment, which only
-  # main may use; `secrets: inherit` is the only way an environment secret reaches it.
+  # main may use; `secrets: inherit` is the only way an environment secret reaches it,
+  # so the workflow is pinned to a commit. The release PR merges itself once its
+  # required checks pass, which releases every releasable change.
   release-please:
     permissions:
       id-token: write
-    uses: Web-tree/actions/.github/workflows/release-please.yml@v1
+      checks: read
+      pull-requests: read
+    uses: Web-tree/actions/.github/workflows/release-please.yml@cece6160ad54272e48173ef5fd95adae32705110 # v1.2.0
     with:
+      auto-merge: true
       aws-region: eu-central-1
       app-id-parameter: /webtree/github/apps/webtree-release/app-id
       private-key-parameter: /webtree/github/apps/webtree-release/private-key
