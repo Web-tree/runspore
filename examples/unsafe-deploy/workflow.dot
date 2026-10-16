@@ -1,0 +1,10 @@
+// One `unsafe` step that appends to deploy.log, then sleeps for three seconds.
+digraph "unsafe-deploy" {
+  dialect = "runspore/0.2";
+  start   = "deploy";
+
+  deploy;
+  done [kind="complete"];
+
+  deploy -> done;
+}

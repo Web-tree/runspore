@@ -1,0 +1,17 @@
+// `check` fails until `rework` has run, then the run waits for an `approval` signal.
+digraph "review-loop" {
+  dialect = "runspore/0.2";
+  start   = "check";
+
+  check;
+  rework;
+  approve  [kind="await-signal"];
+  done     [kind="complete"];
+  rejected [kind="fail"];
+
+  check   -> approve  [on="ok"];
+  check   -> rework   [on="red"];
+  rework  -> check;
+  approve -> done     [on="approved"];
+  approve -> rejected [on="rejected"];
+}
