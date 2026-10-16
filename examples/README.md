@@ -1,8 +1,11 @@
 # Examples
 
-Three workflows for the `spore` binary. The commands below were run in this order,
-in one shell, against a release build; each output block is what they printed. Run and
-invocation IDs are derived from the start key, so yours are the same.
+Workflow folders for the `spore` binary. Each folder holds `workflow.dot` (the steps
+and the arrows between them) and `settings.json` (what each step runs); `spore` reads
+the folder, builds its artifact in memory and records the artifact with the run. The
+commands below were run in this order against a release build; each output block is
+what they printed. Run IDs are random, so yours differ, and `...` marks lines left
+out.
 
 ## Setup
 
@@ -12,175 +15,217 @@ of the examples. The database is `./runspore.db` there.
 ```sh
 cargo build --release -p runspore-cli
 export PATH="$PWD/target/release:$PATH"
-demo=$(mktemp -d) && cp examples/*.json "$demo" && cd "$demo"
+demo=$(mktemp -d) && cp -R examples/hello examples/review-loop examples/unsafe-deploy "$demo" && cd "$demo"
 ```
 
-## hello.json
+## hello/
 
 Two `read-only` steps of two seconds each; `shout` receives the output of `greet`. Each
 step may take up to three attempts.
 
 ```sh
-spore validate hello.json
-spore run hello.json --key hello-1
+spore validate hello
+spore run hello --key hello-1
 ```
 
 ```text
-hello.json is valid
-run        run_1ed55d2b7e22541f12a4d93233ea1f12
+hello is valid
+2026-10-16T04:32:20Z  hello-1  step greet started, attempt 1
+2026-10-16T04:32:22Z  hello-1  greet returned ok -> shout
+2026-10-16T04:32:22Z  hello-1  step shout started, attempt 1
+2026-10-16T04:32:25Z  hello-1  shout returned ok -> done
+2026-10-16T04:32:25Z  hello-1  completed at done
+run        run_cc275ce70f71ce5c2325b8b74b91f77e
 start key  hello-1
 status     completed
 revision   3
+package    sha256:73dcd360fa0dd84ab10b63262bb15267cab451f627f397dff1b31536ea71511a
+artifact   sha256:5eac69a8d6d15f5634a5cf42510a25f64e42f43089288f6b83cc1bad86b8f057
+end        done, from shout on ok
 result     {"output":{"message":"hello"}}
 ```
+
+The package digest is the run's workflow; the artifact digest is the file it came from.
 
 ### Interrupt and resume
 
-On SIGINT (Ctrl-C) or SIGTERM the process stops claiming steps, gives the steps in
-flight up to `--grace-ms` (10 seconds by default) to finish, records their results, and
-exits 130.
+On SIGINT (Ctrl-C), SIGTERM or SIGHUP the process stops claiming steps, gives the
+steps in flight a short grace period, stops the commands still running, and exits.
 
 ```sh
-spore run hello.json --key hello-2 & sleep 1; kill -INT $!; wait $!; echo "exit $?"
-spore run hello.json --key hello-2
-spore events run_02dba8c4bbfa7115e5ac84527ad928f4
+spore run hello --key hello-2 & sleep 3; kill -INT $!; wait $!
+spore run hello --key hello-2
+spore events run_0422d62dc8f51dcf726f870079ad6404
 ```
 
 ```text
-run        run_02dba8c4bbfa7115e5ac84527ad928f4
+2026-10-16T04:32:43Z  hello-2  step greet started, attempt 1
+2026-10-16T04:32:45Z  hello-2  greet returned ok -> shout
+2026-10-16T04:32:45Z  hello-2  step shout started, attempt 1
+run        run_0422d62dc8f51dcf726f870079ad6404
 start key  hello-2
 status     running
-revision   2
-position   shout (shout/1)
-invocation inv_d4aefc08b535626e4827120fbd1cf5b7 attempt 1 scheduled
-exit 130
-run        run_02dba8c4bbfa7115e5ac84527ad928f4
-start key  hello-2
-status     completed
-revision   3
+...
+position   shout (shout/1, from greet on ok)
+invocation inv_5700be57c1cc1ae94dad95f15118899a attempt 1 of 3 scheduled
+...
+2026-10-16T04:33:00Z  hello-2  shout returned ok -> done
+2026-10-16T04:33:00Z  hello-2  completed at done
+run        run_0422d62dc8f51dcf726f870079ad6404
+...
 result     {"output":{"message":"hello"}}
-   1  run.started            rev 1      start
-   2  activity.result        rev 2      att:inv_8a54ca10ce093bcba43fef226ef14aea.1
-   3  activity.result        rev 3      att:inv_d4aefc08b535626e4827120fbd1cf5b7.1
+   1  2026-10-16T04:32:43Z  run.started            rev 1      greet  start
+   2  2026-10-16T04:32:45Z  activity.result        rev 2      greet  ok -> shout: {"greeting":"hello"}  att:inv_e7ef7b1ffab7ea31b1b2df8d1664da66.1
+   3  2026-10-16T04:33:00Z  activity.result        rev 3      shout  ok -> done: {"message":"hello"}; completed  att:inv_5700be57c1cc1ae94dad95f15118899a.1
 ```
 
-`greet` finished during the grace period and its result was recorded. The second `run`
-ran only `shout`: one `activity.result` per step.
+`greet`'s result was recorded before the interrupt, so the second `run` ran only
+`shout`: one `activity.result` per step.
 
 ### Kill and resume
 
-SIGKILL leaves the step in flight claimed. The next `run` waits until its lease (10
-seconds by default) runs out, then retries it, because a `read-only` step is safe to
-repeat. Recorded steps do not run again.
+SIGKILL leaves the step in flight claimed, and the guard in front of its command stops
+the command. The next `run` waits until the step's lease (10 seconds by default) runs
+out, then retries it, because a `read-only` step is safe to repeat. Recorded steps do
+not run again.
 
 ```sh
-spore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!; echo "exit $?"
-spore run hello.json --key hello-3
-spore events run_59be2f5a2cd74bff8b99b6ca86bc5aa9
+spore run hello --key hello-3 & sleep 3; kill -KILL $!; wait $!; echo "exit $?"
+spore run hello --key hello-3
 ```
 
 ```text
+2026-10-16T04:33:07Z  hello-3  step greet started, attempt 1
+2026-10-16T04:33:09Z  hello-3  greet returned ok -> shout
+2026-10-16T04:33:09Z  hello-3  step shout started, attempt 1
 exit 137
-run        run_59be2f5a2cd74bff8b99b6ca86bc5aa9
+2026-10-16T04:33:19Z  hello-3  step shout attempt 1 failed: attempt.expired: the attempt's lease ran out
+2026-10-16T04:33:19Z  hello-3  step shout started, attempt 2
+2026-10-16T04:33:21Z  hello-3  shout returned ok -> done
+2026-10-16T04:33:21Z  hello-3  completed at done
+run        run_0be544f12f0c92d34656ef907b87a55a
 start key  hello-3
 status     completed
 revision   4
-result     {"output":{"message":"hello"}}
-   1  run.started            rev 1      start
-   2  activity.result        rev 2      att:inv_e89f5ddc7ccd2a203c2d3e88507d55e0.1
-   3  activity.result        rev 3      att:inv_eba64bfa12dcfe3b5641d08d62e662b9.1  activity.retry-scheduled
-   4  activity.result        rev 4      att:inv_eba64bfa12dcfe3b5641d08d62e662b9.2
+...
 ```
 
-Event 3 is the expired first attempt of `shout`; the kernel scheduled a retry. Event 4
-is the second attempt. `greet` ran once.
+The first attempt of `shout` expired and the kernel scheduled a second. `greet` ran
+once.
 
-## review-loop.json
+## review-loop/
 
 `check` fails until `rework` has run, then the run waits for an `approval` signal. `run`
-exits 3 while the run waits. `signal` can come from any process; the next `run` (or a
-`spore worker` that is already running) continues from there.
+exits 3 while the run waits and prints the commands that answer it. `signal` can come
+from any process; `spore continue` (or a `spore worker` that is already running) goes
+on from there.
 
 ```sh
-spore run review-loop.json --key review-1; echo "exit $?"
-spore events run_698d808071a554a19eaf1cc0c578af57
-spore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
-spore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
-spore run review-loop.json --key review-1
+spore run review-loop --key review-1; echo "exit $?"
+spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome approved --id approve-1
+spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome approved --id approve-1
+spore continue run_04f51c4db6397978f2958d917e176b95
 ```
 
 ```text
-run        run_698d808071a554a19eaf1cc0c578af57
+2026-10-16T04:33:26Z  review-1  step check started, attempt 1
+2026-10-16T04:33:26Z  review-1  check returned red -> rework
+2026-10-16T04:33:26Z  review-1  step rework started, attempt 1
+2026-10-16T04:33:26Z  review-1  rework returned ok -> check
+2026-10-16T04:33:26Z  review-1  step check started, attempt 1
+2026-10-16T04:33:26Z  review-1  check returned ok -> approve
+2026-10-16T04:33:26Z  review-1  waiting at approve for signal approval
+run        run_04f51c4db6397978f2958d917e176b95
 start key  review-1
 status     waiting
 revision   4
-position   approve (approve/1)
+...
+position   approve (approve/1, from check on ok)
+waiting    for signal approval since 2026-10-16T04:33:26Z, for 0s
+outcomes   approved
+           rejected
+answer     spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome approved
+           spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome rejected
 exit 3
-   1  run.started            rev 1      start
-   2  activity.result        rev 2      att:inv_138162c8309df8cf48cbe8a4c6bf064b.1
-   3  activity.result        rev 3      att:inv_47a35a3724b312bec12d500ed3eaceab.1
-   4  activity.result        rev 4      att:inv_cf426245203a83a7b53a7b54f5c442db.1
 signal approval applied (message ID approve-1)
 signal approval duplicate (message ID approve-1)
-run        run_698d808071a554a19eaf1cc0c578af57
-start key  review-1
-status     completed
-revision   5
-result     {"output":{"approval":"approved","check":"checks pass\n"}}
+2026-10-16T04:33:32Z  review-1  approve returned approved -> done
+2026-10-16T04:33:32Z  review-1  completed at done
+run run_04f51c4db6397978f2958d917e176b95 completed at done
 ```
 
-The events are `check` (red), `rework`, `check` (ok). Repeating a message ID is a
-no-op. `--outcome rejected` would end the run in the `fail` node, and `run` would exit 1.
+Repeating a message ID is a no-op. `--outcome rejected` would end the run in the `fail`
+node, and `continue` would exit 1.
 
-## unsafe-deploy.json
+### Cancel
+
+A run nobody wants any more is cancelled. It ends `cancelled`, its history is kept, and
+a step in progress is stopped.
+
+```sh
+spore start review-loop --key review-2
+spore cancel run_1cfdd0c834eff27d0dc75ec2bb686f4b --reason "not needed"
+spore list
+```
+
+```text
+created run run_1cfdd0c834eff27d0dc75ec2bb686f4b (start key review-2)
+run run_1cfdd0c834eff27d0dc75ec2bb686f4b cancelled (request ID cancel_74de1eca15fc8496)
+...
+run_04f51c4db6397978f2958d917e176b95  completed           -                  -  review-1
+run_1cfdd0c834eff27d0dc75ec2bb686f4b  cancelled           -                  -  review-2
+```
+
+## unsafe-deploy/
 
 One `unsafe` step that appends to `deploy.log` and then sleeps for three seconds. Kill
 the process while it runs:
 
 ```sh
-spore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!; echo "exit $?"
+spore run unsafe-deploy --key deploy-1 & sleep 1; kill -KILL $!; wait $!; echo "exit $?"
 cat deploy.log
-spore run unsafe-deploy.json --key deploy-1; echo "exit $?"
+spore run unsafe-deploy --key deploy-1; echo "exit $?"
 ```
 
 ```text
+2026-10-16T04:33:38Z  deploy-1  step deploy started, attempt 1
 exit 137
-deployed inv_365cb523af61e7de1ded53399d6ee056
-run        run_d3f771834c9dca1abe857c4307ef9b6c
+deployed inv_d05e1c780633ee634db3bb6504984c13
+2026-10-16T04:33:48Z  deploy-1  step deploy attempt 1 failed: attempt.expired: the attempt's lease ran out
+2026-10-16T04:33:48Z  deploy-1  needs intervention at deploy: the outcome of attempt 1 is unknown
+run        run_e9b5a9c8589b644e0ddb6e1238f1cc9c
 start key  deploy-1
 status     needs-intervention
 revision   2
+...
 position   deploy (deploy/1)
-invocation inv_365cb523af61e7de1ded53399d6ee056 attempt 1 unknown
+invocation inv_d05e1c780633ee634db3bb6504984c13 attempt 1 of 1 unknown
+process    group 16998 on Max-M5.local
+needs      a person: step deploy lost its last attempt's lease with no result since 2026-10-16T04:33:48Z, for 0s
+resolve    spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --retry
+           spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --complete ok
+           spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --fail <message>
 exit 4
 ```
 
 The step started and its result was never recorded. Runspore cannot tell whether the
 deploy took effect, and an `unsafe` step is never repeated on its own. After the lease
 ran out, the run parked in `needs-intervention` and `run` exited 4. An operator answers
-the invocation: `--complete <outcome>` when the effect happened, `--retry` to run it
-again as attempt 2, `--fail <message>` to fail the run.
+it: `--complete <outcome>` when the effect happened, `--retry` to run it again as
+attempt 2, `--fail <message>` to fail the run.
 
 ```sh
-spore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
-spore run unsafe-deploy.json --key deploy-1
+spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --complete ok --id fix-1
+spore continue run_e9b5a9c8589b644e0ddb6e1238f1cc9c
 cat deploy.log
-spore list
 ```
 
 ```text
 resolution applied (request ID fix-1)
-run        run_d3f771834c9dca1abe857c4307ef9b6c
-start key  deploy-1
-status     completed
-revision   3
-result     {"output":{"deployed":"ok"}}
-deployed inv_365cb523af61e7de1ded53399d6ee056
-run_02dba8c4bbfa7115e5ac84527ad928f4  completed           hello-2
-run_1ed55d2b7e22541f12a4d93233ea1f12  completed           hello-1
-run_59be2f5a2cd74bff8b99b6ca86bc5aa9  completed           hello-3
-run_698d808071a554a19eaf1cc0c578af57  completed           review-1
-run_d3f771834c9dca1abe857c4307ef9b6c  completed           deploy-1
+2026-10-16T04:33:56Z  deploy-1  deploy returned ok -> done
+2026-10-16T04:33:56Z  deploy-1  completed at done
+run run_e9b5a9c8589b644e0ddb6e1238f1cc9c completed at done
+deployed inv_d05e1c780633ee634db3bb6504984c13
 ```
 
 The deploy ran once. Exit codes and the JSON output (`--json`) are listed in
@@ -191,3 +236,9 @@ The deploy ran once. Exit codes and the JSON output (`--json`) are listed in
 The reference coding loop as a workflow folder: Claude implements through a plain
 `claude -p` step, `npm test` runs, and a person approves. It needs `claude` on `PATH`;
 [docs/guide/claude-step.md](../docs/guide/claude-step.md) walks through it.
+
+## watch-a-run/, headless-agent/
+
+`watch-a-run/` holds the two workflows of
+[docs/guide/watch-a-run.md](../docs/guide/watch-a-run.md). `headless-agent/` is the
+superseded 0.1 research example behind C04; its README says what replaced it.

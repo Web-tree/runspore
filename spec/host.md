@@ -666,7 +666,7 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
 
   ```jsonc
   "argv": [
-    "claude", "-p",
+    "coder", "-p",
     { "$if": [{ "$get": ["step", "resumed"] }, "--resume", "--session-id"] },
     { "$uuid": [{ "$get": ["run", "id"] }, { "$get": ["step", "node"] }] },
     "--tools", { "$join": [{ "$get": ["params", "tools"] }, ","] }
@@ -691,9 +691,9 @@ the same operators and the same error codes as in the kernel (kernel.md §4).
   roots to any runner.
 
   **Known limit.** `resumed` says that a try happened, not how far its program got.
-  Measured with `claude` 2.1.296: a try stopped within about 1 second of starting has
+  Measured with one such program: a try stopped within about 1 second of starting has
   not created its session yet, so the next try gets `resumed: true` and `--resume`
-  fails with "No conversation found"; a try stopped after 3 seconds or more resumes
+  fails because there is no session to resume; a try stopped after 3 seconds or more resumes
   correctly. A try that ended before its program ran (`command.spawn`) counts too. The
   fix is a step reporting its progress, as Temporal's heartbeat details do, and
   `resumed` reading that report; it is left to a later version.
@@ -751,8 +751,8 @@ never reaches the kernel.
 ran (every row but `cwd-invalid`, `argv-invalid` and `spawn`) carries in its details
 `stdoutTail` and `stderrTail`, the last 4 KiB of each stream, decoded as UTF-8, lossy,
 and cut on a character boundary. Stdout's end is kept even when the stream passes
-64 KiB. Some programs write their errors to stdout (`claude -p --output-format json`
-prints `{"is_error": true, …}` and leaves stderr empty), so the cause shows whichever
+64 KiB. Some programs write their errors to stdout (one prints
+`{"is_error": true, …}` there and leaves stderr empty), so the cause shows whichever
 stream it went to. A failure a command names itself in result mode (below) is its own
 and gets neither. 0.1 kept only `stderrTail`, in `command.exit`, and gave the other
 rows no details. An action that declares no `outcomes` declares `["ok"]`
@@ -794,7 +794,7 @@ and the output out of it, so no wrapper script is needed (AWS Step Functions'
 `ResultSelector` and `Choice` do the same in two states):
 
 ```jsonc
-{"kind": "command", "argv": ["claude", "-p", "--output-format", "json", "…"],
+{"kind": "command", "argv": ["coder", "-p", "--output-format", "json", "…"],
  "output": "json", "outcomes": ["approved", "changes"],
  "result": {
    "outcome": {"$get": ["stdout", "structured_output", "outcome"]},
@@ -810,8 +810,8 @@ and the output out of it, so no wrapper script is needed (AWS Step Functions'
 - On exit 0 the host parses stdout as JSON (`command.output-too-large` as above;
   stdout that is not JSON is `command.malformed-output`), then evaluates `outcome`,
   then `output`, with the kernel's evaluator. Unlike `json` mode without a block,
-  stdout itself need not be in the canonical domain: `claude -p --output-format json`
-  prints its cost as a fraction beside the answer. Only the mapped `output` must be;
+  stdout itself need not be in the canonical domain: a program may print its cost
+  as a fraction beside the answer. Only the mapped `output` must be;
   one that is not (a fraction, a nesting too deep) is `command.result-invalid`,
   details `{"field": "output", "reason": <the canonical code>}`, such as
   `canonical.non-integer`. The result is checked as in result mode: the outcome must be

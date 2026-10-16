@@ -2,7 +2,7 @@
 
 Design revision 0.1 — 2026-10-05.
 
-This directory defines the proposed production architecture for Runspore. The documents are a coordinated specification: implementation must satisfy the durability, effect, security, and target conformance requirements together. The runtime has not yet been implemented or qualified for production.
+This directory defines the proposed production architecture for Runspore: the target, not what `spore` does today. The documents are a coordinated specification: implementation must satisfy the durability, effect, security, and target conformance requirements together. The runtime has not been qualified for production. What is implemented, semantics 0.2, is specified in [spec/](../spec/README.md), which wins where it is narrower; a paragraph here that 0.2 contradicts says so. The decision records behind 0.2 are in [design/](design/), the vocabulary in [CONTEXT.md](../CONTEXT.md).
 
 Start with scope and decisions, then components, kernel, graph semantics, and durable execution. Sources describe upstream behavior; design choices are project recommendations.
 

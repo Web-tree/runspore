@@ -238,6 +238,8 @@ A small mod could:
 
 Durability stays in `spore`. The mod is a session-scoped adapter.
 
+*Superseded.* This sketch was inferred on 2026-10-06. The map replaced it: a step that needs Claude runs in a session the integration starts for it, never in the person's own session (C07 L2), and an interactive step hands in its answer through the helper's report command, not a mod tool (C12). The menu is a pane with a `Select` (C05).
+
 ## 7. Claims in docs/13 "Claude Code mods" section
 
 | # | Claim | Verdict | Source |

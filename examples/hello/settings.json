@@ -1,0 +1,21 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "greet": {
+      "kind": "command", "effect": "read-only", "output": "json", "retry": { "maxAttempts": 3 },
+      "argv": ["/bin/sh", "-c", "sleep 2; printf '{\"greeting\": \"hello\"}'"]
+    },
+    "shout": {
+      "kind": "command", "effect": "read-only", "output": "json", "retry": { "maxAttempts": 3 },
+      "argv": ["/bin/sh", "-c", "sleep 2; cat"]
+    }
+  },
+  "nodes": {
+    "greet": { "action": "greet" },
+    "shout": {
+      "action": "shout",
+      "input": { "message": { "$get": ["nodes", "greet", "output", "greeting"] } }
+    },
+    "done": { "output": { "$get": ["nodes", "shout", "output"] } }
+  }
+}

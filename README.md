@@ -2,7 +2,7 @@
 
 Runspore is an embedded durable workflow runtime designed around a deterministic Rust/WebAssembly graph kernel and replaceable transactional storage.
 
-**Status: MVP implemented.** One binary, `spore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. Node and Bun are verified at kernel level only; there is no JS host. Not implemented yet: timers, fork and join, child workflows, compensation, `reconcilable` effects, a compiler or YAML frontend, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Website: [runspore.com](https://runspore.com).
+**Status: semantics 0.2.** One binary, `spore`, with a SQLite store and a Rust host that runs the kernel through Wasmtime. A workflow is a folder holding `workflow.dot` and `settings.json`; `spore build` seals it into a workflow artifact. A step can be done by an actor outside the worker or by a job that outlives it, a step that gives up pauses the run for a person, and a run can be cancelled. Node and Bun are verified at kernel level only; there is no JS host. The supported setup is one machine, one OS user and one database per checkout, with no authorization beyond file permissions. Not implemented yet: timers, fork and join, the `workflow` node type, compensation, `reconcilable` effects, a YAML frontend, PostgreSQL, a JS host or SDK, browser and Cloudflare profiles, secrets, telemetry and the rest listed in [spec/README.md](spec/README.md). Website: [runspore.com](https://runspore.com).
 
 ```text
 event + state → deterministic kernel → new state + commands
@@ -38,94 +38,120 @@ Before the first release, a repository admin runs `scripts/new-release-key.sh` o
 
 ## Quickstart
 
-From the repository root, build the binary and work in a scratch directory with copies of the [examples](examples/README.md):
+From the repository root, build the binary and work in a scratch directory with copies of the [example](examples/README.md) workflow folders:
 
 ```sh
 cargo build --release -p runspore-cli
 export PATH="$PWD/target/release:$PATH"
-demo=$(mktemp -d) && cp examples/*.json "$demo" && cd "$demo"
+demo=$(mktemp -d) && cp -R examples/hello examples/review-loop examples/unsafe-deploy "$demo" && cd "$demo"
 ```
 
-Run a workflow of two steps to completion. The database is `./runspore.db`.
+Run a workflow of two steps to completion. `spore` reads the folder, builds its artifact in memory and records it with the run. The database is `./runspore.db`. Run IDs are random, so yours differ.
 
 ```sh
-spore run hello.json --key hello-1
+spore run hello --key hello-1
 ```
 
 ```text
-run        run_1ed55d2b7e22541f12a4d93233ea1f12
+2026-10-16T04:32:20Z  hello-1  step greet started, attempt 1
+2026-10-16T04:32:22Z  hello-1  greet returned ok -> shout
+2026-10-16T04:32:22Z  hello-1  step shout started, attempt 1
+2026-10-16T04:32:25Z  hello-1  shout returned ok -> done
+2026-10-16T04:32:25Z  hello-1  completed at done
+run        run_cc275ce70f71ce5c2325b8b74b91f77e
 start key  hello-1
 status     completed
 revision   3
+package    sha256:73dcd360fa0dd84ab10b63262bb15267cab451f627f397dff1b31536ea71511a
+artifact   sha256:5eac69a8d6d15f5634a5cf42510a25f64e42f43089288f6b83cc1bad86b8f057
+end        done, from shout on ok
 result     {"output":{"message":"hello"}}
 ```
 
 Kill the process during the second step and run the same key again. The first step does not run again; the second is retried after its lease (10 seconds by default) runs out.
 
 ```sh
-spore run hello.json --key hello-3 & sleep 3; kill -KILL $!; wait $!
-spore run hello.json --key hello-3
+spore run hello --key hello-3 & sleep 3; kill -KILL $!; wait $!
+spore run hello --key hello-3
 ```
 
 ```text
-run        run_59be2f5a2cd74bff8b99b6ca86bc5aa9
+2026-10-16T04:33:19Z  hello-3  step shout attempt 1 failed: attempt.expired: the attempt's lease ran out
+2026-10-16T04:33:19Z  hello-3  step shout started, attempt 2
+2026-10-16T04:33:21Z  hello-3  shout returned ok -> done
+2026-10-16T04:33:21Z  hello-3  completed at done
+run        run_0be544f12f0c92d34656ef907b87a55a
 start key  hello-3
 status     completed
 revision   4
-result     {"output":{"message":"hello"}}
+...
 ```
 
-A run that waits for a signal exits 3. Deliver the signal from any process and continue:
+A run that waits for a signal exits 3 and prints the commands that answer it. Deliver the signal from any process, then `spore continue`:
 
 ```sh
-spore run review-loop.json --key review-1; echo "exit $?"
-spore signal run_698d808071a554a19eaf1cc0c578af57 approval --outcome approved --id approve-1
-spore run review-loop.json --key review-1
+spore run review-loop --key review-1; echo "exit $?"
+spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome approved --id approve-1
+spore continue run_04f51c4db6397978f2958d917e176b95
 ```
 
 ```text
-run        run_698d808071a554a19eaf1cc0c578af57
+...
+run        run_04f51c4db6397978f2958d917e176b95
 start key  review-1
 status     waiting
-revision   4
-position   approve (approve/1)
+...
+waiting    for signal approval since 2026-10-16T04:33:26Z, for 0s
+outcomes   approved
+           rejected
+answer     spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome approved
+           spore signal run_04f51c4db6397978f2958d917e176b95 approval --outcome rejected
 exit 3
 signal approval applied (message ID approve-1)
-run        run_698d808071a554a19eaf1cc0c578af57
-start key  review-1
-status     completed
-revision   5
-result     {"output":{"approval":"approved","check":"checks pass\n"}}
+2026-10-16T04:33:32Z  review-1  approve returned approved -> done
+2026-10-16T04:33:32Z  review-1  completed at done
+run run_04f51c4db6397978f2958d917e176b95 completed at done
 ```
 
-An `unsafe` step interrupted after it started is never repeated on its own. The run parks in `needs-intervention` (exit 4) until an operator resolves the invocation:
+An `unsafe` step interrupted after it started is never repeated on its own. The run parks in `needs-intervention` (exit 4) until an operator resolves it:
 
 ```sh
-spore run unsafe-deploy.json --key deploy-1 & sleep 1; kill -KILL $!; wait $!
-spore run unsafe-deploy.json --key deploy-1; echo "exit $?"
-spore resolve run_d3f771834c9dca1abe857c4307ef9b6c inv_365cb523af61e7de1ded53399d6ee056 --complete ok --id fix-1
-spore run unsafe-deploy.json --key deploy-1
+spore run unsafe-deploy --key deploy-1 & sleep 1; kill -KILL $!; wait $!
+spore run unsafe-deploy --key deploy-1; echo "exit $?"
+spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --complete ok --id fix-1
+spore continue run_e9b5a9c8589b644e0ddb6e1238f1cc9c
 cat deploy.log
 ```
 
 ```text
-run        run_d3f771834c9dca1abe857c4307ef9b6c
-start key  deploy-1
-status     needs-intervention
-revision   2
-position   deploy (deploy/1)
-invocation inv_365cb523af61e7de1ded53399d6ee056 attempt 1 unknown
+2026-10-16T04:33:48Z  deploy-1  step deploy attempt 1 failed: attempt.expired: the attempt's lease ran out
+2026-10-16T04:33:48Z  deploy-1  needs intervention at deploy: the outcome of attempt 1 is unknown
+...
+needs      a person: step deploy lost its last attempt's lease with no result since 2026-10-16T04:33:48Z, for 0s
+resolve    spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --retry
+           spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --complete ok
+           spore resolve run_e9b5a9c8589b644e0ddb6e1238f1cc9c --fail <message>
 exit 4
 resolution applied (request ID fix-1)
-run        run_d3f771834c9dca1abe857c4307ef9b6c
-start key  deploy-1
-status     completed
-revision   3
-result     {"output":{"deployed":"ok"}}
-deployed inv_365cb523af61e7de1ded53399d6ee056
+2026-10-16T04:33:56Z  deploy-1  deploy returned ok -> done
+2026-10-16T04:33:56Z  deploy-1  completed at done
+run run_e9b5a9c8589b644e0ddb6e1238f1cc9c completed at done
+deployed inv_d05e1c780633ee634db3bb6504984c13
 ```
 
-Commands, exit codes and JSON output: [spec/cli.md](spec/cli.md).
+A run you no longer want is cancelled; its history stays, and a step in progress is stopped:
+
+```sh
+spore start review-loop --key review-2
+spore cancel run_1cfdd0c834eff27d0dc75ec2bb686f4b --reason "not needed"
+```
+
+```text
+created run run_1cfdd0c834eff27d0dc75ec2bb686f4b (start key review-2)
+run run_1cfdd0c834eff27d0dc75ec2bb686f4b cancelled (request ID cancel_74de1eca15fc8496)
+```
+
+Inside a repository, `spore init` makes the project folder `.spore/`, which holds its workflows and its run database, and every `spore` call from any subfolder uses that database. Commands, exit codes and JSON output: [spec/cli.md](spec/cli.md).
 
 ## Guides
 
@@ -134,7 +160,7 @@ Commands, exit codes and JSON output: [spec/cli.md](spec/cli.md).
 
 ## Documentation
 
-Read the [architecture index](docs/README.md) and [delivery plan](docs/17-delivery-plan.md). The design covers Rust, Node, Bun, browser and Cloudflare profiles; typed graphs; effects; SQLite and PostgreSQL adapters; security; OpenTelemetry; and Claude Code / skills integrations.
+Read the [architecture index](docs/README.md) and [delivery plan](docs/17-delivery-plan.md). `docs/` is the target architecture: Rust, Node, Bun, browser and Cloudflare profiles; typed graphs; effects; SQLite and PostgreSQL adapters; security; OpenTelemetry. [spec/](spec/README.md) is what `spore` does today, and wins where the two differ. The vocabulary is in [CONTEXT.md](CONTEXT.md). The Claude Code integration is the `ml-workflow` plugin in the `max-skills` repository, specified there.
 
 ## Contract seeds
 
@@ -142,7 +168,7 @@ The [contracts](contracts/README.md) directory includes the reducer and telemetr
 
 ## Evidence
 
-- The kernel gives byte-identical results natively, through Wasmtime, in Node and in Bun: 48 golden traces plus generated corpora. Run `conformance/js/check.sh`.
+- The kernel gives byte-identical results natively, through Wasmtime, in Node and in Bun: 76 golden traces plus generated corpora. Run `conformance/js/check.sh`.
 - The SQLite store passes the adapter-independent conformance suite and a crash test at every store failpoint.
 - The `spore` binary, aborted at each of 19 failpoints and killed at 40 points through a run, recovers: no completed step runs again, and an interrupted `unsafe` step parks the run until an operator resolves it. Run `cargo test -p runspore-cli`.
 

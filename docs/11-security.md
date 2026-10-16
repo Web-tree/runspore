@@ -27,6 +27,8 @@ Wasmtime metering does not meter a blocking host call; adapters need I/O deadlin
 
 ## Approvals and authorization
 
+**Target architecture, not 0.2.** This section describes a multi-user host. `spore` 0.2 has no authorization: its supported setup is one machine, one OS user and one database per checkout, and whoever can write the database file may claim any actor label, signal, resolve, abandon or cancel. An actor label is a filter, not a permission, and an approval in a workflow is a plain signal. File permissions are the boundary, as for git or SQLite ([spec/store.md](../spec/store.md) §3).
+
 An approval record includes authenticated actor, tenant, run and activation, package digest, action binding digest, exact input digest, scope, expiry, nonce, and target external revision where relevant. The broker checks it again immediately before execution and transactionally binds consumption to one logical operation and receipt. Recovery reconciles that same authorized operation; it cannot reuse approval for a different operation. New dispatches recheck revocation and expiry; expired permission permits evidence reconciliation but no new mutation unless policy authorizes it. Changed code, target, arguments, or permission policy invalidates the old approval. A plain graph signal saying approved is not sufficient.
 
 For local tools, use an authenticated Unix socket or equivalent local transport, restrictive file permissions, and CSRF and origin protection if a web UI is added. For remote workers, use authenticated transport, short-lived scoped credentials, per-tenant dispatch identities, and response validation. Generic MCP tool exposure must not allow a model to forge administrative completions or human decisions.

@@ -54,7 +54,7 @@ Discarded early: `rs` and `sp` fail at once (macOS base tool, Debian binary, sev
 
 ## Reasoning
 
-**Why `spore`.** It is five letters, says what the product is, and reads well: `spore run x.json`, `spore status`, `spore signal`. None of Homebrew, Debian, Ubuntu, Arch or Nix installs a `spore` executable, and no oh-my-zsh plugin aliases it (see the table). The registry names are taken, but by stale packages: a 2019 placeholder crate with no bin ([crates.io][cr-spore]), a 2011 npm package with no bin ([npm][npm-spore]), and a PyPI package last uploaded in 2014 ([PyPI][py-spore]; whether it installs a `spore` script was not checked). So publishing as `runspore` with a `spore` binary does not shadow any command found in the sources checked.
+**Why `spore`.** It is five letters, says what the product is, and reads well: `spore run x.json`, `spore status`, `spore signal` (an example from 0.1; `spore` 0.2 runs workflow folders, `spore run coding-loop`). None of Homebrew, Debian, Ubuntu, Arch or Nix installs a `spore` executable, and no oh-my-zsh plugin aliases it (see the table). The registry names are taken, but by stale packages: a 2019 placeholder crate with no bin ([crates.io][cr-spore]), a 2011 npm package with no bin ([npm][npm-spore]), and a PyPI package last uploaded in 2014 ([PyPI][py-spore]; whether it installs a `spore` script was not checked). So publishing as `runspore` with a `spore` binary does not shadow any command found in the sources checked.
 
 **Costs of `spore`.**
 

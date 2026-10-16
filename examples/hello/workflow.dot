@@ -1,0 +1,12 @@
+// Two read-only steps of two seconds each; `shout` gets the output of `greet`.
+digraph "hello" {
+  dialect = "runspore/0.2";
+  start   = "greet";
+
+  greet;
+  shout;
+  done [kind="complete"];
+
+  greet -> shout;
+  shout -> done;
+}

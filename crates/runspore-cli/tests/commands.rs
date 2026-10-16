@@ -343,13 +343,12 @@ fn a_database_from_another_version_is_refused() {
 }
 
 #[test]
-fn every_example_validates_as_a_folder() {
+fn every_example_folder_validates() {
     let dir = Dir::new("examples");
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     for name in ["hello", "review-loop", "unsafe-deploy"] {
-        let text = std::fs::read_to_string(examples.join(format!("{name}.json"))).unwrap();
-        dir.folder(name, &serde_json::from_str(&text).unwrap());
-        let out = dir.run(&["--native-kernel", "validate", name]);
+        let folder = examples.join(name);
+        let out = dir.run(&["--native-kernel", "validate", folder.to_str().unwrap()]);
         assert_eq!(out.code(), Some(0), "{name}: {}", out.stderr);
     }
 }

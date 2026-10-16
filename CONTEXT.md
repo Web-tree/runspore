@@ -11,32 +11,64 @@ A versioned definition of a graph of nodes and the actions bound to them. One wo
 _Avoid_: pipeline, flow, "current workflow" (that is a run)
 
 **Workflow folder**:
-The folder an author writes one workflow in: `workflow.dot`, `settings.json`, and the instruction, asset and schema files the settings name.
-_Avoid_: project, bundle, source tree
+The folder an author writes one workflow in: `workflow.dot`, `settings.json`, and the instruction, asset and schema files the settings name. Instruction files usually sit in `instructions/`; `steps/` is the name of the step-files tree.
+_Avoid_: project, bundle, source tree, package
+
+**DOT dialect**:
+The part of the DOT language `spore` reads in `workflow.dot`, with its own attribute vocabulary and a version (`dialect = "runspore/0.2"`). `spore` parses it itself and never needs Graphviz.
+_Avoid_: DOT format, Graphviz file, "the DOT standard"
+
+**Settings file**:
+`settings.json` in a workflow folder: everything about the workflow except its arrows, such as what each action runs, each node's input and limits, and the paths of the files the workflow declares.
+_Avoid_: bindings file, config, node file (and not the project's `.spore/settings.json`, which holds worker settings)
 
 **Package**:
-The canonical document of one workflow that the kernel runs. Its digest is a run's identity.
-_Avoid_: compiled workflow, "the JSON"
+The canonical JSON document of one workflow that the kernel runs: the graph and its actions in one document. A build makes it from a workflow folder and seals it inside the workflow artifact. Its digest is a run's identity.
+_Avoid_: compiled workflow, "the JSON", container (the manifest and files belong to the artifact, not the package)
 
 **Workflow artifact**:
-The immutable WebAssembly file a build makes from a workflow folder: the package and every file the workflow declares, listed in its manifest. A run records the artifact it was started from and never reads the folder again.
-_Avoid_: bundle, binary, "the wasm" (the kernel is a different component)
+The immutable WebAssembly file a build makes from a workflow folder: the package and every file the workflow declares, listed in its manifest. A run records the artifact it was started from and never reads the folder again. "Artifact" alone means a workflow or composed artifact, never the kernel component; its digest is provenance, the package digest is identity.
+_Avoid_: bundle (in any sense), binary, "the wasm", kernel artifact
 
 **Composed artifact**:
 The workflow artifact and the kernel component nested unchanged in one WebAssembly component that exports both of their interfaces, for a host that can load only one component. `spore build --composed` writes it; `spore` itself reads only its artifact half.
-_Avoid_: kernel+graph wasm, standalone binary, fat artifact, bundle
+_Avoid_: kernel+graph wasm, standalone binary, fat artifact, bundle, graph-embedded component, workflow.wasm
+
+**Kernel component**:
+The one WebAssembly component that holds the kernel. `spore` embeds it, and every host runs the same bytes.
+_Avoid_: kernel artifact, certified artifact, kernel bundle, "the wasm"
 
 **Run**:
 One execution of a workflow, with its own identity and state.
 _Avoid_: workflow instance, job, session
 
+**Run ID**:
+A run's identity, `run_` and 32 random hex digits, made once when the run is created and unique across databases. Every ID the run hands out, effect keys included, is built from it.
+_Avoid_: start key, execution ID
+
 **Start key**:
 The name a caller gives a run so that starting it twice gives back the same run. It names a run only inside one database: the same start key in another database starts a different run.
 _Avoid_: run ID, workflow ID
 
+**Visit**:
+One time the run is at a node; a loop-back makes a new visit. The spec calls it an activation (`node/visit`), and the work one visit of an activity asks for an invocation.
+_Avoid_: attempt, iteration
+
+**Try**:
+One go at a visit's work; a retry is another try of the same visit. The spec calls it an attempt.
+_Avoid_: visit, run
+
+**Retry**:
+Another try of the same visit after a try was lost or failed in a way that may be repeated, with the same effect key, up to the action's `retry.maxAttempts`.
+_Avoid_: loop-back (a new visit), repair (inside one try)
+
 **Effect key**:
 The key a step hands to services outside Runspore so that a repeated try of the step is not carried out twice. Every other visit of the step, in any run and any database, gets a different one.
 _Avoid_: idempotency token, request ID
+
+**Effect class**:
+What a repeat of an action would do, declared on every action: `pure`, `read-only`, `idempotent` (repeated on its own after a lost try) or `unsafe` (waits for a person). `read-only` here is a promise about the action; the CLI's read-only commands (`status`, `list`, `events`, `step show`) are those that create no database, and step files are read-only on disk.
+_Avoid_: side-effect flag
 
 **Worker**:
 The process that moves runs forward: it asks the kernel for each next step, records the decision, and carries out the actions it can perform itself.
@@ -52,7 +84,15 @@ _Avoid_: quarantined (a run's fault, lifted by `release`), stuck, failed
 
 **Driver**:
 Whoever keeps a run moving between steps by running `spore`: a session following the run, a separate process, or an outside agent that visits it. Several may act on one run at once; nothing has to run between their calls.
-_Avoid_: owner, controller, scheduler
+_Avoid_: owner (the store's name for who holds an attempt's lease), controller, scheduler
+
+**Decision**:
+The kernel's answer to one event: the run's next state and the commands to carry out, which the worker records. A person's reply at a waiting node or to a stuck step is an **answer** (a signal or a resolution).
+_Avoid_: "decision" for a person's reply
+
+**Supported setup**:
+One machine, one OS user, one database per checkout. Several machines on one database, two repositories sharing one database on purpose, and other OS users are not supported and not detected. Whoever can write the database file may do anything to its runs: file permissions are the only boundary.
+_Avoid_: multi-user, shared database
 
 **Leftover command**:
 A command still running after the worker that started it has died, so nobody will record its result. Runspore stops it at once, and before the step is tried again.
@@ -75,15 +115,27 @@ The arrow that brought the run into the step it is entering: the step whose resu
 _Avoid_: previous step (the previous visit of the same step), parent
 
 **Loop limit**:
-How many times in a row a step may send the run along one arrow before the run takes that step's exhausted arrow instead. Any other result from the step starts the count again.
+How many times in a row a step may send the run along one arrow before the run takes that step's exhausted arrow instead. Any other result from the step starts the count again. Written as `loopLimits` on the node.
 _Avoid_: retry limit, max attempts, visit limit (the workflow-wide safety net)
+
+**Exhausted arrow**:
+The arrow `<node> -> <target> [on="exhausted"]`: where the run goes when one of the node's loop limits is used up. `exhausted` is a reserved outcome: no action may declare it and no signal can take it.
+_Avoid_: give-up edge, escape edge
+
+**Streak**:
+The kernel's count for one node of which limited outcome it took last and how many times in a row. It is kept in the run state and starts again on any other outcome and after the exhausted arrow.
+_Avoid_: counter, loop variable
+
+**Safety net**:
+The workflow-wide limits, `maxVisitsPerNode` and `maxActivations`. Reaching one fails the run; no arrow can route it.
+_Avoid_: loop limit
 
 **Parent run**:
 The run whose step started another run, from inside that step: a build and the ticket runs it starts. The started run is its **child run**, and records the parent's run and node. `spore list` shows children under their parent.
 _Avoid_: sub-workflow, nested run, caller
 
 **Unfinished run**:
-A run that has not completed, failed or been cancelled. A repository may have several at once. What it needs is one of: working, a signal, a person for a stuck step, an actor to claim its external step, the actor holding that step or the work its async command started, or a release from quarantine. `spore continue` does the next thing it needs, or says what a person must type.
+A run that has not completed, failed or been cancelled. A repository may have several at once. What it needs is one of: working, a signal, a person for a stuck step, an actor to claim its external step, the actor holding that step or the work its async command started, or a release from quarantine; `spore list` shows these as `needs`: `working`, `signal`, `stuck`, `external-ready`, `held`, `quarantined`. `spore continue` does the next thing it needs, or says what a person must type.
 _Avoid_: open run, active run, pending run
 
 **Step description**:
@@ -91,8 +143,8 @@ What `spore step show` prints of the step a run is at, without claiming it: its 
 _Avoid_: manifest (that is the artifact's), step info
 
 **Cancel**:
-Ending an unfinished run on purpose. The run's history is kept, and a step in progress is told to stop.
-_Avoid_: abort (a crash), terminate, drop
+Ending an unfinished run on purpose. The run's history is kept, and a step in progress is told to stop. Like Temporal's terminate, nothing is undone or compensated, and the cancel is recorded on the run, not as a kernel event.
+_Avoid_: abort (a crash), terminate, drop, cancellation request (the target architecture's compensating cancel)
 
 **Input schema**:
 The shape of the input a workflow accepts, declared with the workflow and checked when a run starts.
@@ -118,6 +170,10 @@ _Avoid_: message table, translations
 A concrete change to the author's files that removes a diagnostic, marked safe, needs-review or needs-choice. `spore validate --fix` applies only the safe ones.
 _Avoid_: suggestion, quick fix, autofix
 
+**Decision record**:
+One map ticket's decisions, in `docs/design/` (C02, C03, C06–C17), with rule IDs such as C13 R2 (L locked, R routine). The architecture decisions A01–A12 are in `docs/02` and the freeze decisions M01–M12 in `spec/README.md`.
+_Avoid_: ADR for a C record, "M12 in docs/02"
+
 ### Steps and their actors
 
 **Step**:
@@ -133,8 +189,16 @@ Whoever takes an external step, does its work, and reports the outcome back to t
 _Avoid_: agent (one kind of actor), client, user
 
 **Actor label**:
-A name on an external step saying which kind of actor should take it; Runspore matches it but never interprets it.
+A name on an external action saying which kind of actor should take its steps; Runspore matches it but never interprets it. It is a filter, not a permission: anyone who can write the database may claim any label.
 _Avoid_: queue, assignee, role
+
+**Token**:
+What `spore step claim` returns: the attempt's identity, its owner and its fence. Only its bearer can renew, complete or fail that attempt.
+_Avoid_: handle (the holder's identity), ticket
+
+**Renew**:
+A holder telling the store it is still at work, which extends its lease up to the step's deadline: `spore step renew` for an actor, the store's `heartbeat` for a worker.
+_Avoid_: heartbeat_attempt, ping, keep-alive
 
 **Async action**:
 An action whose result does not come back to the worker that started it, but is reported later through the result channel. Every other action is sync: the worker performs it and waits.
@@ -157,8 +221,8 @@ Whoever a step in progress is waiting on: the worker for a sync action, the acto
 _Avoid_: owner, assignee
 
 **Holder handle**:
-The recorded identity of an async step's holder, such as a process, a session or a pod. Its form belongs to the action; Runspore keeps it without reading it.
-_Avoid_: job ID, token
+The recorded identity of an async step's holder, such as a process, a session or a pod. Its form belongs to the action; Runspore keeps it without reading it. It may hold a PID, but Runspore never stops anything by it; that is the process record's job.
+_Avoid_: job ID, token, process record
 
 **Probe**:
 An action's own check of a holder handle, answering whether the holder is alive, dead, or unknown.
@@ -166,14 +230,18 @@ _Avoid_: healthcheck, ping
 
 **Watch**:
 An action's own wait on a holder handle that ends when the job behind it ends, and may deliver its result.
-_Avoid_: await, poll
+_Avoid_: await, poll, "watching" a run (that is following it)
+
+**Result mode**:
+The command output mode `"output": "result"`, in which the program names the outcome itself: its stdout is `{"outcome", "output"}`.
+_Avoid_: outcome-from-stdout, JSON mode (that is `"output": "json"`)
 
 **Output schema**:
 The shape a step's data must have when the step ends a given way, such as "needs changes" carrying the list of changes. Runspore checks each step's data against it the moment the data arrives; a step with no output schema is not checked.
 _Avoid_: contract, type
 
 **Step files**:
-The read-only copy of the files a step declares (its instructions and its action's files), made from the run's stored workflow, never from the author's folder.
+The read-only copy of the files a step declares (its instructions and its action's files), made from the run's stored workflow, never from the author's folder, under `<database>.files/steps/`.
 _Avoid_: asset dir, bundle, workspace
 
 **Work folder**:
@@ -196,21 +264,59 @@ _Avoid_: signing key (ambiguous with package signing), GPG key
 
 ### Claude Code integration
 
+These terms belong to the integration, which is specified in the `max-skills` repository. The spec in `spec/` never uses them.
+
+**Integration**:
+Everything that lets a person use Runspore from Claude Code: the plugin, with its mod, helper and skills. `spore` knows nothing about it.
+_Avoid_: profile (the map's old word), adapter, `adapter-claude`
+
+**Session**:
+A Claude Code conversation, the person's own or one the integration starts for a step. Elsewhere name the kind: an OS process session (the guard's), a herdr pane. Two programs using one database are drivers, not sessions.
+_Avoid_: session for a driver or a run
+
 **Mod**:
-The Claude Code extension through which a person starts, watches and resumes runs from inside a session.
+The Claude Code extension through which a person starts, follows and resumes runs from inside a session.
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
 
 **Plugin**:
 The Claude Code package, `ml-workflow` in the `max-skills` marketplace, that ships the mod, the authoring interview and the helper. It lives outside this repository.
 _Avoid_: extension, addon
 
+**Sub-skill**:
+One of the plugin's skills, typed as `/ml-workflow:<name>`: `menu`, `start`, `status`, `continue`, `cancel`, `author`.
+_Avoid_: subcommand (a mod command is never namespaced)
+
 **Helper**:
 The plugin's own program, `claude-spore`, which runs Claude steps, checks workflows and hands in answers; `spore` never knows about it.
 _Avoid_: wrapper, shim
 
+**Oldest supported spore**:
+The lowest `spore` version the plugin works with, stated in the plugin and checked against `spore capabilities --json`.
+_Avoid_: pinned version, required version
+
+**Following a run**:
+A session running `spore continue <runId> --wait` in the background and reacting each time it returns. It is the plugin's usual driver; closing the session stops it and the run pauses.
+_Avoid_: watching (a watch waits on a holder handle), attaching
+
+**Coming back**:
+What a person does after their Claude session died: start a new session or resume the old one. Both find the same run state, because the run lives in `spore`'s database, not in the session.
+_Avoid_: recovery, reattach
+
 **Entry menu**:
-What a person sees after typing `/ml-workflow:menu` in their own Claude session: the unfinished runs and what each needs, the workflows to start, and writing a new one.
+What a person sees after typing `/ml-workflow:menu` in their own Claude session: the unfinished runs, each with what it needs and a View, the workflows to start, writing a new one and changing one.
 _Avoid_: dashboard, launcher
+
+**Live view**:
+The plugin's pane showing one run: its drawing, the highlighted file lines and the run's facts (status, node, visit, try, loop count). It changes when the run moves.
+_Avoid_: dashboard, monitor, graph view
+
+**Run line**:
+The one line above the prompt for each run the session follows, with a button that opens the live view.
+_Avoid_: status bar, banner
+
+**Reference loop**:
+The workflow in `examples/coding-loop/`: Claude implements, the tests run, red tests go back to implement at most three times in a row before a person is asked, and a person approves. It is the check the integration and `spore` must both pass, not a sample.
+_Avoid_: demo workflow, example
 
 **Authoring interview**:
 The conversation in the person's own Claude session in which Claude drafts a workflow from their description, corrects it with them, and writes and checks its folder. It also changes an existing workflow.
@@ -242,3 +348,11 @@ _Avoid_: error workflow, exit handler, alert, webhook
 **Repair**:
 Claude fixing its own answer in the same conversation after being told exactly why it does not fit the step's output schema. It happens before Runspore sees the answer, at most twice per try.
 _Avoid_: retry (a new try of the step), loop-back (a new visit)
+
+**Report command**:
+The helper command an interactive step's Claude runs as its last act to hand in its answer. It checks the answer against the step's output schemas and writes the result file only when it fits.
+_Avoid_: result file (what it writes), `step complete` (`spore`'s command for external steps)
+
+**Run facts**:
+What a Claude try reports about itself rather than about the work: cost, turns, duration, tools that were denied. They are kept beside the result, not in it.
+_Avoid_: output, metadata

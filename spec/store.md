@@ -351,6 +351,15 @@ quarantine. Read views show status `cancelled` and the cancel record.
 ## 3. SQLite adapter
 
 - One database file. Several processes on one host may open it at once.
+- **Supported setup (0.2).** One machine, one OS user, one database per checkout.
+  Several machines on one database, two repositories sharing one database on
+  purpose (`--db` or `RUNSPORE_DB`), and processes of another OS user are not
+  supported, and nothing detects them, as for a network filesystem. They share one
+  tenant, so one start-key namespace, and a process record they leave cannot be
+  checked: its attempt expires by lease with `process.unchecked` (host §3).
+- **No authorization (0.2).** Whoever can write the database file may claim any
+  label, signal, resolve, abandon or cancel. File permissions are the boundary, as
+  for git or SQLite itself.
 - `journal_mode = WAL`, `synchronous = FULL`, `foreign_keys = ON`, a busy timeout of at
   least 5 seconds. Never on a network filesystem (documented, not detected).
 - Every mutation runs in `BEGIN IMMEDIATE`. `SQLITE_BUSY` after the timeout maps to

@@ -11,8 +11,8 @@ The abstraction is an Action binding used by a graph node. A binding declares in
 | Native function | Registered Rust or JS callback | Bound to that worker capability |
 | Command | Executable and argv, working directory, limits | OS worker only |
 | HTTP or MCP | Typed remote call with authenticated adapter | Network-capable host or remote worker |
-| Agent or skill | Agent runner plus pinned instruction assets | Agent-capable worker |
-| Human | Durable request and authenticated response | UI or external client |
+| Agent or skill | Not a binding kind in 0.2: an agent step is a `command` (a background step) or an async `command` (an interactive step) that an integration's program runs; "agent" and "skill" are the integration's words, never written in a workflow | OS worker with that program |
+| Human | 0.2: an `await-signal` node, or an `external` action a person claims and reports; neither is authenticated. Target: durable request and authenticated response | CLI, UI or external client |
 | Child workflow | A pinned graph package invocation | Supported store messaging profile |
 
 Static text is an immutable asset or a literal value. Displaying it is a UI action; asking a model to follow it is an agent action; waiting for a person is a human action. A skill is instructions plus a runner and granted tools, not executable behavior on its own. Avoid inventing a text activity that implicitly chooses a model or side effect.
