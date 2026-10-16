@@ -7,12 +7,15 @@ mod common;
 use common::{Dir, BIN};
 use serde_json::{json, Value};
 
+/// The heartbeat renews the lease well before it runs out on a busy machine. No test
+/// here waits for a lease to run out, so the lease is long: a step that starts `spore`
+/// itself can stall the worker's heartbeats past a short one under load.
 const FAST: [&str; 7] = [
     "--native-kernel",
     "--poll-ms",
     "20",
     "--lease-ms",
-    "500",
+    "5000",
     "--heartbeat-ms",
     "100",
 ];
