@@ -9,8 +9,9 @@ use std::sync::Arc;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
-    validate_workflow, ActivityRegistry, Engine, EngineConfig, HostError, NativeRunner, Observer,
-    StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING, FILES_UNWRITABLE,
+    validate_workflow, ActivityRegistry, Engine, EngineConfig, HeldSlot, HostError, NativeRunner,
+    Observer, StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
+    FILES_UNWRITABLE,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::SqliteStore;
@@ -510,7 +511,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         }
         Command::List { unfinished } => list(&engine, &db, *unfinished).await,
         Command::Continue { run_id, wait } => {
-            continue_run(&engine, &db, &cwd, run_id.as_deref(), *wait).await
+            continue_run(&engine, &db, &cwd, run_id.as_deref(), *wait, cli.json).await
         }
         Command::Events { run_id } => events(&engine, run_id).await,
         Command::Signal {
@@ -1249,13 +1250,16 @@ fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output
 /// `spore continue [<runId>] [--wait]` (spec/cli.md, What a run needs): with nothing
 /// unfinished the workflows to start; with several, the runs and exit 2; with one, the
 /// run worked until it parks (with `wait`, until it needs a person or has ended), unless
-/// it is quarantined or finished, then what a person must type.
+/// it is quarantined or finished, then what a person must type. When another worker runs
+/// the run's step, it says so: without `wait` it returns that, with `wait` it prints it
+/// on stderr and waits.
 async fn continue_run(
     engine: &Engine,
     db: &Path,
     cwd: &Path,
     run: Option<&str>,
     wait: bool,
+    json: bool,
 ) -> Result<Output, Fail> {
     let view = match run {
         Some(run) => existing(engine, run).await?,
@@ -1266,7 +1270,23 @@ async fn continue_run(
     };
     let (view, interrupted) = match view::needs(&view, None) {
         Some("quarantined") | None => (view, false),
-        Some(_) => work(engine, &view.key, wait).await?,
+        Some(_) => {
+            let shown = Shown::read(engine, &view).await?;
+            let worker = &engine.config().worker_id;
+            if let Some(slot) = view::elsewhere(&shown, &view.key.run, worker) {
+                if !wait {
+                    return Ok(running_elsewhere(&view, &shown, slot, db));
+                }
+                if json {
+                    let mut object = view::elsewhere_progress_json(slot, shown.now_ms);
+                    object["format"] = json!(FORMAT);
+                    eprintln!("{object}");
+                } else {
+                    eprintln!("{}", view::elsewhere_progress_text(slot, shown.now_ms));
+                }
+            }
+            work(engine, &view.key, wait).await?
+        }
     };
     let shown = Shown::read(engine, &view).await?;
     // A holder that waits for a person: its watch stops with its process group, and the
@@ -1282,6 +1302,22 @@ async fn continue_run(
         out.text = next.text;
     }
     Ok(out)
+}
+
+/// `continue` at a step another worker runs: which worker, its pid and for how long, and
+/// how to follow the run until that worker is done. It works nothing and exits 0.
+fn running_elsewhere(view: &RunView, shown: &Shown, slot: &HeldSlot, db: &Path) -> Output {
+    let mut out = parked(view, shown, db, false);
+    let commands = vec![format!("spore continue {} --wait", view.key.run)];
+    out.text = format!(
+        "{}\n  {}\n",
+        view::elsewhere_text(slot, shown.now_ms),
+        commands[0]
+    );
+    out.json["needs"] = json!("working");
+    out.json["commands"] = json!(commands);
+    out.exit = 0;
+    out
 }
 
 /// `continue` with no unfinished run: the workflows of the project folder to start.

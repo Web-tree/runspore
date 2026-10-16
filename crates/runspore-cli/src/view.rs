@@ -290,6 +290,54 @@ impl Shown {
     }
 }
 
+/// The step of `run` a live worker other than `worker` runs now, if any: `continue`
+/// names it instead of waiting on it in silence (spec/cli.md, What a run needs). A
+/// worker known to be gone runs nothing; its try waits for its lease to run out.
+pub fn elsewhere<'a>(shown: &'a Shown, run: &str, worker: &str) -> Option<&'a HeldSlot> {
+    shown
+        .slots
+        .iter()
+        .find(|slot| slot.key.run == run && slot.worker != worker && !slot.worker_gone())
+}
+
+/// `fix attempt 1 is running on worker <id> (pid <pid>, for 7m35s); waiting for it to
+/// finish`, the pid and the time left out when they are not known.
+pub fn elsewhere_text(slot: &HeldSlot, now_ms: u64) -> String {
+    let mut about = Vec::new();
+    if let Some(pid) = slot.pid {
+        about.push(format!("pid {pid}"));
+    }
+    if let Some(claimed) = slot.claimed_at_ms {
+        about.push(format!(
+            "for {}",
+            duration_text(now_ms.saturating_sub(claimed))
+        ));
+    }
+    let about = match about.is_empty() {
+        true => String::new(),
+        false => format!(" ({})", about.join(", ")),
+    };
+    format!(
+        "{} attempt {} is running on worker {}{about}; waiting for it to finish",
+        slot.node_id, slot.attempt, slot.worker
+    )
+}
+
+/// The line `continue --wait` prints on stderr before it waits on a step another worker
+/// runs, as a progress line (spec/cli.md, Progress).
+pub fn elsewhere_progress_text(slot: &HeldSlot, now_ms: u64) -> String {
+    let line = elsewhere_text(slot, now_ms);
+    format!("{}  {}  {line}", utc_text(now_ms), slot.start_key)
+}
+
+/// `elsewhere_progress_text` as a progress object, change `running-elsewhere`.
+pub fn elsewhere_progress_json(slot: &HeldSlot, now_ms: u64) -> Value {
+    let (_, lasted) = since_json(slot.claimed_at_ms, now_ms);
+    json!({"atMs": now_ms.to_string(), "runId": slot.key.run, "startKey": slot.start_key,
+           "change": "running-elsewhere", "nodeId": slot.node_id, "attempt": slot.attempt,
+           "worker": slot.worker, "pid": slot.pid, "forMs": lasted})
+}
+
 /// Runs as a tree, parents first, each unfinished one with its node and since when it
 /// has stood there (spec/cli.md, `list`); or, `flat`, the unfinished runs alone, newest
 /// first (spec/cli.md, What a run needs).

@@ -176,6 +176,13 @@ fn process_nonce() -> String {
     format!("{:x}-{nanos:x}-{n:x}", std::process::id())
 }
 
+/// The process a default worker ID, `worker-<process nonce>`, was made in; `None` for a
+/// worker ID set otherwise.
+fn worker_pid(worker_id: &str) -> Option<i32> {
+    let nonce = worker_id.strip_prefix("worker-")?;
+    i32::from_str_radix(nonce.split('-').next()?, 16).ok()
+}
+
 /// The result of `start`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartOutcome {

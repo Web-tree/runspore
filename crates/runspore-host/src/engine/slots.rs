@@ -3,8 +3,9 @@
 
 use runspore_types::store::*;
 
-use super::{retry, Engine, PAGE};
+use super::{retry, worker_pid, Engine, PAGE};
 use crate::error::HostError;
+use crate::process;
 
 /// An attempt that takes a worker's slot: claimed by a worker, unfinished, with a lease
 /// that has not run out, at a step that is not external and not held by an async
@@ -21,6 +22,20 @@ pub struct HeldSlot {
     pub claimed_at_ms: Option<u64>,
     /// The leader of the process group its program runs in, once it has started.
     pub pid: Option<i32>,
+    /// The process record of its program, once it has started.
+    pub process: Option<ProcessRecord>,
+}
+
+impl HeldSlot {
+    /// Whether the worker that claimed it is known to be gone though its lease has not
+    /// run out yet: it ran on this machine, and its process no longer runs. Its try is
+    /// then left to lease expiry (spec/cli.md, Coming back after a kill).
+    pub fn worker_gone(&self) -> bool {
+        match (&self.process, worker_pid(&self.worker)) {
+            (Some(record), Some(pid)) => process::starter_gone(record, pid),
+            _ => false,
+        }
+    }
 }
 
 impl Engine {
@@ -61,7 +76,8 @@ impl Engine {
                         attempt: invocation.attempt_number,
                         worker,
                         claimed_at_ms: invocation.claimed_at_ms,
-                        pid: invocation.process.map(|p| p.pgid),
+                        pid: invocation.process.as_ref().map(|p| p.pgid),
+                        process: invocation.process,
                     });
                 }
             }
@@ -70,5 +86,39 @@ impl Engine {
                 return Ok(held);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot(worker: &str) -> HeldSlot {
+        let record = process::record(std::process::id() as i32).unwrap();
+        HeldSlot {
+            key: RunKey {
+                tenant: "t".into(),
+                run: "run_1".into(),
+            },
+            start_key: "k".into(),
+            node_id: "fix".into(),
+            invocation_id: "inv_1".into(),
+            attempt: 1,
+            worker: worker.into(),
+            claimed_at_ms: None,
+            pid: Some(record.pgid),
+            process: Some(record),
+        }
+    }
+
+    #[test]
+    fn a_worker_on_this_machine_whose_process_is_gone_is_gone() {
+        let me = format!("worker-{:x}-1-0", std::process::id());
+        assert!(!slot(&me).worker_gone());
+        assert!(slot(&format!("worker-{:x}-1-0", i32::MAX)).worker_gone());
+        assert!(
+            !slot("reviewer").worker_gone(),
+            "an ID that names no process"
+        );
     }
 }
