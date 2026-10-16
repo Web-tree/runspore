@@ -202,6 +202,29 @@ fn continue_works_the_one_run_and_prints_the_signal_to_send() {
 }
 
 #[test]
+fn continue_works_only_its_run_and_spends_no_try_of_another() {
+    let dir = Dir::new("continue-only-its-run");
+    let ran = dir.file("ran.log");
+    let line = format!("echo \"$RUNSPORE_RUN_ID\" >> '{}'", ran.display());
+    loop_folder(&dir.file("loop"), json!(["sh", "-c", line]));
+    let other = start(&dir, "loop", "other");
+    let mine = start(&dir, "loop", "mine");
+    let out = dir.run(&args(&["continue", &mine]));
+    assert_eq!(out.code(), Some(3), "{}", out.stderr);
+    assert!(!out.stderr.contains("other"), "{}", out.stderr);
+    assert_eq!(std::fs::read_to_string(&ran).unwrap(), format!("{mine}\n"));
+    let (_, status) = json(&dir, &["status", &other, "--no-probe"]);
+    assert_eq!(status["status"], "created", "{status}");
+
+    let (code, out) = json(&dir, &["continue", &other]);
+    assert_eq!(code, Some(3), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        format!("{mine}\n{other}\n")
+    );
+}
+
+#[test]
 fn continue_at_a_stuck_step_prints_the_three_resolve_forms() {
     let dir = Dir::new("continue-stuck");
     loop_folder(&dir.file("loop"), json!(["false"]));

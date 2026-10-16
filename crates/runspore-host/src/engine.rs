@@ -1143,6 +1143,12 @@ impl Engine {
     /// One bounded pass: sweep expired leases, coordinate ready runs, dispatch due
     /// invocations. Never waits for an activity.
     pub async fn tick(&self) -> Result<TickReport, HostError> {
+        self.tick_for(None).await
+    }
+
+    /// `tick`, coordinating and dispatching only `only` when it names a run: the sweep
+    /// still covers every run, but no other run takes a turn or has an attempt claimed.
+    async fn tick_for(&self, only: Option<&RunKey>) -> Result<TickReport, HostError> {
         let inner = &self.inner;
         let mut report = TickReport::default();
         inner.reap();
@@ -1159,7 +1165,9 @@ impl Engine {
         loop {
             let page = retry(false, || inner.store.scan_ready(cursor.clone(), PAGE)).await?;
             for key in &page.items {
-                inner.coordinate(key, &mut report).await?;
+                if only.is_none_or(|only| only == key) {
+                    inner.coordinate(key, &mut report).await?;
+                }
             }
             cursor = page.next;
             if cursor.is_none() {
@@ -1174,6 +1182,9 @@ impl Engine {
                 break;
             }
             if let DueItem::Outbox { key, invocation_id } = item {
+                if only.is_some_and(|only| only != &key) {
+                    continue;
+                }
                 match Inner::dispatch(inner, key, invocation_id).await? {
                     Dispatched::Started => report.dispatched += 1,
                     Dispatched::Quarantined => report.quarantined += 1,
@@ -1231,7 +1242,8 @@ impl Engine {
     /// Ticks until the run is terminal, `waiting`, `needs-intervention` or quarantined,
     /// or waits at an async step this engine does not watch (or whose watch says that
     /// its holder waits for a person), with no pending event and nothing of it in
-    /// flight.
+    /// flight. It works only this run, so returning leaves no other run's attempt
+    /// claimed and cut off when the caller exits.
     pub async fn run_until_parked(&self, key: &RunKey) -> Result<RunView, HostError> {
         self.until(key, false).await
     }
@@ -1247,7 +1259,7 @@ impl Engine {
     async fn until(&self, key: &RunKey, follow: bool) -> Result<RunView, HostError> {
         let inner = &self.inner;
         loop {
-            let report = self.tick().await?;
+            let report = self.tick_for(Some(key)).await?;
             let busy = lock(&inner.inflight).iter().any(|(k, _)| k == key);
             let view = self.get_run(key).await?.ok_or_else(|| {
                 HostError::invalid("run.not-found", format!("run {} does not exist", key.run))
