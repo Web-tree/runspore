@@ -379,7 +379,9 @@ async fn q07_a_version_2_file_is_upgraded() {
     )
     .unwrap();
     drop(conn);
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!((kept.revision, kept.base_dir), (0, None));
@@ -481,7 +483,9 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     assert_eq!(
         store.writer().unwrap().as_deref(),
@@ -516,7 +520,9 @@ async fn q10_a_version_5_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let shown = store
         .list_invocations(&attempt.key)
@@ -584,7 +590,9 @@ async fn q12_a_version_6_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store
         .claim_attempt(claim(&old, "claim", &scheduled, "w", 100))
@@ -637,7 +645,9 @@ async fn q13_a_version_7_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!((kept.revision, kept.parent), (0, None));
@@ -673,7 +683,9 @@ async fn q14_a_version_8_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let shown = store
         .list_invocations(&attempt.key)
@@ -726,7 +738,9 @@ async fn q15_a_version_9_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert!(kept.result_channels.is_empty());
@@ -757,7 +771,9 @@ async fn q16_a_version_10_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_200)).unwrap().0;
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_200))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store
         .get_run(&attempt.key)
@@ -904,7 +920,11 @@ async fn q18_an_older_file_is_not_upgraded_by_opening_it() {
         runspore_store_sqlite::WRITER,
         "spore migrate",
     ] {
-        assert!(error.message.contains(wanted), "{wanted}: {}", error.message);
+        assert!(
+            error.message.contains(wanted),
+            "{wanted}: {}",
+            error.message
+        );
     }
     assert_eq!(user_version(&path), 11, "the file is left as it was");
     assert_eq!(tables(&path), before);
@@ -968,7 +988,11 @@ async fn q19_migrate_waits_for_the_older_workers() {
         (StoreFailureKind::Unavailable, "migrate.workers-live")
     );
     for wanted in ["worker worker-old", "step build of run busy", "older spore"] {
-        assert!(error.message.contains(wanted), "{wanted}: {}", error.message);
+        assert!(
+            error.message.contains(wanted),
+            "{wanted}: {}",
+            error.message
+        );
     }
     assert!(!error.message.contains("actor-ab"), "{}", error.message);
     assert_eq!(user_version(&path), 11, "the file is left as it was");

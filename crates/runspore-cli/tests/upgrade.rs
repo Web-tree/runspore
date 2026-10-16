@@ -149,7 +149,13 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
     // older spore wrote it.
     for command in [
         vec!["status", gate_run.as_str()],
-        vec!["signal", gate_run.as_str(), "approval", "--outcome", "approved"],
+        vec![
+            "signal",
+            gate_run.as_str(),
+            "approval",
+            "--outcome",
+            "approved",
+        ],
         vec!["--migrate", "list"],
     ] {
         let (code, refused) = json(&dir, &command);
@@ -358,7 +364,9 @@ fn migrate_waits_for_the_workers_of_the_older_spore() {
     assert_eq!(user_version(&sql(&dir)), SCHEMA_VERSION);
 
     let again = worker(&dir);
-    wait_for("the new worker to record itself", || workers(&dir).len() == 1);
+    wait_for("the new worker to record itself", || {
+        workers(&dir).len() == 1
+    });
     stop(again);
     assert_eq!(workers(&dir), [], "a stopped worker removes its record");
 }

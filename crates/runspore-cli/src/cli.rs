@@ -1116,7 +1116,10 @@ fn migrate(database: &project::Database) -> Result<Output, Fail> {
     if !db.exists() {
         return Err(Fail::usage(
             "db.not-found",
-            format!("{} does not exist: there is nothing to migrate", db.display()),
+            format!(
+                "{} does not exist: there is nothing to migrate",
+                db.display()
+            ),
         ));
     }
     project::before_write(database)?;

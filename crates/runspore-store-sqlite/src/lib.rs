@@ -708,7 +708,8 @@ impl SqliteStore {
             .map_err(db)?;
             tx.commit().map_err(db)
         })();
-        conn.pragma_update(None, "synchronous", "FULL").map_err(db)?;
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(db)?;
         beat
     }
 
