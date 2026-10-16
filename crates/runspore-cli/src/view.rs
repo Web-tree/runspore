@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use runspore_host::disk::DiskFull;
 use runspore_host::progress::{Change, Happened, Progress};
 use runspore_host::Cancelled;
 use runspore_host::{Arrival, Arrow, AsyncStep, HeldSlot, StepState};
@@ -136,6 +137,8 @@ pub struct Shown {
     pub children: Tree,
     pub slots: Vec<HeldSlot>,
     pub slot_limit: usize,
+    /// The worker's disk when it is under the floor: no step is taken.
+    pub paused: Option<DiskFull>,
     pub now_ms: u64,
 }
 
@@ -145,11 +148,14 @@ impl Shown {
         let mut json = status_json(view, self);
         json["step"] = step_json(self.step.as_ref());
         json["children"] = self.children.json();
+        json["paused"] = paused_json(self.paused_for(view));
         json
     }
 
     pub fn text(&self, view: &RunView) -> String {
-        let mut text = status_text(view, self) + &step_text(self.step.as_ref());
+        let mut text = paused_text(self.paused_for(view))
+            + &status_text(view, self)
+            + &step_text(self.step.as_ref());
         if !self.children.rows.is_empty() {
             text += "children\n";
             text += &self.children.text(1, self.now_ms);
@@ -157,6 +163,29 @@ impl Shown {
         }
         text
     }
+}
+
+impl Shown {
+    /// The pause, for a run that waits for a worker to take its step.
+    fn paused_for(&self, view: &RunView) -> Option<&DiskFull> {
+        let working = needs(view, self.step.as_ref()) == Some("working");
+        self.paused.as_ref().filter(|_| working)
+    }
+}
+
+/// The `paused` object of `status` and `list` while the worker's disk is under its
+/// floor, else null (spec/cli.md, A full disk).
+pub fn paused_json(paused: Option<&DiskFull>) -> Value {
+    paused.map_or(Value::Null, |full| {
+        json!({"reason": "disk-full", "message": full.to_string(),
+               "freeBytes": full.free.to_string(), "floorBytes": full.floor.to_string(),
+               "mount": full.mount})
+    })
+}
+
+/// `paused: disk full (312 MiB free on /)` as a line, or nothing.
+pub fn paused_text(paused: Option<&DiskFull>) -> String {
+    paused.map_or_else(String::new, |full| format!("paused: {full}\n"))
 }
 
 /// What `continue` prints once it has worked a run: what the run needs, the commands a
@@ -1317,6 +1346,14 @@ pub fn progress_text(progress: &Progress) -> String {
             format!("failed{at}: {code}: {message}")
         }
         Change::Quarantined { code, details } => format!("quarantined: {code}: {details}"),
+        Change::Paused {
+            node_id: Some(node),
+            reason,
+        } => format!("paused at {node}: {reason}"),
+        Change::Paused {
+            node_id: None,
+            reason,
+        } => format!("paused: {reason}"),
     };
     format!(
         "{}  {}  {change}",
@@ -1354,6 +1391,7 @@ pub fn progress_json(progress: &Progress) -> Value {
             message,
         } => json!({"nodeId": node_id, "error": {"code": code, "message": message}}),
         Change::Quarantined { code, details } => json!({"code": code, "details": details}),
+        Change::Paused { node_id, reason } => json!({"nodeId": node_id, "reason": reason}),
     };
     json["atMs"] = json!(progress.at_ms.to_string());
     json["runId"] = json!(progress.key.run);

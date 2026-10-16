@@ -163,7 +163,9 @@ struct Held {
 fn unmade(unmade: Unmade) -> HostError {
     match unmade {
         Unmade::Unreadable(details) => HostError::invalid(ARTIFACT_UNREADABLE, details),
-        Unmade::Unwritable(details) => HostError::invalid(FILES_UNWRITABLE, details),
+        Unmade::Unwritable(details) | Unmade::DiskFull(details) => {
+            HostError::invalid(FILES_UNWRITABLE, details)
+        }
         Unmade::DirMissing => HostError::invalid(
             FILES_DIR_MISSING,
             "the run's workflow declares files, and the engine has no files_dir",

@@ -65,11 +65,19 @@ pub enum Change {
     },
     /// The worker quarantined the run.
     Quarantined { code: String, details: String },
+    /// The worker takes no new step of the run while its disk is full, and set aside
+    /// the try at `node_id` that ended on it; `reason` reads `disk full (<free> free on
+    /// <mount>)` (spec/host.md §2, Disk pressure). Not a committed change: no event
+    /// records it.
+    Paused {
+        node_id: Option<String>,
+        reason: String,
+    },
 }
 
 impl Change {
     /// The change's name in JSON: `step-started`, `try-failed`, `outcome`, `waiting`,
-    /// `needs-intervention`, `completed`, `failed` or `quarantined`.
+    /// `needs-intervention`, `completed`, `failed`, `quarantined` or `paused`.
     pub fn name(&self) -> &'static str {
         match self {
             Change::StepStarted { .. } => "step-started",
@@ -80,6 +88,7 @@ impl Change {
             Change::Completed { .. } => "completed",
             Change::Failed { .. } => "failed",
             Change::Quarantined { .. } => "quarantined",
+            Change::Paused { .. } => "paused",
         }
     }
 }

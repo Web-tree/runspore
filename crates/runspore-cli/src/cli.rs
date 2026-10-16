@@ -823,7 +823,7 @@ fn explain(code: Option<&str>) -> Result<Output, Fail> {
 /// and leaves no file behind.
 fn missing_database(command: &Command, db: &Path, cwd: &Path) -> Result<Output, Fail> {
     match command {
-        Command::List { .. } => done(json!({"db": db, "runs": []}), String::new()),
+        Command::List { .. } => done(json!({"db": db, "paused": null, "runs": []}), String::new()),
         Command::Continue { run_id: None, .. } => Ok(nothing_to_continue(cwd)),
         Command::Step(StepCommand::Show { run_id: None }) => Err(none_unfinished("step show")),
         Command::Status { run_id, .. }
@@ -1004,6 +1004,9 @@ fn engine(
     config.stop_grace_ms = cli.stop_grace_ms.unwrap_or(config.stop_grace_ms);
     config.max_watches = cli.max_watches.unwrap_or(config.max_watches);
     config.max_concurrent_activities = settings.slots.unwrap_or(config.max_concurrent_activities);
+    if let Some(mb) = settings.disk_floor_mb {
+        config.disk_floor = mb.saturating_mul(1 << 20);
+    }
     Ok(Engine::new(
         Arc::new(store),
         reducer(cli)?,
@@ -1389,6 +1392,7 @@ impl Shown {
             children: read_tree(engine, runs, Some(&view.key.run)).await?,
             slots: engine.held_slots(now).await?,
             slot_limit: engine.config().max_concurrent_activities,
+            paused: engine.disk_full(),
             now_ms: now,
         })
     }
@@ -1764,9 +1768,10 @@ async fn list(engine: &Engine, db: &Path, unfinished_only: bool) -> Result<Outpu
     } else {
         read_tree(engine, all_runs(engine).await?, None).await?
     };
+    let paused = engine.disk_full();
     done(
-        json!({"db": db, "runs": tree.json()}),
-        tree.text(0, now_ms()),
+        json!({"db": db, "paused": view::paused_json(paused.as_ref()), "runs": tree.json()}),
+        view::paused_text(paused.as_ref()) + &tree.text(0, now_ms()),
     )
 }
 

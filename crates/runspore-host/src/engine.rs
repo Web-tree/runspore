@@ -27,6 +27,7 @@ use tokio::task::JoinSet;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::arrival::{Arrival, Trail};
+use crate::disk::{self, Disk};
 use crate::error::{HostError, Unrouted};
 use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
@@ -37,10 +38,12 @@ use crate::progress::{self, Change, Happened, Progress};
 mod cancel;
 mod held;
 mod intervention;
+mod pressure;
 mod slots;
 mod steps;
 
 pub use cancel::{Cancelled, Stopped};
+pub use pressure::DISK_FULL;
 pub use slots::HeldSlot;
 pub use steps::{AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState};
 
@@ -89,6 +92,11 @@ pub struct EngineConfig {
     /// Watches of held async attempts the engine runs at once, apart from
     /// `max_concurrent_activities`.
     pub max_watches: usize,
+    /// Free bytes the disk of `files_dir` (else `base_dir`) must keep for a step to be
+    /// claimed; 0 never pauses.
+    pub disk_floor: u64,
+    /// How that disk's free space is read.
+    pub disk: Disk,
 }
 
 impl Default for EngineConfig {
@@ -111,6 +119,8 @@ impl Default for EngineConfig {
             files_dir: None,
             parent: None,
             max_watches: 16,
+            disk_floor: disk::DEFAULT_FLOOR,
+            disk: Disk::system(),
         }
     }
 }
@@ -359,6 +369,8 @@ struct Inner {
     observer: OnceLock<Observer>,
     /// The start key of each run the observer was told about.
     start_keys: Mutex<HashMap<RunKey, String>>,
+    /// Runs told that a step of theirs waits for disk space, until one is taken again.
+    paused: Mutex<HashSet<RunKey>>,
 }
 
 /// What `Engine::observe` calls with each change of a run, in commit order.
@@ -710,6 +722,7 @@ impl Engine {
                 shutdown,
                 observer: OnceLock::new(),
                 start_keys: Mutex::new(HashMap::new()),
+                paused: Mutex::new(HashSet::new()),
             }),
         }
     }
@@ -1614,6 +1627,12 @@ impl Inner {
         if this.left_alone(&key, &invocation_id).await {
             return Ok(Dispatched::Not);
         }
+        // On a full disk no new step is taken (spec/host.md §2, Disk pressure).
+        if let Some(full) = this.disk_full() {
+            this.held_back(&key, None, &full).await;
+            return Ok(Dispatched::Not);
+        }
+        this.unpaused(&key);
         let delivery = match this.deliver(&key, &invocation_id).await? {
             Ok(delivery) => delivery,
             Err(Undeliverable::Quarantined) => return Ok(Dispatched::Quarantined),
@@ -1786,8 +1805,19 @@ impl Inner {
         view: &RunView,
         unmade: Unmade,
     ) -> Result<Undeliverable, HostError> {
+        // A disk that filled since the check before is no fault of the run's.
+        let full = match &unmade {
+            Unmade::DiskFull(_) | Unmade::Unwritable(_) => self.disk_full(),
+            _ => None,
+        };
+        if let Some(full) = full {
+            self.held_back(&view.key, None, &full).await;
+            return Ok(Undeliverable::Skip);
+        }
         let (code, details) = match unmade {
             Unmade::Unreadable(details) => (ARTIFACT_UNREADABLE, details),
+            // Out of space with free space above the floor, such as out of inodes.
+            Unmade::DiskFull(details) => (FILES_UNWRITABLE, details),
             Unmade::Unwritable(details) => (FILES_UNWRITABLE, details),
             Unmade::DirMissing => (
                 FILES_DIR_MISSING,
@@ -1974,27 +2004,46 @@ impl Inner {
                             .map_err(|e| e.to_string())
                     })
                 });
-                let run = runner.run(&ctx, &action, &input);
-                tokio::pin!(run);
                 let period = Duration::from_millis(self.config.heartbeat_ms.max(1));
                 let mut beat =
                     tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                 let mut shutdown = self.shutdown.subscribe();
                 let output = loop {
-                    tokio::select! {
-                        output = &mut run => break output,
-                        _ = beat.tick(), if !lost => {
-                            if let Err(f) = self.heartbeat(&attempt).await {
-                                if f.kind == StoreFailureKind::Stale {
-                                    lost = true;
-                                    stop.send_replace(true);
+                    let run = runner.run(&ctx, &action, &input);
+                    tokio::pin!(run);
+                    let output = loop {
+                        tokio::select! {
+                            output = &mut run => break output,
+                            _ = beat.tick(), if !lost => {
+                                if let Err(f) = self.heartbeat(&attempt).await {
+                                    if f.kind == StoreFailureKind::Stale {
+                                        lost = true;
+                                        stop.send_replace(true);
+                                    }
                                 }
                             }
+                            () = async { let _ = shutdown.wait_for(|s| *s).await; }, if !stopping => {
+                                stopping = true;
+                                stop.send_replace(true);
+                            }
                         }
-                        () = async { let _ = shutdown.wait_for(|s| *s).await; }, if !stopping => {
-                            stopping = true;
-                            stop.send_replace(true);
-                        }
+                    };
+                    // A try that ended on a full disk is not counted (spec/host.md §2,
+                    // Disk pressure): a repeatable one runs again in the same attempt
+                    // once there is space; an unsafe one is reported unknown.
+                    if lost || stopping || matches!(output, ActivityOutput::Held { .. }) {
+                        break output;
+                    }
+                    let Some(full) = self.disk_full() else {
+                        break output;
+                    };
+                    self.held_back(&attempt.key, Some(&claim.node_id), &full)
+                        .await;
+                    if !pressure::repeatable(&action) {
+                        break pressure::unknown(&full);
+                    }
+                    if !self.await_space(&attempt, &mut beat, &mut shutdown).await {
+                        return;
                     }
                 };
                 action_run = Some(action.clone());
