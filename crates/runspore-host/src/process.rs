@@ -100,18 +100,60 @@ pub async fn settle(record: &ProcessRecord, grace: Duration) -> Leftover {
     }
 }
 
+/// What a look at a process record from this machine finds, stopping nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seen {
+    /// The recorded group runs here.
+    Running,
+    /// No process of the recorded group runs here any more.
+    Gone,
+    /// The record is of this machine before it last booted.
+    Rebooted,
+    /// The record cannot be checked from here: another host, or members that cannot be
+    /// read.
+    Unchecked,
+}
+
+/// Looks whether the group `record` names still runs, as the check before a lease
+/// expiry does, its leader checked with its start time and not by the number alone.
+pub fn look(record: &ProcessRecord) -> Seen {
+    let Ok(machine) = machine() else {
+        return Seen::Unchecked;
+    };
+    if record.host != machine.host {
+        return Seen::Unchecked;
+    }
+    if record.boot != machine.boot {
+        return Seen::Rebooted;
+    }
+    let Ok(started) = record.started.parse::<u64>() else {
+        return Seen::Unchecked;
+    };
+    match ours(record.pgid, started) {
+        Some(true) => Seen::Running,
+        Some(false) => Seen::Gone,
+        None => Seen::Unchecked,
+    }
+}
+
 /// Whether process `pid`, which started the group `record` names, is known to be gone:
 /// the record is of this machine, and the machine has booted since or no process `pid`
 /// runs. False when that cannot be told from here.
 pub fn starter_gone(record: &ProcessRecord, pid: i32) -> bool {
-    let Ok(machine) = machine() else {
-        return false;
-    };
+    starter_runs(record, pid) == Some(false)
+}
+
+/// Whether process `pid`, which started the group `record` names, still runs; `None`
+/// when that cannot be told from here (another host).
+pub fn starter_runs(record: &ProcessRecord, pid: i32) -> Option<bool> {
+    let machine = machine().ok()?;
     if record.host != machine.host {
-        return false;
+        return None;
     }
-    record.boot != machine.boot
-        || nix::sys::signal::kill(Pid::from_raw(pid), None) == Err(Errno::ESRCH)
+    Some(
+        record.boot == machine.boot
+            && nix::sys::signal::kill(Pid::from_raw(pid), None) != Err(Errno::ESRCH),
+    )
 }
 
 /// Whether the group `pgid` running now is the one recorded with start time
@@ -326,6 +368,33 @@ mod tests {
         assert_eq!(killpg(Pid::from_raw(pid), None), Err(Errno::ESRCH));
         let _ = reaper.join();
     }
+
+    #[test]
+    fn a_look_tells_a_running_group_from_a_gone_one() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let record = here(pid, os::start_time(pid).unwrap());
+        assert_eq!(look(&record), Seen::Running);
+        assert_eq!(
+            look(&here(pid, os::start_time(pid).unwrap() + 1)),
+            Seen::Gone,
+            "a leader that started later is someone else's"
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(look(&record), Seen::Gone);
+        let mut rebooted = record.clone();
+        rebooted.boot = "another-boot".into();
+        assert_eq!(look(&rebooted), Seen::Rebooted);
+        let mut elsewhere = record;
+        elsewhere.host = format!("{}-elsewhere", elsewhere.host);
+        assert_eq!(look(&elsewhere), Seen::Unchecked);
+    }
+
     /// Linux only: a container whose first process does not reap leaves zombies for
     /// good. On macOS `launchd` reaps a dead leftover at once.
     #[cfg(target_os = "linux")]

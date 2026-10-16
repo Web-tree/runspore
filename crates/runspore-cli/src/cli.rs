@@ -1513,11 +1513,17 @@ async fn read_tree(
         .collect();
     let mut names = HashMap::new();
     let mut rows = Vec::new();
+    let now = now_ms();
     for (run, depth) in view::tree(&runs, root) {
         let (node_id, since_ms) = whereabouts(engine, run).await?;
         let step = engine.async_step(run).await?;
         let child_unfinished = waited_on.contains(run.key.run.as_str());
-        let needs = view::needs_below(run, step.as_ref(), child_unfinished);
+        let mut needs = view::needs_below(run, step.as_ref(), child_unfinished);
+        if needs == Some("working") && step.is_none() {
+            let invocations = engine.list_invocations(&run.key).await?;
+            let cut_off = view::cut_off_of(run, &invocations, now);
+            needs = view::needs_driver(needs, cut_off.as_ref());
+        }
         let actor = step
             .filter(|_| matches!(needs, Some("external-ready" | "held")))
             .and_then(|s| s.actor);
