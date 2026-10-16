@@ -193,6 +193,29 @@ fn unsafe_step_needs_intervention_and_resolve_is_idempotent() {
     assert_eq!(dir.effects().len(), 1);
 }
 
+/// An `idempotent` step that sets no `retry` still runs again after its worker is
+/// killed mid-try: the build gives it three tries (spec/dot.md §4).
+#[test]
+fn idempotent_step_with_no_retry_reruns_after_a_kill() {
+    let dir = Dir::new("default-retry");
+    let mut flow = flow("5", "idempotent");
+    flow["actions"]["work"]
+        .as_object_mut()
+        .unwrap()
+        .remove("retry");
+    dir.folder("flow", &flow);
+    let mut child = dir.spawn(&args(&["run", "flow", "--key", "d"]));
+    while dir.effects().is_empty() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let out = dir.run(&args(&["--json", "run", "flow", "--key", "d"]));
+    assert_eq!(out.code(), Some(3), "{}", out.stderr);
+    assert_eq!(out.json()["position"]["activationId"], "approve/1");
+    assert_eq!(dir.effects().len(), 2);
+}
+
 /// spore 0.2 reads no JSON workflow document (spec/cli.md): `validate`, `start` and
 /// `run` refuse one with exit 2 and say that a workflow is a folder, and nothing is
 /// created.

@@ -52,6 +52,9 @@ const ACTION_ROOTS: [&str; 4] = ["input", "params", "run", "step"];
 const ON_INTERVENTION_ROOTS: [&str; 3] = ["input", "nodes", "run"];
 /// An external action's `async.timeoutMs` when it gives none (spec/host.md §2).
 const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
+/// The tries a repeatable action gets when it sets no `retry.maxAttempts`, so a try
+/// lost to a crash runs again on its own, as Temporal's default retry policy does.
+const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 /// Characters a shell would treat specially: a command line holding one is not
 /// split into words safely.
 const SHELL: &[char] = &[
@@ -1810,6 +1813,7 @@ impl<'a> Checks<'a> {
         for action in actions.values_mut() {
             if let Some(action) = action.as_object_mut() {
                 action.remove("assets");
+                default_retry(action);
             }
         }
         let nodes = self.value.get("nodes").and_then(Value::as_object);
@@ -1880,6 +1884,25 @@ impl<'a> Checks<'a> {
             package.insert(ON_INTERVENTION.into(), hook.clone());
         }
         Value::Object(package)
+    }
+}
+
+/// Gives an action whose effect is repeatable and that sets no `retry.maxAttempts`
+/// [`DEFAULT_MAX_ATTEMPTS`] in the package (spec/dot.md §4). An `unsafe` action keeps
+/// the kernel's one try.
+fn default_retry(action: &mut Map<String, Value>) {
+    let repeatable = matches!(
+        action.get("effect").and_then(Value::as_str),
+        Some("pure" | "read-only" | "idempotent")
+    );
+    if !repeatable {
+        return;
+    }
+    let retry = action.entry("retry").or_insert_with(|| json!({}));
+    if let Some(retry) = retry.as_object_mut() {
+        retry
+            .entry("maxAttempts")
+            .or_insert_with(|| json!(DEFAULT_MAX_ATTEMPTS));
     }
 }
 

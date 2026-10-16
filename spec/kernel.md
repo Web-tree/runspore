@@ -94,7 +94,9 @@ bytes are the package; `digest::package` of them is the package digest.
 ```
 
 From an action the kernel reads `outcomes` (default `["ok"]`), `effect` (required), and
-`retry` (default one attempt). It ignores every other action field.
+`retry` (default one attempt). It ignores every other action field. A package built
+from a workflow folder states three attempts for a repeatable action that sets none
+([dot.md](dot.md) §4).
 
 ### Validation
 

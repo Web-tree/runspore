@@ -318,7 +318,9 @@ pub enum Output {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Retry {
-    /// Tries in all, the first included. Default 1.
+    /// Tries in all, the first included. Default 3 when the effect is `pure`,
+    /// `read-only` or `idempotent`, so a try lost to a crash runs again; 1 when it is
+    /// `unsafe`.
     #[serde(default)]
     #[schemars(with = "u32", range(min = 1, max = 100))]
     pub max_attempts: Option<u32>,

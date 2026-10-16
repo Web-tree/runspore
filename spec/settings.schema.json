@@ -380,7 +380,7 @@
           "description": "The wait before the second try, doubled for each one after, in milliseconds."
         },
         "maxAttempts": {
-          "description": "Tries in all, the first included. Default 1.",
+          "description": "Tries in all, the first included. Default 3 when the effect is `pure`,\n`read-only` or `idempotent`, so a try lost to a crash runs again; 1 when it is\n`unsafe`.",
           "format": "uint32",
           "maximum": 100,
           "minimum": 1,
