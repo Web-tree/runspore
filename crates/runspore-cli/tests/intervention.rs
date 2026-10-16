@@ -17,7 +17,7 @@ const DOT: &str = r#"digraph "told" {
 }
 "#;
 
-/// `work` always fails; `tell` writes its stdin to `told.json` and its argument and
+/// `work` always fails, on its one try; `tell` writes its stdin to `told.json` and its argument and
 /// node to `told.args`, then fails while the file `broken` exists.
 fn folder(name: &str) -> Dir {
     let dir = Dir::new(name);
@@ -28,7 +28,7 @@ fn folder(name: &str) -> Dir {
     let settings = json!({
         "format": "runspore.workflow/0.2",
         "actions": {
-            "work": {"kind": "command", "effect": "idempotent",
+            "work": {"kind": "command", "effect": "idempotent", "retry": {"maxAttempts": 1},
                      "argv": ["/bin/sh", "-c", "echo no luck >&2; exit 3"]},
             "tell": {"kind": "command", "effect": "unsafe",
                      "argv": ["/bin/sh", "-c", tell, "tell", {"$get": ["params", "issue"]}]}

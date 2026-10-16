@@ -115,8 +115,14 @@ against the same schema whether or not it does. An action takes only the fields 
 schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, and per kind: for
 `command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
 `native`, `function`; for `external` (0.2), `actor` and `async`), so a misspelt field
-is a problem rather than ignored. `async` takes `timeoutMs` and `leaseMs`, positive
-decimal strings, and `probe`, `watch`, `stop` and `channels`; an action's `leaseMs`
+is a problem rather than ignored. An action whose `effect` is `pure`, `read-only` or
+`idempotent` and that sets no `retry.maxAttempts` gets `"maxAttempts": 3` in the
+package, so a try lost to a crash runs again on its own, as Temporal's default retry
+policy retries an activity that sets none; an `unsafe` action keeps the kernel's
+default of one try (kernel.md §2), and `"maxAttempts": 1` asks for one try. As in
+the kernel, the same tries also cover a retryable failure, such as a command's exit
+code that `exitOutcomes` does not list (kernel.md §7.3). `async` takes `timeoutMs` and
+`leaseMs`, positive decimal strings, and `probe`, `watch`, `stop` and `channels`; an action's `leaseMs`
 must be smaller than its `timeoutMs` (default `"3600000"`), else
 `action.lease-too-long` (host.md §2, Steps outside the worker). `probe`, `watch` and
 `stop` are each `{"command": {"argv", "cwd", "env", "timeoutMs"}}`, `argv` required,
@@ -271,7 +277,7 @@ action: steps may run it too, and its `argv` mappings read the params under `par
    root (schema.md §4); then replace each `$outputSchemas` and `$resultSchema` marker,
    checking that the copy still fits the package's depth limit where it lands.
 6. Produce the package: `format`, `name` and `start` from the files above, `limits`,
-   `actions`, `inputSchema` and `onIntervention` from the settings, and each node as its DOT `kind`, its settings
+   `actions` (with the default `retry.maxAttempts` of §4), `inputSchema` and `onIntervention` from the settings, and each node as its DOT `kind`, its settings
    fields, and, for `activity` and `await-signal`, `outcomes` mapping each edge's
    `on` to its target. The build checks every rule of the kernel's validation
    (kernel.md §2, W01 to W15) and the host's checks of each action itself, and words
