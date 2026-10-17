@@ -36,6 +36,23 @@
               "function"
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "component"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "module"
+            ]
+          }
         }
       ],
       "description": "What an action does when a step runs it.",
@@ -89,8 +106,16 @@
           "description": "`native`: the function the host registered under this name.",
           "type": "string"
         },
+        "grants": {
+          "$ref": "#/$defs/Grants",
+          "description": "`component`: what the step runner may do. A host call outside it fails the step."
+        },
         "kind": {
           "$ref": "#/$defs/Kind"
+        },
+        "module": {
+          "$ref": "#/$defs/FileRef",
+          "description": "`component`: the step runner, a WebAssembly component of world\n`runspore:runner/runner@0.1.0` in the folder, sealed into the workflow artifact."
         },
         "outcomes": {
           "description": "The outcomes a run of the action ends with. Default `[\"ok\"]`.",
@@ -254,11 +279,45 @@
       ],
       "type": "string"
     },
+    "Grant": {
+      "description": "One thing a step runner is granted, as it is written.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "Grants": {
+      "additionalProperties": false,
+      "description": "What a step runner may do, by kind. Each list is optional, default empty.",
+      "properties": {
+        "folders": {
+          "description": "The folders it may read, with everything below them, written as sockets are.",
+          "items": {
+            "$ref": "#/$defs/Grant"
+          },
+          "type": "array"
+        },
+        "programs": {
+          "description": "The programs it may start, each as `argv[0]`: a bare name looked up on the\n`PATH`, an absolute path, or `./<path>`, a file of the folder bundled with the\naction.",
+          "items": {
+            "$ref": "#/$defs/Grant"
+          },
+          "type": "array"
+        },
+        "sockets": {
+          "description": "The Unix sockets it may send a request to: absolute, `~/<path>`, or relative to\nthe run's base folder.",
+          "items": {
+            "$ref": "#/$defs/Grant"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "Kind": {
       "enum": [
         "command",
         "native",
-        "external"
+        "external",
+        "component"
       ],
       "type": "string"
     },

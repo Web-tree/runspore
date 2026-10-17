@@ -17,6 +17,7 @@ use crate::diagnostic::{
 };
 use crate::dot::{arrow_text, Graph};
 use crate::near::closest;
+use crate::runner;
 use crate::settings::{self, Action, Broken, Kind, Output};
 use crate::spans::{Odd, Spans};
 use crate::{
@@ -498,6 +499,7 @@ impl<'a> Checks<'a> {
             }
         }
         self.bundled_programs(id, &raw);
+        self.runner(id, &raw);
         for (object, field) in [
             ("retry", "backoffMs"),
             ("retry", "maxBackoffMs"),
@@ -547,7 +549,7 @@ impl<'a> Checks<'a> {
             return;
         };
         self.lease(id, &action);
-        if action.kind == Kind::External {
+        if matches!(action.kind, Kind::External | Kind::Component) {
             return;
         }
         if action.kind == Kind::Native {
@@ -763,6 +765,52 @@ impl<'a> Checks<'a> {
                 }
             }
         }
+    }
+
+    /// A `component` action's step runner and its `./` program grants, files of the
+    /// folder sealed as the action's assets; the runner checked as the host loads it
+    /// (spec/host.md §3, `component`).
+    fn runner(&mut self, id: &str, action: &Value) {
+        if action.get("kind").and_then(Value::as_str) != Some("component") {
+            return;
+        }
+        let here = pointer("/actions", id);
+        let owner = || Some(Owner::Action(id.to_string()));
+        if let Some(Value::Array(programs)) = action.pointer("/grants/programs") {
+            for (i, program) in programs.iter().enumerate() {
+                let at = format!("{here}/grants/programs/{i}");
+                if let (Some(path), false) = (
+                    program.as_str().and_then(|p| p.strip_prefix("./")),
+                    self.broken.touches(&at),
+                ) {
+                    self.reference_path(&at, path, EntryKind::Asset, owner());
+                }
+            }
+        }
+        let at = pointer(&here, "module");
+        if self.broken.touches(&at) {
+            return;
+        }
+        let Some(file) = self.reference(&at, EntryKind::Asset, owner()) else {
+            return;
+        };
+        let Ok(bytes) = std::fs::read(&file) else {
+            return;
+        };
+        let diagnostic = match runner::check(&bytes) {
+            Ok(()) => return,
+            Err(runner::Problem::Invalid(reason)) => {
+                Diagnostic::new("component.invalid", At::value(&at))
+                    .arg("module", Arg::Input(at.clone()))
+                    .arg("reason", Arg::Computed(json!(reason)))
+            }
+            Err(runner::Problem::Import(import)) => {
+                Diagnostic::new("component.import-unsupported", At::value(&at))
+                    .arg("module", Arg::Input(at.clone()))
+                    .arg("import", Arg::Computed(json!(import)))
+            }
+        };
+        self.push(diagnostic);
     }
 
     /// The workflow's `onIntervention` (spec/host.md §2, Telling a person): an action
@@ -1863,7 +1911,8 @@ impl<'a> Checks<'a> {
     }
 
     fn set_reference(&self, at: &str, path: &str) -> Edit {
-        let value = if at.contains("/async/") && !path.starts_with("./") {
+        let program = at.contains("/async/") || at.contains("/grants/programs/");
+        let value = if program && !path.starts_with("./") {
             format!("./{path}")
         } else {
             path.to_string()

@@ -17,7 +17,7 @@ use super::{
     Package, PAGE,
 };
 use crate::activity::{ActivityContext, ActivityOutput};
-use crate::command::Program;
+use crate::component;
 use crate::error::HostError;
 use crate::external::{self, Async, StepToken};
 use crate::holder::{self, Answer, Watched};
@@ -215,12 +215,13 @@ impl Inner {
         Ok(())
     }
 
-    /// Runs the probe of `held`, when its action declares one; a `dead` answer expires
-    /// the attempt at once with reason `probe-dead`.
+    /// Runs the probe of `held`, when its action declares one or is a `component` whose
+    /// runner probes; a `dead` answer expires the attempt at once with reason
+    /// `probe-dead`.
     pub(super) async fn probe(&self, held: &HeldAttempt) -> Result<Option<Answer>, HostError> {
-        let Some(program) = &held.bounds.probe else {
+        if held.bounds.probe.is_none() && held.bounds.runner.is_none() {
             return Ok(None);
-        };
+        }
         let Ok(delivery) = self
             .deliver(&held.attempt.key, &held.attempt.invocation_id)
             .await?
@@ -228,7 +229,11 @@ impl Inner {
             return Ok(None);
         };
         let ctx = self.held_context(held, &delivery, self.shutdown.subscribe());
-        let answer = holder::probe(&ctx, program, &held.input, &held.holder).await;
+        let answer = match (&held.bounds.probe, &held.bounds.runner) {
+            (Some(program), _) => holder::probe(&ctx, program, &held.input, &held.holder).await,
+            (None, Some(runner)) => component::probe(&ctx, runner, &held.input, &held.holder).await,
+            (None, None) => Answer::Unknown,
+        };
         drop(delivery);
         if answer == Answer::Dead {
             let reason = ExpireReason::ProbeDead;
@@ -254,9 +259,13 @@ impl Inner {
     }
 
     /// Runs the stop of `held`, an attempt a cancel has expired, once, and keeps its exit
-    /// code and stdout as late evidence (spec/host.md §3, Async commands, Stop). Returns
-    /// its exit code; whatever it does is otherwise ignored.
-    pub(super) async fn stop(&self, held: &HeldAttempt, program: &Program) -> Option<i32> {
+    /// code and stdout as late evidence (spec/host.md §3, Async commands, Stop): the
+    /// action's stop program, else its step runner's `stop`. Returns its exit code;
+    /// whatever it does is otherwise ignored. `None` without either: nothing ran.
+    pub(super) async fn stop(&self, held: &HeldAttempt) -> Option<Option<i32>> {
+        if held.bounds.stop.is_none() && held.bounds.runner.is_none() {
+            return None;
+        }
         // Without its step files the stop still runs; a `./` program then fails.
         let delivery = match self
             .deliver(&held.attempt.key, &held.attempt.invocation_id)
@@ -266,7 +275,11 @@ impl Inner {
             _ => super::Delivery::default(),
         };
         let ctx = self.held_context(held, &delivery, self.shutdown.subscribe());
-        let (exit, stdout) = holder::stop(&ctx, program, &held.input, &held.holder).await;
+        let (exit, stdout) = match (&held.bounds.stop, &held.bounds.runner) {
+            (Some(program), _) => holder::stop(&ctx, program, &held.input, &held.holder).await,
+            (None, Some(runner)) => component::stop(&ctx, runner, &held.input, &held.holder).await,
+            (None, None) => (None, Vec::new()),
+        };
         drop(delivery);
         let tail = &stdout[stdout.len().saturating_sub(STOP_STDOUT)..];
         let said = json!({"stop": {"exit": exit, "stdout": String::from_utf8_lossy(tail)}});
@@ -286,7 +299,7 @@ impl Inner {
             };
             let _ = retry(true, || self.store.record_late_evidence(late.clone())).await;
         }
-        exit
+        Some(exit)
     }
 
     /// Starts a watch of `held` in the background, unless this engine watches it

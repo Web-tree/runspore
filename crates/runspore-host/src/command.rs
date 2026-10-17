@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -225,41 +225,52 @@ fn prepare(command: &mut Command, ctx: &ActivityContext, cwd: &Path, env: &[(Str
     command
         .current_dir(cwd)
         .envs(env.iter().cloned())
-        .env("RUNSPORE_RUN_ID", &ctx.key.run)
-        .env("RUNSPORE_NODE_ID", &ctx.node_id)
-        .env("RUNSPORE_INVOCATION_ID", &ctx.invocation_id)
-        .env("RUNSPORE_ATTEMPT", ctx.attempt.to_string())
-        .env("RUNSPORE_VISIT", ctx.visit.to_string())
-        .env("RUNSPORE_EFFECT_KEY", &ctx.effect_key)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // After `env`, so a workflow cannot point its steps at another database.
-    if let Some(db) = &ctx.db {
-        command.env("RUNSPORE_DB", db);
-    }
-    // After `env` too; one the step lacks is removed, so a value the worker inherited
-    // never reaches it.
-    let files = ctx.files.as_ref();
-    let instructions = files.and_then(|f| f.instructions.as_deref());
-    let work_dir = ctx.work_dir.as_deref();
-    for (name, value) in [
-        ("RUNSPORE_STEP_FILES", files.map(|f| f.dir.as_os_str())),
-        ("RUNSPORE_INSTRUCTIONS", instructions.map(Path::as_os_str)),
-        ("RUNSPORE_WORK_DIR", work_dir.map(Path::as_os_str)),
-        (
-            "RUNSPORE_PARENT_RUN_ID",
-            ctx.parent_run.as_deref().map(OsStr::new),
-        ),
-    ] {
+    for (name, value) in variables(ctx) {
         match value {
-            Some(path) => command.env(name, path),
+            Some(value) => command.env(name, value),
             None => command.env_remove(name),
         };
     }
     for name in ["RUNSPORE_TOKEN", "RUNSPORE_RESULT_CHANNEL"] {
         command.env_remove(name);
     }
+}
+
+/// The step's variables a program the host starts for it gets after its own
+/// environment (spec/host.md §3). `None` removes the variable, so a value the worker
+/// inherited never reaches the step.
+pub(crate) fn variables(ctx: &ActivityContext) -> Vec<(&'static str, Option<OsString>)> {
+    let files = ctx.files.as_ref();
+    let instructions = files.and_then(|f| f.instructions.as_deref());
+    let path = |p: Option<&Path>| p.map(|p| p.as_os_str().to_os_string());
+    let mut list = vec![
+        ("RUNSPORE_RUN_ID", Some(ctx.key.run.clone().into())),
+        ("RUNSPORE_NODE_ID", Some(ctx.node_id.clone().into())),
+        (
+            "RUNSPORE_INVOCATION_ID",
+            Some(ctx.invocation_id.clone().into()),
+        ),
+        ("RUNSPORE_ATTEMPT", Some(ctx.attempt.to_string().into())),
+        ("RUNSPORE_VISIT", Some(ctx.visit.to_string().into())),
+        ("RUNSPORE_EFFECT_KEY", Some(ctx.effect_key.clone().into())),
+    ];
+    // After `env`, so a workflow cannot point its steps at another database.
+    if let Some(db) = &ctx.db {
+        list.push(("RUNSPORE_DB", Some(db.as_os_str().to_os_string())));
+    }
+    list.extend([
+        ("RUNSPORE_STEP_FILES", path(files.map(|f| f.dir.as_path()))),
+        ("RUNSPORE_INSTRUCTIONS", path(instructions)),
+        ("RUNSPORE_WORK_DIR", path(ctx.work_dir.as_deref())),
+        (
+            "RUNSPORE_PARENT_RUN_ID",
+            ctx.parent_run.as_deref().map(OsString::from),
+        ),
+    ]);
+    list
 }
 
 /// A probe's or watch's stdout and how it ended; `None` when it did not run, was

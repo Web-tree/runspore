@@ -29,6 +29,10 @@ Every problem and warning `spore validate` can report, with its help page. `spor
 | [`command.program-not-found`](command.program-not-found.md) | warning | Program not found |
 | [`command.result-exit-zero`](command.result-exit-zero.md) | problem | Outcome for exit code 0 in result mode |
 | [`command.result-not-json`](command.result-not-json.md) | problem | "result" without JSON output |
+| [`component.grant-unsupported`](component.grant-unsupported.md) | problem | Grant spore does not offer |
+| [`component.import-unsupported`](component.import-unsupported.md) | problem | Runner imports what spore does not offer |
+| [`component.invalid`](component.invalid.md) | problem | Not a step runner |
+| [`component.no-module`](component.no-module.md) | problem | Missing "module" |
 | [`dot.after-graph`](dot.after-graph.md) | problem | Text after the graph |
 | [`dot.arrow-from-end`](dot.arrow-from-end.md) | problem | Arrow from an end |
 | [`dot.attribute-typo`](dot.attribute-typo.md) | problem | Unknown attribute |

@@ -74,7 +74,7 @@ fn a_build_that_is_not_a_release_says_so_with_its_commit_and_date() {
     assert_eq!(out.get("commitDate"), date.map(Value::from).as_ref());
     let human = dir.run(&["capabilities"]).stdout;
     assert!(
-        human.starts_with(&format!("version         {text}\n")),
+        human.starts_with(&format!("version          {text}\n")),
         "{human}"
     );
 }
@@ -155,17 +155,31 @@ fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database()
         json!({"artifact": "0.1", "cli": "0.2", "dot": "0.2", "host": "0.2",
                "kernel": "0.2", "schema": "0.2", "store": "0.2"})
     );
-    assert_eq!(out["actionKinds"], json!(["command", "external", "native"]));
-    assert_eq!(out["asyncKinds"], json!(["command", "external"]));
+    assert_eq!(
+        out["actionKinds"],
+        json!(["command", "component", "external", "native"])
+    );
+    assert_eq!(
+        out["asyncKinds"],
+        json!(["command", "component", "external"])
+    );
     assert_eq!(out["resultChannels"], json!(["store"]));
+    assert_eq!(
+        out["componentWorlds"],
+        json!(["runspore:runner/runner@0.1.0"])
+    );
     assert!(!dir.file("runspore.db").exists());
 
     let text = dir.run(&["capabilities"]).stdout;
     assert!(
-        text.contains("async kinds     command, external\n"),
+        text.contains("async kinds      command, component, external\n"),
         "{text}"
     );
-    assert!(text.contains("result channels store\n"), "{text}");
+    assert!(text.contains("result channels  store\n"), "{text}");
+    assert!(
+        text.contains("component worlds runspore:runner/runner@0.1.0\n"),
+        "{text}"
+    );
 }
 
 #[test]

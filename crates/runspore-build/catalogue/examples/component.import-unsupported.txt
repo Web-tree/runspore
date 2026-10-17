@@ -1,0 +1,10 @@
+── Runner imports what spore does not offer ── component.import-unsupported/settings.json:6  component.import-unsupported
+"runner.wasm", the runner of action "review", imports "wasi:clocks/wall-clock@0.2.0", which spore does not offer a step runner.
+
+  6 │       "module": "runner.wasm",
+    │                 ^^^^^^^^^^^^^
+
+To fix: import only "runspore:runner/host@0.1.0": it starts programs, reaches sockets and reads folders the action grants.
+Why: a runner gets only the host's own imports, so it can do no more than its grants allow.
+
+1 problem in review. Nothing was run.

@@ -27,6 +27,7 @@ use tokio::task::JoinSet;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::arrival::{Arrival, Trail};
+use crate::component;
 use crate::disk::{self, Disk};
 use crate::error::{HostError, Unrouted};
 use crate::external;
@@ -594,6 +595,20 @@ pub fn validate_workflow(
     Ok(check_workflow(reducer, activities, limits, workflow_json, &started)?.package)
 }
 
+/// The checks `start_artifact` makes of a loaded artifact, without a store: those of
+/// `validate_workflow` on its package, and each step runner it holds loaded as a
+/// component of world `runner` (spec/host.md §3, `component`).
+pub fn validate_artifact(
+    reducer: &dyn Reducer,
+    activities: &ActivityRegistry,
+    limits: Limits,
+    artifact: &Artifact,
+) -> Result<Vec<u8>, HostError> {
+    let package = validate_workflow(reducer, activities, limits, &artifact.package)?;
+    component::check_runners(&artifact.package, Some(artifact))?;
+    Ok(package)
+}
+
 /// A workflow that passed the checks of `validate_workflow`.
 struct Checked {
     /// The canonical package bytes.
@@ -630,6 +645,13 @@ fn check_workflow(
         }
         if kind == external::KIND {
             external::parse(action).map_err(|e| {
+                HostError::invalid("action.invalid", format!("action `{action_id}`: {e}"))
+            })?;
+        }
+        // Before its runner's `validate`, so a grant of another kind has its own code.
+        if kind == component::KIND && activities.get(kind).is_some() {
+            component::parse(action_id, action)?;
+            external::async_of(action).map_err(|e| {
                 HostError::invalid("action.invalid", format!("action `{action_id}`: {e}"))
             })?;
         }
@@ -765,6 +787,7 @@ impl Engine {
         input: Value,
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
+        component::check_runners(workflow_json, None)?;
         self.start_from(workflow_json, None, input, start_key).await
     }
 
@@ -783,6 +806,7 @@ impl Engine {
                 "the workflow declares instructions or assets, and the engine has no files_dir",
             ));
         }
+        component::check_runners(&artifact.package, Some(artifact))?;
         let stored = StoredArtifact {
             digest: artifact.digest.clone(),
             bytes: artifact.bytes.clone(),

@@ -16,7 +16,7 @@ There is no key "concurrency" in "actions" → "build".
   8 │       "concurrency": 3
     │       ^^^^^^^^^^^^^
 
-To fix: remove it; the keys allowed here are "actor" | "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "kind" | "outcomes" | "output" | "priority" | "result" | "retry" | "timeoutMs".
+To fix: remove it; the keys allowed here are "actor" | "argv" | "assets" | "async" | "cwd" | "effect" | "env" | "exitOutcomes" | "function" | "grants" | "kind" | "module" | "outcomes" | "output" | "priority" | "result" | "retry" | "timeoutMs".
 ```
 
 The fix changes:

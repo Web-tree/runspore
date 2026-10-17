@@ -16,8 +16,8 @@ pub const KIND: &str = "external";
 /// `async.timeoutMs` when the action gives none: one hour.
 pub const DEFAULT_TIMEOUT_MS: u64 = 3_600_000;
 
-/// The `async` object of an external action or an async command: the attempt's bounds
-/// and the programs that look after its holder.
+/// The `async` object of an external action, an async command or a `component`
+/// action: the attempt's bounds and the programs that look after its holder.
 #[derive(Debug, Clone)]
 pub(crate) struct Async {
     pub timeout_ms: u64,
@@ -26,6 +26,9 @@ pub(crate) struct Async {
     pub watch: Option<Program>,
     /// Run once when the run is cancelled while the attempt is held.
     pub stop: Option<Program>,
+    /// A `component` action's step runner, whose `probe` and `stop` run when the
+    /// action gives no program of its own (spec/host.md §3, `component`).
+    pub runner: Option<crate::component::Spec>,
 }
 
 impl Async {
@@ -47,12 +50,18 @@ pub(crate) fn is_external(action: &Value) -> bool {
     action.get("kind").and_then(Value::as_str) == Some(KIND)
 }
 
-/// The `async` object of an action held outside the worker: an external action, whose
-/// `async` is optional, or a `command` that carries one. `None` for any other action.
+/// The `async` object of an action held outside the worker: an external or
+/// `component` action, whose `async` is optional, or a `command` that carries one.
+/// `None` for any other action.
 pub(crate) fn async_of(action: &Value) -> Result<Option<Async>, String> {
     let kind = action.get("kind").and_then(Value::as_str);
     match (kind, action.get("async")) {
         (Some(KIND), spec) => parse_async(spec.unwrap_or(&Value::Null)).map(Some),
+        (Some(crate::component::KIND), spec) => {
+            let mut bounds = parse_async(spec.unwrap_or(&Value::Null))?;
+            bounds.runner = Some(crate::component::read(action).map_err(|(_, e)| e)?);
+            Ok(Some(bounds))
+        }
         (Some("command"), Some(spec)) => parse_async(spec).map(Some),
         _ => Ok(None),
     }
@@ -94,6 +103,7 @@ fn parse_async(spec: &Value) -> Result<Async, String> {
         probe,
         watch,
         stop,
+        runner: None,
     })
 }
 

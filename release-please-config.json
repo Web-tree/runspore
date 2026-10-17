@@ -20,6 +20,7 @@
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-schema')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-store-conformance')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-store-sqlite')].version" },
+        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-test-runner')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-trace')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-types')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value === 'runspore-wasmtime')].version" }

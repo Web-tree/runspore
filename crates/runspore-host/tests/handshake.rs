@@ -51,9 +51,13 @@ fn engine(path: &std::path::Path, activities: ActivityRegistry) -> Engine {
 #[test]
 fn the_capability_set_lists_the_runners_external_and_the_store() {
     let set = spore().capabilities();
-    assert_eq!(set.action_kinds, ["command", "external", "native"]);
-    assert_eq!(set.async_kinds, ["command", "external"]);
+    assert_eq!(
+        set.action_kinds,
+        ["command", "component", "external", "native"]
+    );
+    assert_eq!(set.async_kinds, ["command", "component", "external"]);
     assert_eq!(set.result_channels, ["store"]);
+    assert_eq!(set.component_worlds, ["runspore:runner/runner@0.1.0"]);
 }
 
 #[tokio::test]
@@ -62,13 +66,16 @@ async fn h35_validate_and_start_refuse_what_the_host_does_not_offer_and_name_the
         (
             json!({"kind": "teleport", "effect": "pure"}),
             "action.kind-unregistered",
-            ["`teleport`", "`command`, `external`, `native`"],
+            ["`teleport`", "`command`, `component`, `external`, `native`"],
         ),
         (
             json!({"kind": "native", "function": "work", "effect": "pure",
                    "async": {"timeoutMs": "60000"}}),
             "action.async-unsupported",
-            ["runs `command`, `external` async", "remove `async`"],
+            [
+                "runs `command`, `component`, `external` async",
+                "remove `async`",
+            ],
         ),
         (
             json!({"kind": "external", "effect": "unsafe",

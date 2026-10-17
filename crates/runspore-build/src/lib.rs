@@ -18,6 +18,7 @@ mod dot;
 pub mod edit;
 mod near;
 pub mod report;
+pub mod runner;
 pub mod settings;
 pub mod spans;
 

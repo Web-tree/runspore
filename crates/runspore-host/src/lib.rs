@@ -7,6 +7,7 @@
 mod activity;
 mod arrival;
 mod command;
+mod component;
 pub mod disk;
 mod engine;
 mod error;
@@ -23,11 +24,12 @@ pub use activity::{
 };
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
+pub use component::{ComponentRunner, GRANT_KINDS};
 pub use engine::{
-    cut_off, validate_workflow, AsyncStep, Cancelled, CutOff, CutOffReason, Engine, EngineConfig,
-    HeldSlot, Observer, RunIds, StartOutcome, StepClaim, StepDescription, StepRenewed, StepReport,
-    StepState, Stopped, TickReport, ARTIFACT_UNREADABLE, CAPABILITY_MISSING, DISK_FULL,
-    FILES_DIR_MISSING, FILES_UNWRITABLE,
+    cut_off, validate_artifact, validate_workflow, AsyncStep, Cancelled, CutOff, CutOffReason,
+    Engine, EngineConfig, HeldSlot, Observer, RunIds, StartOutcome, StepClaim, StepDescription,
+    StepRenewed, StepReport, StepState, Stopped, TickReport, ARTIFACT_UNREADABLE,
+    CAPABILITY_MISSING, DISK_FULL, FILES_DIR_MISSING, FILES_UNWRITABLE,
 };
 pub use error::{HostError, Unrouted};
 pub use external::{StepToken, DEFAULT_TIMEOUT_MS as EXTERNAL_DEFAULT_TIMEOUT_MS};

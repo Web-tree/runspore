@@ -1,0 +1,14 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "review": {
+      "kind": "component",
+      "module": "runner.wasm",
+      "effect": "idempotent",
+      "grants": { "programs": ["herdr"], "network": ["api.example.com"] }
+    }
+  },
+  "nodes": {
+    "review": { "action": "review" }
+  }
+}

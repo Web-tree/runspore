@@ -236,10 +236,12 @@ impl ActivityRegistry {
         Self::default()
     }
 
-    /// A registry with the built-in `command` runner and the given `native` functions.
+    /// A registry with the built-in `command` and `component` runners and the given
+    /// `native` functions.
     pub fn with_builtins(native: NativeRunner) -> Self {
         Self::new()
             .with("command", Arc::new(crate::CommandRunner))
+            .with(crate::component::KIND, Arc::new(crate::ComponentRunner))
             .with("native", Arc::new(native))
     }
 

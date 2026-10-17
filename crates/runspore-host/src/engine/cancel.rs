@@ -89,10 +89,9 @@ impl Inner {
             let Some(held) = self.attempt_held(&view, invocation).await else {
                 continue;
             };
-            let Some(program) = held.bounds.stop.clone() else {
+            let Some(exit) = self.stop(&held).await else {
                 continue;
             };
-            let exit = self.stop(&held, &program).await;
             stops.push(Stopped {
                 invocation_id: invocation.invocation_id.clone(),
                 attempt: invocation.attempt_number,

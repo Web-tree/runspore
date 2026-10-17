@@ -9,7 +9,7 @@ use std::sync::Arc;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
-    validate_workflow, ActivityRegistry, Engine, EngineConfig, HeldSlot, HostError, NativeRunner,
+    validate_artifact, ActivityRegistry, Engine, EngineConfig, HeldSlot, HostError, NativeRunner,
     Observer, StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
     FILES_UNWRITABLE,
 };
@@ -713,19 +713,21 @@ fn capabilities() -> Result<Output, Fail> {
         .iter()
         .map(|(name, version)| (name.to_string(), json!(version)))
         .collect();
-    let line = |label: &str, items: &[String]| format!("{label:<15} {}\n", items.join(", "));
+    let line = |label: &str, items: &[String]| format!("{label:<16} {}\n", items.join(", "));
     let contract_text: Vec<String> = CONTRACTS
         .iter()
         .map(|(name, version)| format!("{name} {version}"))
         .collect();
-    let text = format!("{:<15} {VERSION_TEXT}\n", "version")
+    let text = format!("{:<16} {VERSION_TEXT}\n", "version")
         + &line("contracts", &contract_text)
         + &line("action kinds", &set.action_kinds)
         + &line("async kinds", &set.async_kinds)
-        + &line("result channels", &set.result_channels);
+        + &line("result channels", &set.result_channels)
+        + &line("component worlds", &set.component_worlds);
     let mut object = json!({"version": VERSION, "contracts": contracts,
                             "actionKinds": set.action_kinds, "asyncKinds": set.async_kinds,
-                            "resultChannels": set.result_channels});
+                            "resultChannels": set.result_channels,
+                            "componentWorlds": set.component_worlds});
     if let Some(date) = COMMIT_DATE {
         object["commitDate"] = json!(date);
     }
@@ -825,7 +827,7 @@ fn kernel_check(
     let sealed = built.seal().map_err(build_fail)?;
     let artifact = load(&sealed.bytes, folder)?;
     let limits = EngineConfig::default().limits;
-    match validate_workflow(&*reducer(cli)?, &registry(), limits, &artifact.package) {
+    match validate_artifact(&*reducer(cli)?, &registry(), limits, &artifact) {
         Ok(package) => Ok((report, Some(package))),
         Err(HostError::Store(f)) => Err(Fail::internal(&f.code, f.message.clone())),
         Err(_) => {
@@ -2120,7 +2122,7 @@ impl Source {
     /// The checks of `start`, against no store; returns the canonical package bytes.
     fn validate(&self, cli: &Cli) -> Result<Vec<u8>, Fail> {
         let limits = EngineConfig::default().limits;
-        validate_workflow(&*reducer(cli)?, &registry(), limits, &self.artifact.package)
+        validate_artifact(&*reducer(cli)?, &registry(), limits, &self.artifact)
             .map_err(|e| self.fail(e))
     }
 

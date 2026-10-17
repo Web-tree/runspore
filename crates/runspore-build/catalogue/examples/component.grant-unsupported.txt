@@ -1,0 +1,10 @@
+── Grant spore does not offer ── component.grant-unsupported/settings.json:8  component.grant-unsupported
+Action "review" grants its runner "network", a kind of grant spore does not offer.
+
+  8 │       "grants": { "programs": ["herdr"], "network": ["api.example.com"] }
+    │                                          ^^^^^^^^^
+
+To fix: remove it; the kinds of grant spore offers are "folders" | "programs" | "sockets".
+Why: spore enforces every grant itself, so it refuses one it cannot enforce rather than ignore it.
+
+1 problem in review. Nothing was run.

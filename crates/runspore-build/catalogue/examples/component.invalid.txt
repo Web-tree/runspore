@@ -1,0 +1,10 @@
+── Not a step runner ────────────────── component.invalid/settings.json:6  component.invalid
+"runner.wasm", the runner of action "review", is not a step runner: "it is not a WebAssembly file".
+
+  6 │       "module": "runner.wasm",
+    │                 ^^^^^^^^^^^^^
+
+To fix: build the runner as a WebAssembly component of world "runspore:runner/runner@0.1.0", which exports "runspore:runner/step@0.1.0".
+Why: spore loads the runner the way the host will, so a file that cannot run is found before the run starts.
+
+1 problem in review. Nothing was run.

@@ -91,6 +91,7 @@ the crate wins and the prose is a bug.
 crates/runspore-types         frozen contract (canonical JSON, digests, model, traits)
 crates/runspore-kernel        pure reducer
 crates/runspore-component     kernel as a WebAssembly component (guest)
+crates/runspore-test-runner   test-only step runner (guest of contracts/wit/runner)
 crates/runspore-wasmtime      Reducer implemented by running that component
 crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
