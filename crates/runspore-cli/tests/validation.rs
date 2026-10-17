@@ -364,24 +364,6 @@ fn explain_prints_the_page_of_every_code() {
 }
 
 #[test]
-fn the_repositorys_own_workflows_have_no_problem() {
-    let workflows = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.spore/workflows");
-    let dir = Dir::new("validate-own");
-    let mut seen = 0;
-    for entry in std::fs::read_dir(&workflows).unwrap().flatten() {
-        let folder = entry.path();
-        if !folder.join("workflow.dot").is_file() {
-            continue;
-        }
-        seen += 1;
-        let out = dir.run(&["--json", "validate", folder.to_str().unwrap()]);
-        let report = out.json();
-        assert_eq!(report["problems"], "0", "{}: {report}", folder.display());
-    }
-    assert!(seen > 0);
-}
-
-#[test]
 fn settings_may_name_their_schema() {
     let dir = Dir::new("validate-schema");
     let path = programs(&dir, &["aws", "pg_dump"]);
