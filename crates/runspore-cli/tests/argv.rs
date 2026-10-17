@@ -9,14 +9,16 @@ use common::Dir;
 use runspore_types::digest::ids;
 use serde_json::{json, Value};
 
+/// A fast poll, and a lease well above any stall of a loaded runner: a store call that
+/// waits on the database past the lease lets the worker's own sweep expire its try.
 const FAST: [&str; 7] = [
     "--native-kernel",
     "--poll-ms",
     "20",
     "--lease-ms",
-    "500",
+    "5000",
     "--heartbeat-ms",
-    "100",
+    "1000",
 ];
 
 fn args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
@@ -120,7 +122,8 @@ fn a_try_after_a_stopped_try_resumes() {
         .to_string();
     let mut worker = dir.spawn(&args(&["--grace-ms", "300", "worker"]));
     let log = dir.file("effects.log");
-    while !log.exists() {
+    // The shell creates the log before it writes the line: wait for the line.
+    while !std::fs::read_to_string(&log).is_ok_and(|text| text.ends_with('\n')) {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     let pid = nix::unistd::Pid::from_raw(worker.id() as i32);
