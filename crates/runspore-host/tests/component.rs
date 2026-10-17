@@ -401,7 +401,7 @@ async fn h43_start_refuses_a_runner_it_could_not_run() {
     let path = temp_db("h43");
     let engine = worker(&path);
     let code = |r: Result<runspore_host::StartOutcome, runspore_host::HostError>| {
-        r.err().expect("refused").code().to_string()
+        r.expect_err("refused").code().to_string()
     };
     let package = hand_made("runner.wasm", None).package;
     assert_eq!(
@@ -420,8 +420,7 @@ async fn h43_start_refuses_a_runner_it_could_not_run() {
     let refused = engine
         .start_artifact(&kernel, Value::Null, "kernel")
         .await
-        .err()
-        .expect("the kernel is no step runner");
+        .expect_err("the kernel is no step runner");
     assert_eq!(refused.code(), "component.invalid");
     assert!(
         refused.to_string().contains("runspore:runner/runner@0.1.0"),
