@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Web-tree/runspore/compare/v0.6.1...v0.7.0) (2026-10-17)
+
+
+### Features
+
+* **FG-233:** step runners as WASM modules sealed into the workflow, with granted host imports ([#269](https://github.com/Web-tree/runspore/issues/269)) ([177bced](https://github.com/Web-tree/runspore/commit/177bced5e5f41185c886e74cddd39d9e7dbbcc85))
+
 ## [0.6.1](https://github.com/Web-tree/runspore/compare/v0.6.0...v0.6.1) (2026-10-17)
 
 
