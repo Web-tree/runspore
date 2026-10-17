@@ -403,8 +403,8 @@ attempts, fences, effect classes, retries and stuck steps apply unchanged.
 `validate_workflow` and `start` check these fields and refuse a bad one with
 `action.invalid`, like a runner's `validate`. An external action needs no runner.
 
-An **async step** is an external step, or an async command (§3) whose start command
-has handed over its holder handle. Both are held outside the worker until a result
+An **async step** is an external step, or an async command or a `component` action
+(§3) whose start has handed over its holder handle. Both are held outside the worker until a result
 comes back through a result channel; the rules below that name an async step hold for
 both.
 
@@ -416,12 +416,13 @@ repeatable effect or parks an `unsafe` one in `needs-intervention` (kernel §7.3
 
 **Waiting on a step.** A run is **at an async step** when it is `running`, has no
 pending event, and its outstanding invocation (kernel §3) is `scheduled` with an
-external action, or with an async command whose attempt is held (its holder handle
+external action, or with an async command or a `component` action whose attempt is held (its holder handle
 recorded by `hold_attempt`). An external step is `ready` while that invocation is
 pending and `held` while an attempt of it runs; an async command's step is only ever
 `held`. `run_until_parked` also returns there, since the worker has nothing to do until
 an actor or the work reports or the attempt expires, unless it watches the attempt.
-`Engine::async_step(view)` describes it: the action's kind (`external` or `command`)
+`Engine::async_step(view)` describes it: the action's kind (`external`, `command` or
+`component`)
 and actor, `ready` or `held`, the attempt number, and while held the holder handle,
 `deadlineMs` and `leaseUntilMs`. It never shows the input, the owner or the fence.
 **0.2:** it also describes a step that is `capability-missing` (The handshake).
@@ -501,14 +502,15 @@ sorted:
 | Field | Value |
 | --- | --- |
 | `actionKinds` | The kinds it runs: the kind of every runner in its registry, and `external` |
-| `asyncKinds` | The kinds it runs async: `external`, and `command` when its registry runs commands (§3, Async commands) |
+| `asyncKinds` | The kinds it runs async: `external`, `command` when its registry runs commands (§3, Async commands), and `component` when it runs step runners (§3, `component`) |
 | `resultChannels` | The result channels it offers: `store`, where `complete_step` and `fail_step` write the result through the store's `finish_attempt` |
+| `componentWorlds` | **0.2.** The WIT worlds of the step runners it runs, `runspore:runner/runner@0.1.0` when it runs kind `component`; empty when it runs none |
 
 It offers no `probe`, `watch` or `stop` in their `component` form. A kind, a channel
 or a form offered later is a new value of these lists, not a new field.
 
-**Async use.** An action is async when its kind is `external` or it carries an `async`
-object. Its result channels are `async.channels`, in order of preference, default
+**Async use.** An action is async when its kind is `external` or `component`, or it
+carries an `async` object. Its result channels are `async.channels`, in order of preference, default
 `["store"]`.
 
 **At `validate_workflow` and `start`.** Every action is checked against the set. The
@@ -615,6 +617,8 @@ Functions' top-level `Catch` do the same in their engines.
 | `host.attempt.after-claim` | claim held, activity not started |
 | `host.attempt.after-effect` | activity returned, before `finish_attempt` |
 | `host.attempt.after-finish` | `finish_attempt` returned |
+| `host.component.after-spawn` | **0.2.** A step runner's `start-process` started its program (§3, `component`) |
+| `host.component.after-start` | **0.2.** A step runner's `start` returned a handle, before `hold_attempt` |
 
 ## 3. Activities
 
@@ -1003,11 +1007,129 @@ its last 16 KiB). Whatever it does, the run stays cancelled: a stop that fails, 
 cannot be started is ignored. It is best effort, as Temporal's terminate is: a host
 that dies between the cancel and the stop does not run it later.
 
+### `component` (0.2)
+
+A **step runner** is a WebAssembly component that starts, probes and stops an async
+step's work, as an async command's start command, probe and stop do. It is sealed into
+the workflow artifact, so a run keeps the runner it started with, and it can do only
+what the workflow grants it. Wasmtime runs host-defined WIT worlds this way; Extism's
+host functions and the capability grants of Spin and wasmCloud do the same.
+
+```json
+{"kind": "component", "module": "runner.wasm", "effect": "idempotent",
+ "outcomes": ["ok", "changes"],
+ "grants": {"programs": ["herdr", "./bin/job"], "sockets": ["~/.herdr/api.sock"],
+            "folders": ["."]},
+ "async": {"timeoutMs": "3600000", "leaseMs": "120000"}}
+```
+
+- `module`: the path of the runner inside the workflow folder, sealed as an `asset`
+  entry owned by the action (dot.md §4). The host loads it from the run's step files
+  (Step files and work folders, below), whose digest it checks before every use, so
+  replacing the file in the folder never changes a run in flight.
+- `grants`: what the runner may do, by kind. Each list is optional, default empty.
+  - `programs`: the programs `start-process` may start, each an `argv[0]` as written:
+    a bare name looked up on the `PATH` when it starts, an absolute path, or `./<p>`,
+    a file of the folder bundled as the action's asset whose step files' copy runs.
+    `process-alive` and `signal-process` take only a process whose `program` is one.
+  - `sockets`: the Unix sockets `request` may reach.
+  - `folders`: the folders `read-file` and `list-folder` may read, each with what is
+    below it.
+
+  A socket or folder is an absolute path, `~/<p>` under the worker's home folder, or
+  a path relative to the run's base folder. A folder is compared once symbolic links
+  are resolved, so a link never leads out of it. A grant of any other kind is
+  `component.grant-unsupported`.
+- `async`: as an external action's (§2), and optional: a `component` action is always
+  async. `probe`, `watch` and `stop` may each be given in the `command` form; one that
+  is given is run instead of the runner's own export. The `component` form of those
+  three stays refused (`action.component-unsupported`).
+- `timeoutMs`: how long `start` may run, a positive decimal string, default
+  `"60000"`. A probe and a stop get 10 s.
+
+**The world.** A runner is a component of world `runner` of
+`contracts/wit/runner/runner.wit`, `runspore:runner@0.1.0`. It exports `step`:
+`start`, `probe` and `stop`, each given the try it looks after as a `context` (run,
+node, action, invocation, attempt, visit, effect key, input and params as canonical
+JSON, the base folder, the work folder, the step files, the result channel, and to
+`start` only the attempt's token). It may import only `host`:
+
+| Import | What it does |
+| --- | --- |
+| `start-process` | Starts a granted program detached: argv, working folder and environment, in a process group of its own, its standard streams on the null device. Returns a handle: program, host name, boot, process group ID and start time |
+| `process-alive` | `alive`, `dead` or `unknown`, as the check before a lease expiry looks at a process record (The process record, below): the leader checked by its start time, not its ID alone; a zombie is dead |
+| `signal-process` | Sends `term`, `kill`, `interrupt` or `hangup` to the process's group when it is alive; says whether it did |
+| `request` | One request and response over a granted Unix socket: writes the body, reads to the first newline or the end, at most 1 MiB |
+| `sleep` | Waits, at most until the call's deadline |
+| `read-file`, `list-folder` | Read-only access to the granted folders: a file of at most 16 MiB, the sorted names in a folder |
+
+A started program inherits the worker's environment, then the spawn's `env`, then the
+variables of an async command's start command (§3: `RUNSPORE_TOKEN`,
+`RUNSPORE_RESULT_CHANNEL`, `RUNSPORE_DB`, the step files and the rest), so it reports
+the step with `complete_step` or `fail_step` as an async command's work does. It does
+not run under the guard: like that work, it must outlive the worker. A runner that
+leaves no handle to its process, or loses it, leaves it running.
+
+**Sandbox.** The runner runs as the kernel does (§1): Wasmtime's deterministic
+features, a memory ceiling of 64 MiB, a fuel watchdog, a fresh instance for every
+call, and no WASI. The host compiles each module once per process, by digest. A call
+also has a deadline: `timeoutMs` for `start`, 10 s for a probe or a stop. A `sleep` or
+`request` past it traps.
+
+**Grants are enforced, never asked.** A host call outside the action's grants traps the
+runner. The host records which grant was missing, and the call ends with it, whatever
+the runner does next:
+
+| Call | Ends with |
+| --- | --- |
+| `start` | `Failure`, `component.not-granted`, not retryable, details `{"grant": "programs" \| "sockets" \| "folders", "value"}`; the message names the grant and the value, such as "action `review` is not granted program `curl`: add it to `grants.programs`" |
+| `probe` | `unknown`, so a probe never frees a step by breaking its grants |
+| `stop` | Late evidence `{"stop": {"exit": null, "stdout": "<the message>"}}` |
+
+The other endings of a call:
+
+| What happened | `start` | `probe` | `stop` |
+| --- | --- | --- | --- |
+| It returned | `ok(handle)`: held, as an async start's handle (§3) | Its answer | `ok(text)`: exit 0; `err(text)`: exit 1; the text as `stdout` |
+| `start` returned `err(failure)` | `Failure` with its code (`component.failed` when it is not a label), message and `retryable` | | |
+| A handle that is not canonical-domain JSON, or over 4 KiB | `Failure`, `component.malformed-output` or `component.output-too-large`, not retryable | | |
+| A trap, the watchdog, refused memory growth, the deadline | `Unknown`, `component.trap`, `component.watchdog`, `component.memory` or `component.timeout`: a process may have started | `unknown` | exit null |
+| The module is not in the step files, or does not load as a `runner` | `Failure`, `component.module-missing` or `component.invalid`, not retryable | `unknown` | exit null |
+| The lease is lost or the engine shuts down, and the runner then calls the host | `Unknown`, `component.stopped`: that call traps | `unknown` | exit null |
+
+The start of a repeatable action must be repeatable by its effect key, as an async
+start command must (§3): a worker that dies after the runner started its process and
+before `hold_attempt` leaves no handle, and the next try runs `start` again. The work
+folder, which is the same for every try, is where it can keep what it started; grant
+it as a folder to read it back.
+
+**Checks.** `validate_workflow` and `start` refuse, with `action.invalid`, a `module`
+that is not a relative path and `grants` that are not lists of strings by the kinds
+above (`component.grant-unsupported` for another kind). `start` of a package without
+an artifact refuses a `component` action with `component.no-artifact`; `start_artifact`
+loads each runner from the artifact and refuses one it does not hold
+(`component.module-missing`) or that is not a component of world `runner`, imports
+anything else or lacks an export (`component.invalid`, naming the import or the
+export). Nothing is created. `spore validate` checks the same of a folder (dot.md §6).
+
+**Recovery** is an async command's. The handle is stored with `hold_attempt`; the
+worker then holds nothing. A worker that died is replaced by any other: its sweep, and
+`probe_step`, probe the held attempt with the runner's `probe`, and a `dead` answer
+expires it (§3, Probe); a cancel runs the runner's `stop` once (§3, Stop).
+
+**Failpoints.**
+
+| Name | Position |
+| --- | --- |
+| `host.component.after-spawn` | `start-process` started the program, before the runner gets its handle |
+| `host.component.after-start` | `start` returned a handle, before `hold_attempt` |
+
 ### The guard (0.2)
 
 Every process the host starts for an attempt runs under a guard. In 0.2 that is a
 `command`'s `argv`, an async command's start command included, and an async action's
-probe, watch and stop.
+probe, watch and stop. A step runner's `start-process` is not: it starts work that
+must outlive the worker (§3, `component`).
 
 - The guard is a hidden mode of the host's own executable (config `guard`), so there
   is nothing extra to install. It is never named in a workflow and no action opts out.
@@ -1208,3 +1330,7 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H38 | **0.2.** Two runs with a step due each; `run_until_parked` on one, then on the other; and `spore continue <runId>` on one of two started runs | The first call runs only its run's step: the other's invocation stays pending with no attempt, and runs once on its own call; `continue` prints no change of the other run, which is still `created`, and its command has not run |
 | H39 | **0.2.** A waiting run that started a run, which started a third, each with a step due, and a run outside them with a step due; `run_until_parked` on the waiting run; and `spore continue <runId> --wait` on a build whose step starts a ticket run that waits for a person, then signals the build | The two runs below it complete and the call returns the run `waiting`; the run outside them is still `created`; `continue` returns with the ticket run at its wait and the build's `needs` `child`, with the ticket's commands and none of the build's; after the ticket's signal, `continue --wait` completes both |
 | H40 | **0.2.** A worker with one slot and three runs of `implement` then `ship`, started a moment apart, the first run's `implement` holding the slot; once with no `priority` and once with `ship` at priority 1 | `status` shows the other two runs queued 1st and 2nd of 2; without priority every `implement` runs before any `ship`, oldest run first; with it each run's `ship` runs before the next run's `implement` |
+| H41 | **0.2.** A `component` action whose runner starts a detached process and returns its handle; the worker SIGKILLed after `hold_attempt`; a second worker | The attempt is held with the handle; the process survives the worker; the second worker's `probe_step` answers `alive` through the runner, its `cancel` runs the runner's `stop`, which ends the process, and a probe then answers `dead` |
+| H42 | **0.2.** Runners that start a program, reach a socket and read a file outside their grants; one granted each | Each ungranted call fails the step with `component.not-granted` naming the grant and the value, not retryable, with nothing started; a granted one works; an ungranted probe answers `unknown` |
+| H43 | **0.2.** `validate_workflow`, `start` and `start_artifact` with a `component` action whose grants name another kind, without an artifact, whose module the artifact lacks, that is not a component, and that imports an interface outside `runner` | Each is refused with its code and no run |
+| H44 | **0.2.** Crash at `host.component.after-spawn` and `host.component.after-start` during a run whose `component` step follows a command step, then restart | The run completes; the command step ran once; the runner's start ran again on the next try and its work reported once |

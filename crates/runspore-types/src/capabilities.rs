@@ -10,6 +10,11 @@ use serde_json::Value;
 pub const EXTERNAL: &str = "external";
 /// The kind of an action the worker runs as a program; with `async`, an async command.
 pub const COMMAND: &str = "command";
+/// The kind of an action whose start, probe and stop are a step runner, a WebAssembly
+/// component sealed into the workflow (spec/host.md §3, `component`). Always async.
+pub const COMPONENT_KIND: &str = "component";
+/// The WIT world a step runner is a component of, with its version.
+pub const RUNNER_WORLD: &str = "runspore:runner/runner@0.1.0";
 /// The result channel that writes through the store: `step complete` and `step fail`.
 pub const STORE_CHANNEL: &str = "store";
 /// The async programs an action may declare, in the order they are checked.
@@ -17,14 +22,17 @@ pub const PROGRAMS: [&str; 3] = ["probe", "watch", "stop"];
 /// The form of a program no host offers yet.
 pub const COMPONENT: &str = "component";
 
-/// What a host offers: the action kinds it runs, those it runs async, and the result
-/// channels an async action can report through. Each list is sorted.
+/// What a host offers: the action kinds it runs, those it runs async, the result
+/// channels an async action can report through, and the worlds of the step runners it
+/// runs. Each list is sorted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostCapabilities {
     pub action_kinds: Vec<String>,
     pub async_kinds: Vec<String>,
     pub result_channels: Vec<String>,
+    #[serde(default)]
+    pub component_worlds: Vec<String>,
 }
 
 /// One way an action asks for more than the host offers.
@@ -111,9 +119,9 @@ fn async_spec(action: &Value) -> Option<&Value> {
     action.get("async").filter(|a| !a.is_null())
 }
 
-/// Whether the action is async: `external`, or carrying `async`.
+/// Whether the action is async: `external` or `component`, or carrying `async`.
 pub fn is_async(action: &Value) -> bool {
-    kind(action) == EXTERNAL || async_spec(action).is_some()
+    [EXTERNAL, COMPONENT_KIND].contains(&kind(action)) || async_spec(action).is_some()
 }
 
 fn kind(action: &Value) -> &str {
@@ -139,8 +147,8 @@ pub fn channels(action: &Value) -> Vec<String> {
 
 impl HostCapabilities {
     /// The set of a host whose registry runs `kinds`: those and `external`; `external`
-    /// async, and `command` when it runs commands (an async command); the `store`
-    /// channel.
+    /// async, `command` when it runs commands (an async command) and `component` when
+    /// it runs step runners; the `store` channel; the runner world with `component`.
     pub fn of<'a>(kinds: impl IntoIterator<Item = &'a str>) -> Self {
         let mut action_kinds: Vec<String> = kinds.into_iter().map(String::from).collect();
         action_kinds.push(EXTERNAL.to_string());
@@ -148,13 +156,19 @@ impl HostCapabilities {
         action_kinds.dedup();
         let async_kinds = action_kinds
             .iter()
-            .filter(|k| [COMMAND, EXTERNAL].contains(&k.as_str()))
+            .filter(|k| [COMMAND, COMPONENT_KIND, EXTERNAL].contains(&k.as_str()))
             .cloned()
+            .collect();
+        let component_worlds = action_kinds
+            .iter()
+            .filter(|k| *k == COMPONENT_KIND)
+            .map(|_| RUNNER_WORLD.to_string())
             .collect();
         Self {
             action_kinds,
             async_kinds,
             result_channels: vec![STORE_CHANNEL.to_string()],
+            component_worlds,
         }
     }
 
@@ -238,6 +252,14 @@ mod tests {
         assert_eq!(set.result_channels, ["store"]);
         let no_commands = HostCapabilities::of(["native"]);
         assert_eq!(no_commands.async_kinds, ["external"]);
+        assert!(set.component_worlds.is_empty());
+        let runners = HostCapabilities::of(["command", "component"]);
+        assert_eq!(runners.async_kinds, ["command", "component", "external"]);
+        assert_eq!(runners.component_worlds, [RUNNER_WORLD]);
+        assert!(runners
+            .shortfalls(&json!({"kind": "component", "module": "r.wasm"}))
+            .is_empty());
+        assert!(is_async(&json!({"kind": "component"})));
     }
 
     #[test]

@@ -77,8 +77,10 @@ The kinds:
   They make a run's pinned sources complete, so `spore inspect --run` can show what a
   run was started from.
 - `instructions`: the file a node's `instructions` names. Its owner is that node.
-- `asset`: a file an action's `assets` lists, and a probe, watch or stop program the
-  action names as `./<path>` (dot.md §4). Its owner is that action.
+- `asset`: a file an action's `assets` lists, a probe, watch or stop program the
+  action names as `./<path>` (dot.md §4), and (0.2) a `component` action's `module`
+  and each `./<path>` in its `grants.programs` (host.md §3, `component`). Its owner is
+  that action. A step runner is therefore part of the artifact and of its digest.
 
 A file that several owners name, for example one instructions file shared by two
 nodes, is an entry of each, with the same path and digest; its bytes are stored once.

@@ -166,6 +166,46 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "Actor")]
     pub actor: Option<String>,
+    /// `component`: the step runner, a WebAssembly component of world
+    /// `runspore:runner/runner@0.1.0` in the folder, sealed into the workflow artifact.
+    #[serde(default)]
+    #[schemars(with = "FileRef")]
+    pub module: Option<String>,
+    /// `component`: what the step runner may do. A host call outside it fails the step.
+    #[serde(default)]
+    #[schemars(with = "Grants")]
+    pub grants: Option<Grants>,
+}
+
+/// What a step runner may do, by kind. Each list is optional, default empty.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Grants {
+    /// The programs it may start, each as `argv[0]`: a bare name looked up on the
+    /// `PATH`, an absolute path, or `./<path>`, a file of the folder bundled with the
+    /// action.
+    #[serde(default)]
+    #[schemars(with = "Vec<Grant>")]
+    pub programs: Option<Vec<String>>,
+    /// The Unix sockets it may send a request to: absolute, `~/<path>`, or relative to
+    /// the run's base folder.
+    #[serde(default)]
+    #[schemars(with = "Vec<Grant>")]
+    pub sockets: Option<Vec<String>>,
+    /// The folders it may read, with everything below them, written as sockets are.
+    #[serde(default)]
+    #[schemars(with = "Vec<Grant>")]
+    pub folders: Option<Vec<String>>,
+}
+
+/// One thing a step runner is granted, as it is written.
+#[derive(JsonSchema)]
+#[schemars(transform = grant)]
+#[allow(dead_code)]
+struct Grant(String);
+
+fn grant(schema: &mut schemars::Schema) {
+    schema.insert("minLength".into(), json!(1));
 }
 
 /// An asynchronous action's bounds, and the programs that look after its holder.
@@ -279,7 +319,8 @@ fn positive(schema: &mut schemars::Schema) {
     schema.insert("pattern".into(), json!(POSITIVE));
 }
 
-/// A `command` action needs `argv`; a `native` one needs `function`.
+/// A `command` action needs `argv`; a `native` one needs `function`; a `component`
+/// one needs `module`.
 fn kind_needs(schema: &mut schemars::Schema) {
     let needs = |kind: &str, field: &str| {
         json!({"if": {"properties": {"kind": {"const": kind}}, "required": ["kind"]},
@@ -287,7 +328,11 @@ fn kind_needs(schema: &mut schemars::Schema) {
     };
     schema.insert(
         "allOf".into(),
-        json!([needs("command", "argv"), needs("native", "function")]),
+        json!([
+            needs("command", "argv"),
+            needs("native", "function"),
+            needs("component", "module")
+        ]),
     );
 }
 
@@ -297,6 +342,7 @@ pub enum Kind {
     Command,
     Native,
     External,
+    Component,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -822,6 +868,7 @@ fn missing(value: &Value, at: &str, field: &str) -> Diagnostic {
             }]))
         }
         (["actions", _], "argv") => Diagnostic::new("command.no-argv", At::key(at)),
+        (["actions", _], "module") => Diagnostic::new("component.no-module", At::key(at)),
         _ => Diagnostic::new("settings.missing-field", At::key(at))
             .arg("field", Arg::computed(field.to_string())),
     }
@@ -930,6 +977,11 @@ fn unexpected_key(value: &Value, at: &str, key: &str, schema_path: &str) -> Diag
     let remove = || Fix::review(vec![Edit::Remove { at: child.clone() }]);
     let k = key.to_string();
     match (&path[..], key) {
+        (["actions", _, "grants"], _) => {
+            Diagnostic::new("component.grant-unsupported", At::key(&child))
+                .arg("grant", Arg::Key(child.clone()))
+                .fix(remove().arg("allowed", Arg::computed(allowed.clone())))
+        }
         ([], "name" | "start") => Diagnostic::new("settings.from-dot", At::key(&child))
             .arg("key", Arg::Key(child.clone()))
             .fix(remove()),

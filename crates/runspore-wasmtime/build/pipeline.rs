@@ -1,5 +1,6 @@
-//! Builds `runspore-component` for `wasm32-unknown-unknown` with a nested cargo
-//! and turns the core module into a component with `wit-component`.
+//! Builds a guest crate (`runspore-component`, or the test-only
+//! `runspore-test-runner`) for `wasm32-unknown-unknown` with a nested cargo and turns
+//! the core module into a component with `wit-component`.
 //!
 //! Shared by the build script and the reproducibility test. The nested build runs
 //! in release with the workspace profile, under `--locked`, with paths remapped so
@@ -24,10 +25,23 @@ const SCRUBBED_ENV: &[&str] = &[
     "CARGO_PRIMARY_PACKAGE",
 ];
 
-/// Builds the guest with `features` into `target_dir` and returns component bytes.
+/// Builds the kernel guest with `features` into `target_dir` and returns component
+/// bytes.
+#[allow(dead_code)]
 pub fn build_component(
     workspace: &Path,
     target_dir: &Path,
+    features: &[&str],
+) -> Result<Vec<u8>, String> {
+    build_guest(workspace, target_dir, "runspore-component", features)
+}
+
+/// Builds the guest crate `package` with `features` into `target_dir` and returns
+/// component bytes.
+pub fn build_guest(
+    workspace: &Path,
+    target_dir: &Path,
+    package: &str,
     features: &[&str],
 ) -> Result<Vec<u8>, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -40,7 +54,7 @@ pub fn build_component(
     let mut command = Command::new(cargo);
     command
         .current_dir(workspace)
-        .args(["build", "--locked", "--release", "-p", "runspore-component"])
+        .args(["build", "--locked", "--release", "-p", package])
         .args(["--target", GUEST_TARGET])
         .arg("--target-dir")
         .arg(target_dir);
@@ -60,7 +74,7 @@ pub fn build_component(
     let module_path = target_dir
         .join(GUEST_TARGET)
         .join("release")
-        .join("runspore_component.wasm");
+        .join(format!("{}.wasm", package.replace('-', "_")));
     let module = std::fs::read(&module_path)
         .map_err(|e| format!("reading {}: {e}", module_path.display()))?;
     componentise(&module)

@@ -1,0 +1,13 @@
+{
+  "format": "runspore.workflow/0.2",
+  "actions": {
+    "review": {
+      "kind": "component",
+      "module": "runner.wasm",
+      "effect": "idempotent"
+    }
+  },
+  "nodes": {
+    "review": { "action": "review" }
+  }
+}

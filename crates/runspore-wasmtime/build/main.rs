@@ -1,5 +1,6 @@
-//! Builds the kernel component (`kernel.wasm`) and the test-only echo component
-//! (`echo.wasm`) into `OUT_DIR`. See `pipeline.rs`.
+//! Builds the kernel component (`kernel.wasm`), the test-only echo component
+//! (`echo.wasm`) and the test-only step runner (`test-runner.wasm`) into `OUT_DIR`.
+//! See `pipeline.rs`.
 
 use std::path::PathBuf;
 
@@ -11,7 +12,9 @@ const GUEST_INPUTS: &[&str] = &[
     "crates/runspore-component",
     "crates/runspore-kernel",
     "crates/runspore-types",
+    "crates/runspore-test-runner",
     "contracts/wit/machine",
+    "contracts/wit/runner",
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
@@ -31,8 +34,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build");
 
     let target_dir = out_dir.join("guest-target");
-    for (name, features) in [("kernel", &[][..]), ("echo", &["echo"][..])] {
-        let component = pipeline::build_component(&workspace, &target_dir, features)
+    for (name, package, features) in [
+        ("kernel", "runspore-component", &[][..]),
+        ("echo", "runspore-component", &["echo"][..]),
+        ("test-runner", "runspore-test-runner", &[][..]),
+    ] {
+        let component = pipeline::build_guest(&workspace, &target_dir, package, features)
             .unwrap_or_else(|e| panic!("building the {name} component: {e}"));
         std::fs::write(out_dir.join(format!("{name}.wasm")), component)
             .unwrap_or_else(|e| panic!("writing the {name} component: {e}"));

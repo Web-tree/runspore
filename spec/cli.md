@@ -251,8 +251,9 @@ before it starts anything. It reads no database and needs no project folder:
 {"format": "runspore.cli/0.2", "version": "0.2.0",
  "contracts": {"artifact": "0.1", "cli": "0.2", "dot": "0.2", "host": "0.2",
                "kernel": "0.2", "schema": "0.2", "store": "0.2"},
- "actionKinds": ["command", "external", "native"],
- "asyncKinds": ["command", "external"], "resultChannels": ["store"]}
+ "actionKinds": ["command", "component", "external", "native"],
+ "asyncKinds": ["command", "component", "external"], "resultChannels": ["store"],
+ "componentWorlds": ["runspore:runner/runner@0.1.0"]}
 ```
 
 - `version`: the version of the `spore` binary, the one `spore --version` prints.
@@ -267,15 +268,19 @@ before it starts anything. It reads no database and needs no project folder:
   workflow artifact ([artifact.md](artifact.md)) and the schema subset
   ([schema.md](schema.md)). A contract gains a key when it is added; one that changes
   gets a new version.
-- `actionKinds`, `asyncKinds`, `resultChannels`: the host's capability set
-  (host.md §2, The handshake): the action kinds it runs, those it runs async, and the
-  result channels an async action can report through.
+- `actionKinds`, `asyncKinds`, `resultChannels`, `componentWorlds`: the host's
+  capability set (host.md §2, The handshake): the action kinds it runs, those it runs
+  async, the result channels an async action can report through, and (0.2) the WIT
+  world, with its version, of the step runners its component host runs (host.md §3,
+  `component`).
 
 Text mode prints one line per field, such as `async kinds     command, external`.
 
 `validate`, `build`, `start` and `run` check every action against the set and refuse
 a workflow that asks for something outside it, naming the action and what to
-configure (`action.component-unsupported`, `action.no-result-channel`; dot.md §6).
+configure (`action.component-unsupported`, `action.no-result-channel`; dot.md §6),
+and a step runner that does not fit the world or a grant this `spore` does not offer
+(`component.invalid`, `component.import-unsupported`, `component.grant-unsupported`).
 `start` of an artifact also refuses an action of a kind this `spore` does not run or
 does not run async (`action.kind-unregistered`, `action.async-unsupported`; host.md
 §2). `start` records the result channel it picked for each async action with the run,

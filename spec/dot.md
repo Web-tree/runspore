@@ -114,7 +114,8 @@ own Rust types, published at
 against the same schema whether or not it does. An action takes only the fields the
 schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, `priority`, and per kind: for
 `command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
-`native`, `function`; for `external` (0.2), `actor` and `async`), so a misspelt field
+`native`, `function`; for `external` (0.2), `actor` and `async`; for `component`
+(0.2), `module`, `grants`, `timeoutMs` and `async`), so a misspelt field
 is a problem rather than ignored. An action whose `effect` is `pure`, `read-only` or
 `idempotent` and that sets no `retry.maxAttempts` gets `"maxAttempts": 3` in the
 package, so a try lost to a crash runs again on its own, as Temporal's default retry
@@ -128,6 +129,15 @@ must be smaller than its `timeoutMs` (default `"3600000"`), else
 `stop` are each `{"command": {"argv", "cwd", "env", "timeoutMs"}}`, `argv` required,
 or `{"component": {…}}`, and `channels` is a non-empty list of result channels
 (host.md §3, Async commands).
+**0.2:** a `component` action names its step runner with `module`, a file reference
+like an asset's, and what the runner may do with `grants`: `programs`, `sockets` and
+`folders`, each a list of strings (host.md §3, `component`). A `./<p>` program is a
+file of the folder, bundled as the action's asset. The build checks the runner as the
+host loads it: a file that is not a component of world `runspore:runner/runner@0.1.0`,
+or lacks its `step` export, is `component.invalid`; one that imports anything but the
+world's `host` interface is `component.import-unsupported`, naming the import; a grant
+of a kind this `spore` does not offer is `component.grant-unsupported`; a `component`
+action without `module` is `component.no-module`.
 **0.2:** `priority` is an integer from -1000 to 1000, default 0: which due step a
 worker or an actor takes first, a higher priority before a lower one and, among
 equals, the one due longest (host.md §2, Dispatch). It changes no result, only the
@@ -282,8 +292,9 @@ action: steps may run it too, and its `argv` mappings read the params under `par
    action declares has an edge, and every edge's `on` is a declared outcome,
    `failed`, or `exhausted` when the node has `loopLimits`.
 5. Check and strip the file references, and collect the files they name: each
-   `instructions` file as an `instructions` entry owned by its node, each asset and
-   each `./` probe, watch and stop program as an `asset` entry owned by its action,
+   `instructions` file as an `instructions` entry owned by its node, each asset,
+   each `./` probe, watch and stop program, and (0.2) each `component` action's
+   `module` and `./` program grant as an `asset` entry owned by its action,
    each schema file as a `source` entry. Read each `outputSchemas` file and the
    `inputSchema` file, inline the `$ref`s and check every schema against the subset
    at its place in the package (schema.md §1), the input schema also for its object

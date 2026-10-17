@@ -7,6 +7,7 @@
 mod activity;
 mod arrival;
 mod command;
+mod component;
 pub mod disk;
 mod engine;
 mod error;
@@ -23,6 +24,7 @@ pub use activity::{
 };
 pub use arrival::{Arrival, Arrow, End};
 pub use command::CommandRunner;
+pub use component::{ComponentRunner, GRANT_KINDS};
 pub use engine::{
     cut_off, validate_workflow, AsyncStep, Cancelled, CutOff, CutOffReason, Engine, EngineConfig,
     HeldSlot, Observer, RunIds, StartOutcome, StepClaim, StepDescription, StepRenewed, StepReport,

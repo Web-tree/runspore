@@ -21,6 +21,7 @@ thiserror.workspace = true
 tokio.workspace = true
 nix = { version = "0.31.3", features = ["signal", "process", "fs", "hostname"] }
 getrandom = "0.4.3"
+wasmtime = { version = "49.0.2", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libproc = "0.14.11"

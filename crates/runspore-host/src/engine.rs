@@ -27,6 +27,7 @@ use tokio::task::JoinSet;
 
 use crate::activity::{ActivityContext, ActivityOutput, ActivityRegistry, DEFAULT_STOP_GRACE_MS};
 use crate::arrival::{Arrival, Trail};
+use crate::component;
 use crate::disk::{self, Disk};
 use crate::error::{HostError, Unrouted};
 use crate::external;
@@ -633,6 +634,13 @@ fn check_workflow(
                 HostError::invalid("action.invalid", format!("action `{action_id}`: {e}"))
             })?;
         }
+        // Before its runner's `validate`, so a grant of another kind has its own code.
+        if kind == component::KIND && activities.get(kind).is_some() {
+            component::parse(action_id, action)?;
+            external::async_of(action).map_err(|e| {
+                HostError::invalid("action.invalid", format!("action `{action_id}`: {e}"))
+            })?;
+        }
         if let (true, Some(channel)) = (capabilities::is_async(action), offered.pick(action)) {
             result_channels.insert(action_id.clone(), channel);
         }
@@ -765,6 +773,7 @@ impl Engine {
         input: Value,
         start_key: &str,
     ) -> Result<StartOutcome, HostError> {
+        component::check_runners(workflow_json, None)?;
         self.start_from(workflow_json, None, input, start_key).await
     }
 
@@ -783,6 +792,7 @@ impl Engine {
                 "the workflow declares instructions or assets, and the engine has no files_dir",
             ));
         }
+        component::check_runners(&artifact.package, Some(artifact))?;
         let stored = StoredArtifact {
             digest: artifact.digest.clone(),
             bytes: artifact.bytes.clone(),

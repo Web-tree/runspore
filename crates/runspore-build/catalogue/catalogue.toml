@@ -992,6 +992,46 @@ args = { channels = "input", offered = "computed" }
 example = "action.no-result-channel"
 
 [[code]]
+code = "component.no-module"
+severity = "problem"
+title = '''Missing "module"'''
+message = '''Action {action} runs a step runner, but has no "module" to say which.'''
+fix = '''add "module": the path of the runner's .wasm file in this folder, such as "runner.wasm".'''
+why = '''a component action's start, probe and stop are the runner's; without it nothing can start the step.'''
+example = "component.no-module"
+absent = true
+
+[[code]]
+code = "component.invalid"
+severity = "problem"
+title = '''Not a step runner'''
+message = '''{module}, the runner of action {action}, is not a step runner: {reason}.'''
+fix = '''build the runner as a WebAssembly component of world "runspore:runner/runner@0.1.0", which exports "runspore:runner/step@0.1.0".'''
+why = '''spore loads the runner the way the host will, so a file that cannot run is found before the run starts.'''
+args = { module = "input", reason = "computed" }
+example = "component.invalid"
+
+[[code]]
+code = "component.import-unsupported"
+severity = "problem"
+title = '''Runner imports what spore does not offer'''
+message = '''{module}, the runner of action {action}, imports {import}, which spore does not offer a step runner.'''
+fix = '''import only "runspore:runner/host@0.1.0": it starts programs, reaches sockets and reads folders the action grants.'''
+why = '''a runner gets only the host's own imports, so it can do no more than its grants allow.'''
+args = { module = "input", import = "computed" }
+example = "component.import-unsupported"
+
+[[code]]
+code = "component.grant-unsupported"
+severity = "problem"
+title = '''Grant spore does not offer'''
+message = '''Action {action} grants its runner {grant}, a kind of grant spore does not offer.'''
+fix = '''remove it; the kinds of grant spore offers are {allowed}.'''
+why = '''spore enforces every grant itself, so it refuses one it cannot enforce rather than ignore it.'''
+args = { grant = "key", allowed = "computed" }
+example = "component.grant-unsupported"
+
+[[code]]
 code = "command.no-argv"
 severity = "problem"
 title = '''Missing "argv"'''
