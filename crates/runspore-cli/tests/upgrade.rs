@@ -1,7 +1,8 @@
 //! A newer `spore` continues the runs an older 0.2 `spore` left in its database
-//! (spec/store.md §3, spec/kernel.md Versions, spec/host.md §2 tick): the file is
-//! upgraded in place, a run waiting at a signal takes the signal, and a step that was
-//! handed out reports its result and moves its run on.
+//! (spec/store.md §3, spec/kernel.md Versions, spec/host.md §2 tick): opening the file
+//! does not upgrade it; `migrate` does, in place, unless a worker of the older `spore`
+//! is still at work on it; then a run waiting at a signal takes the signal, and a step
+//! that was handed out reports its result and moves its run on.
 
 mod common;
 
@@ -122,7 +123,7 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
     );
     assert_eq!(before[1].1, "external");
 
-    // Its schema: what the file held before versions 5 to 11 were added.
+    // Its schema: what the file held before versions 5 to 12 were added.
     sql(&dir)
         .execute_batch(&format!(
             "ALTER TABLE runs DROP COLUMN cancel_reason;
@@ -136,15 +137,43 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
              ALTER TABLE attempts DROP COLUMN holder;
              ALTER TABLE attempts DROP COLUMN deadline_ms;
              DROP TABLE meta;
+             DROP TABLE workers;
              PRAGMA user_version = {OLDER};"
         ))
         .unwrap();
     let older = as_the_older_spore_reads_it(&dir);
     assert_eq!(older.0, OLDER);
 
+    // Opening it does not upgrade it: a command that reads, one that writes, and one
+    // that reads even with --migrate are each refused, and the file is left as the
+    // older spore wrote it.
+    for command in [
+        vec!["status", gate_run.as_str()],
+        vec![
+            "signal",
+            gate_run.as_str(),
+            "approval",
+            "--outcome",
+            "approved",
+        ],
+        vec!["--migrate", "list"],
+    ] {
+        let (code, refused) = json(&dir, &command);
+        assert_eq!(
+            (code, &refused["error"]["code"]),
+            (Some(10), &json!("schema.needs-migrate")),
+            "{command:?}: {refused}"
+        );
+        let message = refused["error"]["message"].as_str().unwrap();
+        for wanted in ["runspore.db", "schema version 4", "spore migrate"] {
+            assert!(message.contains(wanted), "no `{wanted}` in {message}");
+        }
+        assert_eq!(as_the_older_spore_reads_it(&dir), older, "{command:?}");
+    }
+
     // An upgrade that stops after its first step leaves the file as the older spore
     // wrote it.
-    let mut cmd = dir.cmd(&["--json", "status", &gate_run]);
+    let mut cmd = dir.cmd(&["--json", "migrate"]);
     cmd.env(runspore_types::failpoint::ENV, "store.upgrade.after-step");
     let crashed = common::run(cmd);
     assert!(!crashed.status.success(), "the upgrade did not stop");
@@ -158,7 +187,13 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
         .unwrap();
     assert_eq!(tables, 0, "the first upgrade step was rolled back");
 
-    // The newer spore upgrades it, and status shows both runs where they were.
+    // `migrate` upgrades it, and status shows both runs where they were.
+    let (code, migrated) = json(&dir, &["migrate"]);
+    assert_eq!(code, Some(0), "{migrated}");
+    assert_eq!(
+        (&migrated["migrated"], &migrated["from"], &migrated["to"]),
+        (&json!(true), &json!(OLDER), &json!(SCHEMA_VERSION))
+    );
     let after = [place(&dir, &gate_run), place(&dir, &review_run)];
     assert_eq!(after, before);
     assert_eq!(user_version(&sql(&dir)), SCHEMA_VERSION);
@@ -214,4 +249,124 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
         (refused.code(), &refused.json()["error"]["code"]),
         (Some(10), &json!("schema.too-new"))
     );
+}
+
+/// `nap`, a step that sleeps until it is stopped.
+fn slow() -> Value {
+    json!({
+        "format": "runspore.workflow/0.2", "name": "slow", "start": "nap",
+        "actions": {"nap": {"kind": "command", "effect": "read-only", "argv": ["sleep", "30"]}},
+        "nodes": {
+            "nap": {"kind": "activity", "action": "nap", "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete"}
+        }
+    })
+}
+
+fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+    let start = std::time::Instant::now();
+    while !done() {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// The workers the file records: ID and version.
+fn workers(dir: &Dir) -> Vec<(String, String)> {
+    let conn = sql(dir);
+    let mut rows = conn
+        .prepare("SELECT worker_id, version FROM workers ORDER BY worker_id")
+        .unwrap();
+    rows.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// A worker that works on runs, started with a short lease so it is soon gone once
+/// stopped.
+fn worker(dir: &Dir) -> std::process::Child {
+    dir.spawn(&[
+        "--native-kernel",
+        "--poll-ms",
+        "20",
+        "--lease-ms",
+        "1000",
+        "--heartbeat-ms",
+        "200",
+        "--grace-ms",
+        "200",
+        "--stop-grace-ms",
+        "200",
+        "worker",
+    ])
+}
+
+fn stop(mut worker: std::process::Child) {
+    let pid = nix::unistd::Pid::from_raw(worker.id() as i32);
+    nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM).unwrap();
+    worker.wait().unwrap();
+}
+
+/// A worker records itself while it works and is gone once it stops. `migrate` waits
+/// while a worker of an older `spore`, which records no version, still runs a step;
+/// once it has stopped, `--migrate` on a command that writes upgrades the file first.
+#[test]
+fn migrate_waits_for_the_workers_of_the_older_spore() {
+    let dir = Dir::new("migrate-live");
+    dir.folder("slow", &slow());
+    let (code, started) = json(&dir, &["start", "slow", "--key", "s"]);
+    assert_eq!(code, Some(0), "{started}");
+    let run = started["runId"].as_str().unwrap().to_string();
+
+    let busy = worker(&dir);
+    wait_for("the worker to take the step", || {
+        sql(&dir)
+            .query_row(
+                "SELECT count(*) FROM attempts WHERE status = 'running'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+            == 1
+    });
+    let registered = workers(&dir);
+    assert_eq!(registered.len(), 1, "{registered:?}");
+    let (worker_id, version) = &registered[0];
+    assert!(worker_id.starts_with("worker-"), "{worker_id}");
+    assert_eq!(version, runspore_store_sqlite::WRITER);
+
+    // The file as spore 0.3.0 left it, whose workers record no version: this worker
+    // stands in for one of them.
+    sql(&dir)
+        .execute_batch("DROP TABLE workers; PRAGMA user_version = 11;")
+        .unwrap();
+    let (code, refused) = json(&dir, &["migrate"]);
+    assert_eq!(
+        (code, &refused["error"]["code"]),
+        (Some(10), &json!("migrate.workers-live")),
+        "{refused}"
+    );
+    let message = refused["error"]["message"].as_str().unwrap();
+    for wanted in [worker_id.as_str(), &format!("step nap of run {run}")] {
+        assert!(message.contains(wanted), "no `{wanted}` in {message}");
+    }
+    assert_eq!(user_version(&sql(&dir)), 11, "the file is left as it was");
+
+    stop(busy);
+    wait_for("the stopped worker's lease to pass", || {
+        let (code, _) = json(&dir, &["--migrate", "release", &run]);
+        code == Some(0)
+    });
+    assert_eq!(user_version(&sql(&dir)), SCHEMA_VERSION);
+
+    let again = worker(&dir);
+    wait_for("the new worker to record itself", || {
+        workers(&dir).len() == 1
+    });
+    stop(again);
+    assert_eq!(workers(&dir), [], "a stopped worker removes its record");
 }

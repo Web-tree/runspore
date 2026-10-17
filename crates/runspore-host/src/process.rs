@@ -50,6 +50,11 @@ fn machine() -> Result<&'static Machine, String> {
         .map_err(Clone::clone)
 }
 
+/// This machine's host name, as process records carry it.
+pub fn host_name() -> Result<String, String> {
+    machine().map(|m| m.host.clone())
+}
+
 /// The process record of the group `pid` leads, read while it is waiting for the go.
 pub fn record(pid: i32) -> Result<ProcessRecord, String> {
     let machine = machine()?;

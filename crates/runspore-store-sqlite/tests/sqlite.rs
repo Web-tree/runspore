@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q15 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q19 of `spec/store.md` section 4.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -299,7 +299,8 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -359,7 +360,8 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -377,7 +379,9 @@ async fn q07_a_version_2_file_is_upgraded() {
     )
     .unwrap();
     drop(conn);
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!((kept.revision, kept.base_dir), (0, None));
@@ -402,7 +406,8 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -420,7 +425,7 @@ async fn q08_a_version_3_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, clock).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, clock).unwrap().0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store
         .get_run(&old)
@@ -461,7 +466,8 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -477,7 +483,9 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     assert_eq!(
         store.writer().unwrap().as_deref(),
@@ -496,7 +504,8 @@ async fn q10_a_version_5_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -511,7 +520,9 @@ async fn q10_a_version_5_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let shown = store
         .list_invocations(&attempt.key)
@@ -565,7 +576,8 @@ async fn q12_a_version_6_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -578,7 +590,9 @@ async fn q12_a_version_6_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store
         .claim_attempt(claim(&old, "claim", &scheduled, "w", 100))
@@ -618,7 +632,8 @@ async fn q13_a_version_7_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -630,7 +645,9 @@ async fn q13_a_version_7_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!((kept.revision, kept.parent), (0, None));
@@ -655,7 +672,8 @@ async fn q14_a_version_8_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -665,7 +683,9 @@ async fn q14_a_version_8_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let shown = store
         .list_invocations(&attempt.key)
@@ -708,7 +728,8 @@ async fn q15_a_version_9_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -717,7 +738,9 @@ async fn q15_a_version_9_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_000))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert!(kept.result_channels.is_empty());
@@ -739,7 +762,8 @@ async fn q16_a_version_10_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          PRAGMA user_version = 10;",
@@ -747,7 +771,9 @@ async fn q16_a_version_10_file_is_upgraded() {
     .unwrap();
     drop(conn);
 
-    let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_200)).unwrap();
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_200))
+        .unwrap()
+        .0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     let kept = store
         .get_run(&attempt.key)
@@ -778,7 +804,8 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert!(child(&path, "create-run", None).status.success());
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE runs DROP COLUMN cancel_reason;
+        "DROP TABLE workers;
+         ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
@@ -809,7 +836,172 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert_eq!((meta, runs), (0, 1), "the first step was rolled back");
     drop(conn);
 
-    let store = SqliteStore::open(&path).unwrap();
+    let store = SqliteStore::migrate(&path).unwrap().0;
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     assert!(effect(&store, "create-run").await);
+}
+
+/// Turns the file at `path` into the version 11 file `spore` 0.3.0 wrote: no
+/// `workers` table.
+fn as_version_11(path: &Path) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE workers;
+         UPDATE meta SET value = '0.3.0' WHERE key = 'writer';
+         PRAGMA user_version = 11;",
+    )
+    .unwrap();
+}
+
+/// The names of the tables in the file at `path`.
+fn tables(path: &Path) -> Vec<String> {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .unwrap();
+    stmt.query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// Q17: `migrate` upgrades a version 11 file, adds the `workers` table and says what
+/// it did; on a current file it changes nothing.
+#[tokio::test]
+async fn q17_a_version_11_file_is_migrated() {
+    let path = fresh_path();
+    let (store, attempt) = expired_lease(&path, "old").await;
+    drop(store);
+    as_version_11(&path);
+
+    let (store, migration) =
+        SqliteStore::migrate_with_clock(&path, ManualClock::new(1_200)).unwrap();
+    assert_eq!(
+        migration,
+        runspore_store_sqlite::Migration {
+            from: 11,
+            from_writer: Some("0.3.0".into()),
+            to: runspore_store_sqlite::SCHEMA_VERSION,
+        }
+    );
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    assert!(tables(&path).contains(&"workers".to_string()));
+    assert!(store.get_run(&attempt.key).await.unwrap().is_some());
+    assert_eq!(
+        store.writer().unwrap().as_deref(),
+        Some(runspore_store_sqlite::WRITER)
+    );
+    drop(store);
+
+    let (_, again) = SqliteStore::migrate(&path).unwrap();
+    assert_eq!(again.from, again.to, "nothing left to migrate");
+}
+
+/// Q18: opening an older 0.2 file without migrating is refused before anything is
+/// read or written, naming its writer and `spore migrate`.
+#[tokio::test]
+async fn q18_an_older_file_is_not_upgraded_by_opening_it() {
+    let path = fresh_path();
+    let (store, _) = expired_lease(&path, "old").await;
+    drop(store);
+    as_version_11(&path);
+    let before = tables(&path);
+
+    let error = SqliteStore::open_with_clock(&path, ManualClock::new(1_200))
+        .err()
+        .expect("refused");
+    assert_eq!(
+        (error.kind, error.code.as_str()),
+        (StoreFailureKind::Incompatible, "schema.needs-migrate")
+    );
+    for wanted in [
+        "schema version 11",
+        "spore 0.3.0",
+        runspore_store_sqlite::WRITER,
+        "spore migrate",
+    ] {
+        assert!(
+            error.message.contains(wanted),
+            "{wanted}: {}",
+            error.message
+        );
+    }
+    assert_eq!(user_version(&path), 11, "the file is left as it was");
+    assert_eq!(tables(&path), before);
+}
+
+/// Q19: `migrate` refuses while a worker of an older `spore` holds a step under a live
+/// lease, naming it and the step, and leaves the file; an actor's claim does not stop
+/// it, and once the lease has passed the file is migrated.
+#[tokio::test]
+async fn q19_migrate_waits_for_the_older_workers() {
+    let path = fresh_path();
+    let clock = ManualClock::new(1_000);
+    let store = SqliteStore::open_with_clock(&path, clock.clone()).unwrap();
+    let mut keys = Vec::new();
+    for (run, owner) in [("busy", "worker-old"), ("claimed", "actor-ab")] {
+        let key = RunKey::new(DEFAULT_TENANT, run);
+        store
+            .create_run(create_run(&key, "create", 0))
+            .await
+            .unwrap();
+        let event = store
+            .list_events(&key, 0, 1)
+            .await
+            .unwrap()
+            .items
+            .remove(0)
+            .event;
+        let turn = Turn {
+            key: key.clone(),
+            revision: 0,
+            applied_sequence: 0,
+            package_digest: String::new(),
+            snapshot: None,
+            snapshot_digest: None,
+            next_event: event,
+        };
+        let (command, invocation) = schedule(&key, "build", 0);
+        store
+            .commit_turn(runspore_store_conformance::commit(
+                &turn,
+                "commit",
+                0,
+                vec![command],
+            ))
+            .await
+            .unwrap();
+        store
+            .claim_attempt(claim(&key, "claim", &invocation, owner, 100))
+            .await
+            .unwrap();
+        keys.push(key);
+    }
+    drop(store);
+    as_version_11(&path);
+
+    let error = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_050))
+        .err()
+        .expect("refused");
+    assert_eq!(
+        (error.kind, error.code.as_str()),
+        (StoreFailureKind::Unavailable, "migrate.workers-live")
+    );
+    for wanted in ["worker worker-old", "step build of run busy", "older spore"] {
+        assert!(
+            error.message.contains(wanted),
+            "{wanted}: {}",
+            error.message
+        );
+    }
+    assert!(!error.message.contains("actor-ab"), "{}", error.message);
+    assert_eq!(user_version(&path), 11, "the file is left as it was");
+
+    let (store, migration) =
+        SqliteStore::migrate_with_clock(&path, ManualClock::new(1_100)).unwrap();
+    assert_eq!(migration.from, 11);
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    for key in &keys {
+        assert!(store.get_run(key).await.unwrap().is_some());
+    }
 }

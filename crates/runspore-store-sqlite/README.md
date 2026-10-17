@@ -14,18 +14,23 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
   of the nine operations named in spec section 3.
 
-## Schema (version 11, in `PRAGMA user_version`)
+## Schema (version 12, in `PRAGMA user_version`)
 
 An empty file is initialized from `src/schema.sql`, and `meta` records the crate
-version that wrote the schema (`writer`). A file written by an earlier 0.2 `spore` is
-upgraded in place, in one transaction, and the writer is recorded again: version 2 to
+version that wrote the schema (`writer`). Opening a file an earlier 0.2 `spore` wrote
+is refused as `schema.needs-migrate`. `SqliteStore::migrate(path)` (or
+`migrate_with_clock`) upgrades it in place, in one transaction, records the writer
+again and returns the `Migration` it made. It refuses as `migrate.workers-live` while
+a row of `workers` of another version has `until_ms` ahead, or a `running` attempt
+owned by an unregistered `worker-…` ID holds a live lease. The steps: version 2 to
 3 adds `runs.base_dir`, version 3 to 4 adds the `artifacts` table and
 `runs.artifact_digest`, version 4 to 5 adds `meta`, version 5 to 6 adds
 `attempts.holder` and `attempts.deadline_ms`, version 6 to 7 adds
 `invocations.params`, version 7 to 8 adds `runs.parent_run_id` and
 `runs.parent_node_id`, version 8 to 9 adds `attempts.claimed_at_ms`, version 9 to 10
 adds `runs.result_channels`, version 10 to 11 adds `runs.cancel_reason`,
-`runs.cancel_at_ms` and `runs.cancel_request_id`. Two files are refused with kind
+`runs.cancel_at_ms` and `runs.cancel_request_id`, version 11 to 12 adds `workers`.
+Two more files are refused with kind
 `incompatible` before anything else is read or written: version 1, which `spore` 0.1
 wrote, as `schema.too-old`, and a newer version as `schema.too-new`; both messages
 name the version that wrote the file and the fix (spec/store.md §3).
@@ -43,6 +48,7 @@ name the version that wrote the file and the fix (spec/store.md §3).
 | `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null; `holder` the canonical holder handle or null; `deadline_ms` the deadline `lease_until_ms` never passes, or null |
 | `receipts` | `(tenant, run_id, request_id)` | one applied mutation per request ID |
 | `audit` | `audit_id` | append-only; `kind` is `late-evidence` or `attempt.expired` |
+| `workers` | `worker_id` | one row per worker that uses the file: its `spore` version, host, process ID, last heartbeat (`beat_at_ms`) and the time it stays fresh until (`until_ms`); written by `beat_worker` with `synchronous = OFF`, since the record is advisory and its fsync would hold the write lock while workers renew leases; removed by `end_worker` |
 
 A receipt stores the operation name, request digest, and the canonical JSON
 (`canonical::encode`) of the returned value. A replay decodes those bytes, so it returns
@@ -75,4 +81,4 @@ may share a file; SQLite's file locks serialize their writers.
 
 `tests/conformance.rs` runs S01–S34 from `runspore-store-conformance`. S01, S03 and S15
 race two instances on one file, which covers Q02. `tests/sqlite.rs` covers Q01 and
-Q03–Q16. Q03 and Q11 run `examples/crash.rs` as a child process at a failpoint.
+Q03–Q19, and a unit test the registered half of `migrate.workers-live`. Q03 and Q11 run `examples/crash.rs` as a child process at a failpoint.

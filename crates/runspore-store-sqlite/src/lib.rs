@@ -20,7 +20,9 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 12;
+/// The first schema version with the `workers` table.
+const SCHEMA_VERSION_WORKERS: i64 = 12;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
@@ -53,6 +55,13 @@ const UPGRADE_9: &str = "ALTER TABLE runs ADD COLUMN result_channels TEXT;";
 const UPGRADE_10: &str = "ALTER TABLE runs ADD COLUMN cancel_reason TEXT;
     ALTER TABLE runs ADD COLUMN cancel_at_ms INTEGER;
     ALTER TABLE runs ADD COLUMN cancel_request_id TEXT;";
+/// Upgrades a version 11 database to version 12: the workers that use it.
+const UPGRADE_11: &str = "CREATE TABLE workers (worker_id TEXT PRIMARY KEY,
+    version TEXT NOT NULL, host TEXT NOT NULL, pid INTEGER NOT NULL,
+    beat_at_ms INTEGER NOT NULL, until_ms INTEGER NOT NULL);";
+/// The prefix of the IDs the host gives its workers (host.md §3); other owners of an
+/// attempt, such as an actor's claim, are not workers.
+const WORKER_PREFIX: &str = "worker-";
 /// The fix for a database another `spore` wrote.
 const FIX: &str = "finish its runs with that spore, or move the file aside";
 const MAX_EVENT_BYTES: usize = 64 * 1024;
@@ -69,6 +78,15 @@ impl Clock for SystemClock {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
+}
+
+/// What `migrate` found and left: the schema version the file had (0 for a new file)
+/// with the `spore` it recorded as its writer, and the version it has now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Migration {
+    pub from: i64,
+    pub from_writer: Option<String>,
+    pub to: i64,
 }
 
 /// A `Store` on one SQLite file. Calls run synchronously behind a mutex; the lock is
@@ -100,8 +118,23 @@ fn user_version(conn: &Connection) -> R<i64> {
 
 /// The schema guard of spec/store.md §3: a file `spore` 0.1 wrote is
 /// `schema.too-old`, one with a newer schema is `schema.too-new`; both name the
-/// version that wrote it and the fix.
-fn guard(conn: &Connection, version: i64) -> R<()> {
+/// version that wrote it and the fix. An older 0.2 schema is `schema.needs-migrate`
+/// unless the caller migrates.
+fn guard(conn: &Connection, version: i64, migrate: bool) -> R<()> {
+    if !migrate && version > SCHEMA_VERSION_0_1 && version < SCHEMA_VERSION {
+        let writer = writer(conn)
+            .map(|w| format!("spore {w}"))
+            .unwrap_or_else(|| "an older spore".to_string());
+        return Err(fail(
+            StoreFailureKind::Incompatible,
+            "schema.needs-migrate",
+            format!(
+                "this database has schema version {version}, written by {writer}, older \
+                 than spore {WRITER} (schema version {SCHEMA_VERSION}): run `spore migrate` \
+                 to upgrade it once no older worker uses it, or keep using {writer}"
+            ),
+        ));
+    }
     if version > SCHEMA_VERSION {
         let writer = writer(conn)
             .map(|w| format!("spore {w}"))
@@ -126,6 +159,73 @@ fn guard(conn: &Connection, version: i64) -> R<()> {
         ));
     }
     Ok(())
+}
+
+/// The workers of another `spore` that use the file at `now`, one line each
+/// (spec/store.md §3): a registered worker of another version whose heartbeat is
+/// fresh, and a worker that holds a step under a live lease without being registered,
+/// so of a `spore` older than the `workers` table.
+fn live_workers(conn: &Connection, version: i64, now: u64) -> R<Vec<String>> {
+    let mut found = Vec::new();
+    let mut registered = Vec::new();
+    if version >= SCHEMA_VERSION_WORKERS {
+        let mut rows = conn
+            .prepare(
+                "SELECT worker_id, version, host, pid, beat_at_ms FROM workers
+                 WHERE until_ms > ?1 ORDER BY worker_id",
+            )
+            .map_err(db)?;
+        let rows = rows
+            .query_map([i(now)], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })
+            .map_err(db)?;
+        for row in rows {
+            let (id, writer, host, pid, beat_at_ms) = row.map_err(db)?;
+            if writer != WRITER {
+                let ago = (i(now) - beat_at_ms).max(0);
+                found.push(format!(
+                    "worker {id} of spore {writer} (pid {pid} on {host}, last heartbeat {ago} ms ago)"
+                ));
+            }
+            registered.push(id);
+        }
+    }
+    let mut rows = conn
+        .prepare(
+            "SELECT a.owner, a.run_id, i.node_id FROM attempts a
+             JOIN invocations i ON i.tenant = a.tenant AND i.run_id = a.run_id
+                               AND i.invocation_id = a.invocation_id
+             WHERE a.status = 'running' AND a.lease_until_ms > ?1
+               AND substr(a.owner, 1, length(?2)) = ?2
+             ORDER BY a.owner, a.run_id",
+        )
+        .map_err(db)?;
+    let rows = rows
+        .query_map(params![i(now), WORKER_PREFIX], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(db)?;
+    for row in rows {
+        let (owner, run, node) = row.map_err(db)?;
+        if !registered.contains(&owner) {
+            found.push(format!(
+                "worker {owner} of an older spore, which records no version, running step \
+                 {node} of run {run}"
+            ));
+        }
+    }
+    Ok(found)
 }
 
 fn conflict(code: &str) -> StoreFailure {
@@ -474,19 +574,43 @@ fn page<T>(mut items: Vec<T>, limit: u32, cursor: impl Fn(&T) -> Value) -> Page<
 
 impl SqliteStore {
     /// Opens or initializes the database at `path` with the system clock.
+    /// Never upgrades it: see `open_with_clock`.
     pub fn open(path: impl AsRef<Path>) -> R<Self> {
         Self::open_with_clock(path, Arc::new(SystemClock))
     }
 
-    /// Opens or initializes the database at `path`. A file written by `spore` 0.1 is
-    /// `incompatible` / `schema.too-old`; one with a newer schema is `incompatible` /
-    /// `schema.too-new`. Both name the version that wrote it and the fix, and leave
-    /// the file as it was (spec/store.md §3).
+    /// Opens or initializes the database at `path`; never upgrades it. A file written
+    /// by `spore` 0.1 is `incompatible` / `schema.too-old`; one with a newer schema is
+    /// `incompatible` / `schema.too-new`; one an earlier 0.2 `spore` wrote is
+    /// `incompatible` / `schema.needs-migrate`. Each names the version that wrote it and
+    /// the fix, and leaves the file as it was (spec/store.md §3).
     pub fn open_with_clock(path: impl AsRef<Path>, clock: Arc<dyn Clock>) -> R<Self> {
+        Self::open_inner(path.as_ref(), clock, false).map(|(store, _)| store)
+    }
+
+    /// Opens or initializes the database at `path` with the system clock, and upgrades
+    /// a file an earlier 0.2 `spore` wrote.
+    pub fn migrate(path: impl AsRef<Path>) -> R<(Self, Migration)> {
+        Self::migrate_with_clock(path, Arc::new(SystemClock))
+    }
+
+    /// Opens or initializes the database at `path`, and upgrades a file an earlier 0.2
+    /// `spore` wrote in one transaction. While a worker of another `spore` uses the
+    /// file the upgrade is `unavailable` / `migrate.workers-live`, naming each, and the
+    /// file is left as it was (spec/store.md §3). Refuses a 0.1 or a newer file as
+    /// `open_with_clock` does.
+    pub fn migrate_with_clock(
+        path: impl AsRef<Path>,
+        clock: Arc<dyn Clock>,
+    ) -> R<(Self, Migration)> {
+        Self::open_inner(path.as_ref(), clock, true)
+    }
+
+    fn open_inner(path: &Path, clock: Arc<dyn Clock>, migrate: bool) -> R<(Self, Migration)> {
         let mut conn = Connection::open(path).map_err(db)?;
         conn.busy_timeout(Duration::from_secs(5)).map_err(db)?;
         // Before any pragma changes the file: a refused file is left as it was.
-        guard(&conn, user_version(&conn)?)?;
+        guard(&conn, user_version(&conn)?, migrate)?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db)?;
         conn.pragma_update(None, "synchronous", "FULL")
@@ -497,10 +621,24 @@ impl SqliteStore {
             .map_err(db)?;
         // Again under the write lock, in case another process changed it meanwhile.
         let version = user_version(&tx)?;
-        guard(&tx, version)?;
+        guard(&tx, version, migrate)?;
+        let from_writer = writer(&tx);
         if version == 0 {
             tx.execute_batch(SCHEMA).map_err(db)?;
-        } else {
+        } else if version < SCHEMA_VERSION {
+            let live = live_workers(&tx, version, clock.now_ms())?;
+            if !live.is_empty() {
+                return Err(fail(
+                    StoreFailureKind::Unavailable,
+                    "migrate.workers-live",
+                    format!(
+                        "spore {WRITER} does not upgrade this database while a worker of \
+                         another spore uses it: {}; stop them, or let them finish, then \
+                         migrate again",
+                        live.join("; ")
+                    ),
+                ));
+            }
             for (from, upgrade) in [
                 (2, UPGRADE_2),
                 (3, UPGRADE_3),
@@ -511,6 +649,7 @@ impl SqliteStore {
                 (8, UPGRADE_8),
                 (9, UPGRADE_9),
                 (10, UPGRADE_10),
+                (11, UPGRADE_11),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -528,10 +667,58 @@ impl SqliteStore {
             .map_err(db)?;
         }
         tx.commit().map_err(db)?;
-        Ok(Self {
+        let migration = Migration {
+            from: version,
+            from_writer,
+            to: SCHEMA_VERSION,
+        };
+        let store = Self {
             conn: Mutex::new(conn),
             clock,
-        })
+        };
+        Ok((store, migration))
+    }
+
+    /// Records that worker `worker_id` of this `spore`, process `pid` on `host`, uses
+    /// the file, with a heartbeat fresh for `fresh_ms` from now. `migrate` refuses
+    /// while a worker of another version has a fresh one (spec/store.md §3).
+    /// The record is advisory: a beat a crash loses costs nothing, so it is committed
+    /// without waiting for the disk and never holds the write lock through an fsync
+    /// while workers renew their leases.
+    pub fn beat_worker(&self, worker_id: &str, host: &str, pid: u32, fresh_ms: u64) -> R<()> {
+        let mut conn = self.lock();
+        conn.pragma_update(None, "synchronous", "OFF").map_err(db)?;
+        let beat = (|| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(db)?;
+            let now = self.clock.now_ms();
+            tx.execute(
+                "INSERT OR REPLACE INTO workers (worker_id, version, host, pid, beat_at_ms, until_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    worker_id,
+                    WRITER,
+                    host,
+                    pid,
+                    i(now),
+                    i(now.saturating_add(fresh_ms))
+                ],
+            )
+            .map_err(db)?;
+            tx.commit().map_err(db)
+        })();
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(db)?;
+        beat
+    }
+
+    /// Removes the record of a worker that stopped.
+    pub fn end_worker(&self, worker_id: &str) -> R<()> {
+        self.lock()
+            .execute("DELETE FROM workers WHERE worker_id = ?1", [worker_id])
+            .map(|_| ())
+            .map_err(db)
     }
 
     /// The `spore` that wrote the schema, as the file records it.
@@ -1626,4 +1813,47 @@ fn list_events(c: &Connection, key: &RunKey, after: u64, limit: u32) -> R<Page<E
     Ok(page(items, limit, |e: &EventRecord| {
         json!(e.event.sequence)
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runspore_store_conformance::ManualClock;
+
+    /// No released schema has the `workers` table below the current version yet, so
+    /// the registered half of the check is read directly: only a fresh heartbeat of
+    /// another version counts, and a registered worker is not listed again by its
+    /// attempts.
+    #[test]
+    fn registered_workers_of_another_version_are_live_while_their_heartbeat_is_fresh() {
+        let path = std::env::temp_dir().join(format!("runspore-workers-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let clock = ManualClock::new(1_000);
+        let store = SqliteStore::open_with_clock(&path, clock.clone()).unwrap();
+        store.beat_worker("worker-this", "box", 7, 100).unwrap();
+        let beat_old = || {
+            store.beat_worker("worker-old", "box", 8, 100).unwrap();
+            store
+                .lock()
+                .execute(
+                    "UPDATE workers SET version = '0.2.9' WHERE worker_id = 'worker-old'",
+                    [],
+                )
+                .unwrap();
+        };
+        beat_old();
+        let live = |now| live_workers(&store.lock(), SCHEMA_VERSION_WORKERS, now).unwrap();
+        assert_eq!(
+            live(1_040),
+            ["worker worker-old of spore 0.2.9 (pid 8 on box, last heartbeat 40 ms ago)"]
+        );
+        assert!(live(1_100).is_empty(), "a stale heartbeat is not live");
+        clock.set(1_090);
+        beat_old();
+        assert_eq!(live(1_150).len(), 1, "a new heartbeat is fresh again");
+        store.end_worker("worker-old").unwrap();
+        assert!(live(1_150).is_empty(), "a worker that stopped is gone");
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
 }

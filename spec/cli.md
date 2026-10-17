@@ -15,6 +15,7 @@ marked **0.2** below are new since 0.1.
 | `--db <path>` | `$RUNSPORE_DB`, else an existing `.spore/runspore.db` of the project folder, else the repository's shared `$SPORE_HOME/db/<repo key>/runspore.db` (§Project folder) | Database file |
 | `--json` | off | One JSON object on stdout instead of text |
 | `--native-kernel` | off | Call the kernel natively instead of through Wasmtime; for debugging |
+| `--migrate` | off | **0.2.** Before a command that writes the database, upgrade it as `migrate` does when an earlier 0.2 `spore` wrote it. A command that only reads never upgrades (§Databases from another version) |
 | `--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms` | engine defaults | Worker tuning; mainly for tests |
 | `--stop-grace-ms` | 5000 | Time a stopped command's process group gets between SIGTERM and SIGKILL (host.md §3, `stop_grace_ms`); used by `worker`, `run` and `continue` |
 | `--max-watches` | 16 | **0.2.** Watches of held async steps one worker runs at once, apart from its slots (host.md §3, Async commands); used by `worker`, `run` and `continue` |
@@ -47,6 +48,7 @@ marked **0.2** below are new since 0.1.
 | `step abandon <runId>` | **0.2.** Frees the run's held async step at once |
 | `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
 | `capabilities` | **0.2.** Prints what this `spore` runs: its version, the version of each contract, and its capability set (§Capabilities) |
+| `migrate` | **0.2.** Upgrades a database an earlier 0.2 `spore` wrote to this `spore`'s schema; refused while a worker of another `spore` uses it (§Databases from another version) |
 
 A `<workflow>` is a workflow folder or its `workflow.dot`, which is built in memory
 as [dot.md](dot.md) describes, or a workflow artifact (a file starting with the
@@ -799,12 +801,41 @@ file with exit 10 before it reads or changes anything else:
   database, says it belongs to 0.1, and gives the fix: finish its runs with the 0.1
   binary, or move the file aside;
 - a database written by a newer `spore` is `schema.too-new`. The message names the
-  database and the version that wrote it, and gives the same fix with that version.
+  database and the version that wrote it, and gives the same fix with that version;
+- a database written by an earlier 0.2 `spore` is `schema.needs-migrate`. The
+  message names the database, its schema version and the version that wrote it, and
+  gives the fix: `spore migrate` once no older worker uses it, or keep using that
+  `spore`.
 
-Two versions of `spore` therefore never share a database, and neither can damage the
-other's runs. A database written by an earlier 0.2 `spore` is upgraded in place and
-used. `init` opens no database; it refuses a 0.1 database at the root by its
-name (`project.legacy-database`, above).
+Opening a database never upgrades it: a newer `spore` called from a step of an older
+worker's run (where `RUNSPORE_DB` names that run's database) is refused, and the
+older workers and the build's own `spore` calls keep working. Only `spore migrate`
+upgrades it, or `--migrate` on a command that writes (`start`, `run`, `worker`,
+`continue`, `signal`, `resolve`, `release`, `cancel`, `step` other than `step show`).
+A command that only reads (`status`, `list`, `events`, `inspect`, `step show`) never
+upgrades, even with `--migrate`.
+
+The upgrade happens in place, in one transaction (store.md §3). It is refused with
+exit 10 and `migrate.workers-live`, changing nothing, while a worker of another
+`spore` uses the database; the message names each one and says to stop it, or let
+it finish, and migrate again. A worker of another `spore` is one whose record has a
+fresh heartbeat and another version, or, for a `spore` from before workers kept
+records, one still running a step under a live lease; the message then names the
+step and the run. `run`, `worker` and `continue` keep their record fresh while they
+work, renewing it every 10 seconds for 30 on a connection of their own, so it never
+holds up a lease renewal, and remove it when they stop. A worker killed without its
+stop counts for up to 30 seconds more.
+
+`migrate` on a database that does not exist exits 2 with `db.not-found` and creates
+nothing. On a current database it changes nothing and says so. Its JSON output is
+`{"db", "migrated", "from", "fromWriter", "to", "writer"}`: the database, whether the
+schema changed, the schema version it had (0 for an empty file, which it
+initializes) and the `spore` the file recorded as its writer, or null, and the
+version it has now with this `spore`'s version.
+
+Two versions of `spore` therefore never share a database by accident, and neither
+can damage the other's runs. `init` opens no database; it refuses a 0.1 database at
+the root by its name (`project.legacy-database`, above).
 
 ## Progress (0.2)
 
@@ -940,7 +971,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 5 | The run is quarantined |
 | 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities). For `continue --wait`, only a ready external step, a held step whose holder waits for a person (`step.waiting` is `person`), or a `capability-missing` step |
 | 7 | **0.2.** For `run`, `worker --until-parked` and `continue`: the run was cancelled, before the command or while it worked (§Cancelling a run) |
-| 10 | Store or internal error, including a database written by 0.1 or by a newer `spore` (§Databases from another version), and step files `step show` cannot make |
+| 10 | Store or internal error, including a database written by 0.1, by a newer `spore` or, without `migrate`, by an earlier 0.2 `spore`, and a `migrate` refused while a worker of another `spore` uses the database (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
 ## JSON output

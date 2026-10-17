@@ -136,3 +136,11 @@ CREATE TABLE audit (
     at_ms INTEGER NOT NULL,
     kind TEXT NOT NULL DEFAULT 'late-evidence'
 );
+CREATE TABLE workers (
+    worker_id TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    host TEXT NOT NULL,
+    pid INTEGER NOT NULL,
+    beat_at_ms INTEGER NOT NULL,
+    until_ms INTEGER NOT NULL
+);

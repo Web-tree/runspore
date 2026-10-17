@@ -14,12 +14,14 @@ use runspore_host::{
     FILES_UNWRITABLE,
 };
 use runspore_kernel::NativeReducer;
-use runspore_store_sqlite::SqliteStore;
+use runspore_store_sqlite::{Migration, SqliteStore, WRITER};
 use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::digest;
 use runspore_types::model::{event_kind, ErrorInfo, Resolution, RunStatus, State};
 use runspore_types::reducer::Reducer;
-use runspore_types::store::{Disposition, RunKey, RunParent, RunView, StoreFailureKind};
+use runspore_types::store::{
+    Disposition, RunKey, RunParent, RunView, StoreFailure, StoreFailureKind,
+};
 use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
@@ -49,6 +51,11 @@ const EXIT_INTERRUPTED: u8 = 130;
 const VERSION: &str = env!("SPORE_BUILD_VERSION");
 /// [`VERSION`] as `spore --version` prints it: with the commit's date on a pre-release.
 const VERSION_TEXT: &str = env!("SPORE_BUILD_VERSION_TEXT");
+/// How often a working `spore` renews its worker record, and how long each renewal
+/// keeps it fresh: three beats, so one that waits on a busy database does not let it
+/// lapse (spec/cli.md, Databases from another version).
+const WORKER_BEAT_MS: u64 = 10_000;
+const WORKER_FRESH_MS: u64 = 30_000;
 
 #[derive(Parser)]
 #[command(
@@ -68,6 +75,10 @@ pub struct Cli {
     /// Call the kernel natively instead of through Wasmtime; for debugging.
     #[arg(long, global = true)]
     pub native_kernel: bool,
+    /// Upgrade a database an earlier 0.2 spore wrote before a command that writes it,
+    /// as `spore migrate` does. A command that only reads never upgrades.
+    #[arg(long, global = true)]
+    pub migrate: bool,
     #[arg(long, global = true)]
     pub lease_ms: Option<u64>,
     #[arg(long, global = true)]
@@ -218,6 +229,9 @@ pub enum Command {
     /// What this spore runs: its version, the contract versions, the action kinds, those
     /// it runs async, and its result channels.
     Capabilities,
+    /// Upgrade a database an earlier 0.2 spore wrote to this spore's schema. Refused
+    /// while a worker of another spore uses it.
+    Migrate,
 }
 
 #[derive(Subcommand)]
@@ -444,6 +458,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
     let database = project::database(given, &cwd)?;
     let db = database.path.clone();
     match &cli.command {
+        Command::Migrate => return migrate(&database),
         Command::Status { .. }
         | Command::List { .. }
         | Command::Events { .. }
@@ -454,22 +469,32 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         {
             return missing_database(&cli.command, &db, &cwd);
         }
+        _ => {}
+    }
+    let reads_only = matches!(
+        &cli.command,
         Command::Status { .. }
-        | Command::List { .. }
-        | Command::Events { .. }
-        | Command::Inspect { .. }
-        | Command::Step(StepCommand::Show { .. }) => {}
-        _ => project::before_write(&database)?,
+            | Command::List { .. }
+            | Command::Events { .. }
+            | Command::Inspect { .. }
+            | Command::Step(StepCommand::Show { .. })
+    );
+    if !reads_only {
+        project::before_write(&database)?;
     }
     let base_dir = match &request {
         Some(request) => request.base_dir.clone(),
         None => project::base_dir(None, &cwd)?,
     };
     let parent = request.as_ref().and_then(|r| r.parent.clone());
-    let engine = engine(cli, &db, &cwd, base_dir, parent)?;
-    if let Command::Run(_) | Command::Worker { .. } | Command::Continue { .. } = &cli.command {
-        engine.observe(progress(cli.json));
-    }
+    let engine = engine(cli, &db, &cwd, base_dir, parent, cli.migrate && !reads_only)?;
+    let _beat = match &cli.command {
+        Command::Run(_) | Command::Worker { .. } | Command::Continue { .. } => {
+            engine.observe(progress(cli.json));
+            Some(Beat::start(&db, engine.config())?)
+        }
+        _ => None,
+    };
     if let Some(request) = &request {
         let outcome = request.start(&engine).await?;
         if let Command::Run(_) = &cli.command {
@@ -492,6 +517,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         | Command::Validate { .. }
         | Command::Explain { .. }
         | Command::Capabilities
+        | Command::Migrate
         | Command::Build { .. }
         | Command::Start(_)
         | Command::Run(_) => unreachable!("handled above"),
@@ -1038,10 +1064,10 @@ fn engine(
     cwd: &Path,
     base_dir: PathBuf,
     parent: Option<RunParent>,
+    migrate: bool,
 ) -> Result<Engine, Fail> {
     let settings = project::settings(cwd)?;
-    let store = SqliteStore::open(db)
-        .map_err(|f| Fail::internal(&f.code, format!("{}: {}", db.display(), f.message)))?;
+    let store = open(db, migrate)?;
     let mut config = EngineConfig {
         base_dir,
         db_path: Some(db.to_path_buf()),
@@ -1065,6 +1091,113 @@ fn engine(
         registry(),
         config,
     ))
+}
+
+/// Opens the database, or with `migrate` upgrades one an earlier 0.2 `spore` wrote
+/// first. A refusal names the database and exits 10 (spec/cli.md, Databases from
+/// another version).
+fn open(db: &Path, migrate: bool) -> Result<SqliteStore, Fail> {
+    let opened = if migrate {
+        SqliteStore::migrate(db).map(|(store, _)| store)
+    } else {
+        SqliteStore::open(db)
+    };
+    opened.map_err(|f| refused(db, f))
+}
+
+fn refused(db: &Path, f: StoreFailure) -> Fail {
+    Fail::internal(&f.code, format!("{}: {}", db.display(), f.message))
+}
+
+/// `migrate`: upgrades a database an earlier 0.2 `spore` wrote, unless a worker of
+/// another `spore` uses it (spec/cli.md, Databases from another version).
+fn migrate(database: &project::Database) -> Result<Output, Fail> {
+    let db = database.path.as_path();
+    if !db.exists() {
+        return Err(Fail::usage(
+            "db.not-found",
+            format!(
+                "{} does not exist: there is nothing to migrate",
+                db.display()
+            ),
+        ));
+    }
+    project::before_write(database)?;
+    let Migration {
+        from,
+        from_writer,
+        to,
+    } = SqliteStore::migrate(db).map_err(|f| refused(db, f))?.1;
+    let was = from_writer
+        .as_deref()
+        .map(|w| format!("spore {w}"))
+        .unwrap_or_else(|| "an older spore".into());
+    let text = match from {
+        0 => format!("initialized {} at schema version {to}", db.display()),
+        _ if from == to => format!(
+            "{} is at schema version {to} of spore {WRITER}: nothing to migrate",
+            db.display()
+        ),
+        _ => format!(
+            "migrated {} from schema version {from} ({was}) to {to} (spore {WRITER})",
+            db.display()
+        ),
+    };
+    done(
+        json!({"db": db, "migrated": from != to, "from": from, "fromWriter": from_writer,
+               "to": to, "writer": WRITER}),
+        text,
+    )
+}
+
+/// The record of this process as a worker of the database, kept fresh while it works
+/// on runs so a `migrate` of another `spore` sees it, and removed when it stops
+/// (spec/cli.md, Databases from another version). It has its own connection, and beats
+/// far less often than leases are renewed, so it never holds up a renewal.
+struct Beat {
+    store: Arc<SqliteStore>,
+    worker_id: String,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Beat {
+    fn start(db: &Path, config: &EngineConfig) -> Result<Self, Fail> {
+        let store = Arc::new(open(db, false)?);
+        let host = runspore_host::process::host_name().unwrap_or_else(|_| "unknown".into());
+        let pid = std::process::id();
+        let worker_id = config.worker_id.clone();
+        let beat = {
+            let (store, worker_id) = (store.clone(), worker_id.clone());
+            move || store.beat_worker(&worker_id, &host, pid, WORKER_FRESH_MS)
+        };
+        beat().map_err(|f| Fail::internal(&f.code, f.message))?;
+        let period = std::time::Duration::from_millis(WORKER_BEAT_MS);
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        // A beat that fails is tried again next period; the work does not depend on it.
+        let thread = std::thread::spawn(move || {
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(period)
+            {
+                let _ = beat();
+            }
+        });
+        Ok(Self {
+            store,
+            worker_id,
+            stop: Some(stop),
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for Beat {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        let _ = self.store.end_worker(&self.worker_id);
+    }
 }
 
 fn engine_key(engine: &Engine, run: &str) -> RunKey {
