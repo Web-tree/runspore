@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/Web-tree/runspore/compare/v0.5.0...v0.6.0) (2026-10-17)
+
+
+### Features
+
+* **FG-223:** a build that is not a release names its commit and date ([#230](https://github.com/Web-tree/runspore/issues/230)) ([f0ccc68](https://github.com/Web-tree/runspore/commit/f0ccc6807906c068ba28b9ab2580eeb633e75dc6)), closes [#223](https://github.com/Web-tree/runspore/issues/223)
+* **FG-224:** checkpoint G feedback: `spore status`, `list` and the session-start line tell a try whose pro… ([#231](https://github.com/Web-tree/runspore/issues/231)) ([fb6425e](https://github.com/Web-tree/runspore/commit/fb6425ed1d12b6e4b1249762f956785a7c3f26cd))
+
+
+### Bug Fixes
+
+* **FG-222:** checkpoint G feedback: A newer spore does not silently upgrade a database that older workers … ([#236](https://github.com/Web-tree/runspore/issues/236)) ([0e6e8c6](https://github.com/Web-tree/runspore/commit/0e6e8c66a14c0dbb9e8e21064d3015d9f837a1f2))
+
 ## [0.5.0](https://github.com/Web-tree/runspore/compare/v0.4.0...v0.5.0) (2026-10-16)
 
 
