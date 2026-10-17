@@ -274,7 +274,7 @@ before it starts anything. It reads no database and needs no project folder:
   world, with its version, of the step runners its component host runs (host.md §3,
   `component`).
 
-Text mode prints one line per field, such as `async kinds     command, external`.
+Text mode prints one line per field, such as `async kinds      command, component, external`.
 
 `validate`, `build`, `start` and `run` check every action against the set and refuse
 a workflow that asks for something outside it, naming the action and what to
