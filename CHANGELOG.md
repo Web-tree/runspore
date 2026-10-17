@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/Web-tree/runspore/compare/v0.6.0...v0.6.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate jsonschema to 0.59.0 ([#229](https://github.com/Web-tree/runspore/issues/229)) ([722f757](https://github.com/Web-tree/runspore/commit/722f757a209364d2d97299a0ffa9720dfafcfec3))
+* **FG-237:** schema messages and the recorded writer use spore --version's version ([#238](https://github.com/Web-tree/runspore/issues/238)) ([be19c9d](https://github.com/Web-tree/runspore/commit/be19c9d8c78f6e8d60a98f2642f2e1cf80ff5660)), closes [#237](https://github.com/Web-tree/runspore/issues/237)
+
 ## [0.6.0](https://github.com/Web-tree/runspore/compare/v0.5.0...v0.6.0) (2026-10-17)
 
 
