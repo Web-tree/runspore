@@ -122,7 +122,7 @@ Why settled: Temporal names the same pair `start` and `execute` (`temporal workf
 - IDs keep their kind prefixes (`run_`, `inv_`, `msg_`, `req_`). A prefixed ID of the wrong kind fails before any work.
 - `continue`, `describe run` and `describe step` without a name still pick the only unfinished run, and fail listing the candidates when there are several; `describe step` then describes the step that run is at, as `step show` does. `claim step` without `--run` keeps today's queue behaviour: it claims the oldest ready external step that matches, across every run in the database.
 - `resolve invocation/<run>:<inv-id>` answers that invocation only. If the run has moved on to another invocation, it fails with `resolve.not-applicable` and changes nothing, as `resolve <run> <inv>` does today. `resolve run/<id>` answers the outstanding one.
-- `renew`, `complete` and `fail` name the attempt by `--token` alone, as in 0.2: the token already carries the run, the invocation and the attempt, so a reporter that kept only `RUNSPORE_TOKEN` can still report. `-o name` prints the attempt as `step/<run>:<node>`, read from the token.
+- `renew`, `complete` and `fail` name the attempt by `--token` alone, as in 0.2: the token already carries the run, the invocation and the attempt, so a reporter that kept only `RUNSPORE_TOKEN` can still report. They are the one exception to the `-o name` round trip: `-o name` prints the step as `step/<run>:<node>`, which `describe` takes, but only the token reports on an attempt, since the token also carries the attempt and its fence when a run comes back to the same node.
 
 Why settled: `TYPE/NAME` with plural, singular and short names is kubectl's form; prefix matching that refuses ambiguity is git's and Restate's. Start keys are unique per database (`UNIQUE (tenant, start_key)`, C16), so they are safe names.
 
@@ -138,10 +138,10 @@ Why settled: kubectl's lesson is that CRDs (new kinds as data) carry most of the
 
 **Decision.**
 - **Flags.** `--data` is every JSON payload (`signal`, `resolve`, `complete`), `--outcome` every outcome, `--key` every repeat-safety key (`start`, `signal`, `resolve`, `cancel`), `--fail`/`--error` both become `--error`, `--run` every run scope. Worker tuning flags (`--lease-ms`, `--heartbeat-ms`, `--poll-ms`, `--grace-ms`, `--stop-grace-ms`, `--max-watches`) belong to `serve`, `execute` and `continue` only; `--db` stays global; `--native-kernel` becomes the `RUNSPORE_NATIVE_KERNEL` variable. Every flag and argument has help text and every verb has examples.
-- **Output.** `-o text|wide|json|jsonl|name`; `--json` stays as `-o json`. `--fields a,b` selects fields in JSON. `-o jsonl` streams one object per line and ends with `{"type":"done"}`; it is the form of `get -w`, `wait` and `continue --wait`. Results go to stdout, progress and warnings to stderr.
+- **Output.** `-o text|wide|json|jsonl|name`; `--json` stays as `-o json`. `--fields a,b` selects fields in JSON. `-o jsonl` streams one object per line and ends with `{"type":"done"}`; it is the form of `wait` and `continue --wait`. Results go to stdout, progress and warnings to stderr.
 - **Errors.** Under `-o json` every error is JSON, including usage errors, and names the argument. Each error has a stable code, the current state, `retryable`, and the exact next commands. Writes print `kind/name verbed` and the next command.
-- **Exit codes.** The 0.2 table stays, plus `7` cancelled (c08), `8` timeout (`wait`), and `9` not found.
-- **Dry run.** `--dry-run` on `signal`, `resolve`, `cancel` and `release` prints the event that would be recorded and the resulting status, writing nothing.
+- **Exit codes.** The 0.2 table stays, plus `7` cancelled (c08), `8` timeout (`wait`), and `9` not found. The 0.2 aliases (L9) keep 0.2's exit 2 for a missing run until 0.5.
+- **Dry run.** `--dry-run` on `signal`, `resolve`, `cancel` and `release` prints what the command would change and the resulting status, writing nothing: the event `signal`, `resolve` and `cancel` would record, and for `release`, which records no event, the quarantine it would clear.
 - **One source.** `--help`, `help -o json`, shell completion and the CLI reference in `spec/cli.md` come from the registry and the clap tree.
 
 Why settled: gh (`--json fields`), kubectl (`-o`, `wait --for`), terraform and cargo (JSON streams with a final event), Restate's 2026 CLI revamp (typed exit codes, next steps, dry run), Cloudflare's `cf` (generated from one schema) and Arcjet's guidance all converge on these. They fix the 0.2 gaps listed in §Why.
