@@ -43,7 +43,7 @@ Rejected:
 
 **Decision.** These verbs make up the whole CLI. The kinds column is what the core registry allows; plugins may add kinds to the read verbs, never new meanings to a core verb (L7).
 
-The table shows each verb's targets and the flags this design renames or adds. Every other 0.2 argument and flag moves unchanged to the verb that replaces its command, and keeps its meaning: `--input`, `--input-file` and `--base-dir` on `start` and `execute`; `--retryable` on `fail`; `--short`, `--strict` and `--fix` on `validate`; `--composed` and `--strict` on `build`. One clash is renamed: `build -o <path>` becomes `build --out <path>`, since `-o` is the output format everywhere (L8).
+The table shows each verb's targets and the flags this design renames or adds. Every other 0.2 argument and flag moves unchanged to the verb that replaces its command, and keeps its meaning: `--input`, `--input-file` and `--base-dir` on `start` and `execute`; `--retryable` on `fail`; `--short`, `--strict` and `--fix` on `validate`; `--composed` and `--strict` on `build`. One clash is renamed: `build -o <path>` becomes `build --out <path>`, since `-o` is the output format everywhere (L8). `build` is a 0.2 command and a 0.3 verb under one name, so through 0.4 its `-o` keeps the 0.2 meaning, a path (L9), and `build` takes its output format only as `--json`; `-o` is the format on `build` from 0.5.
 
 | Verb | Kinds | Replaces |
 |---|---|---|
@@ -58,8 +58,8 @@ The table shows each verb's targets and the flags this design renames or adds. E
 | `resolve run/<id> \| invocation/<run>:<inv-id> --retry \| --outcome <o> \| --error <msg> [--data] [--key]` | run, invocation | `resolve` |
 | `cancel run/<id> [--reason] [--key]` | run | — (c08 §spore cancel, #74) |
 | `release quarantine/<run-id>` | quarantine | `release` |
-| `claim step [run/<id>] [--actor] [--holder]` | step | `step claim` |
-| `renew`, `complete`, `fail` `step/<run>:<node> --token <t>` | step | `step renew`, `step complete`, `step fail` |
+| `claim step [--run <id>] [--actor] [--holder]` | step | `step claim` |
+| `renew`, `complete`, `fail` `step --token <t>` | step | `step renew`, `step complete`, `step fail` |
 | `abandon step/<run>:<node>` | step | `step abandon` |
 | `serve [--slots] [--lease-ms] …` | — | `worker` |
 | `validate workflow/<name> \| <path>` | workflow, artifact | `validate` |
@@ -120,8 +120,9 @@ Why settled: Temporal names the same pair `start` and `execute` (`temporal workf
 - A target with a parent names it before a colon: `step/<run>:<node>`, `signal/<run>:<message-id>`, `event/<run>:<sequence>`, `invocation/<run>:<inv-id>`. `--run <id>` scopes a whole command instead (`get steps --run 9f3a1c`), as kubectl's `-n`.
 - `-o name` prints targets in this form, and every command takes them back, so the output of one command is input to the next.
 - IDs keep their kind prefixes (`run_`, `inv_`, `msg_`, `req_`). A prefixed ID of the wrong kind fails before any work.
-- `continue` and `describe run` without a target still pick the only unfinished run, and fail listing the candidates when there are several. `claim step` without a target keeps today's queue behaviour: it claims the oldest ready external step that matches, across every run in the database.
+- `continue`, `describe run` and `describe step` without a name still pick the only unfinished run, and fail listing the candidates when there are several; `describe step` then describes the step that run is at, as `step show` does. `claim step` without `--run` keeps today's queue behaviour: it claims the oldest ready external step that matches, across every run in the database.
 - `resolve invocation/<run>:<inv-id>` answers that invocation only. If the run has moved on to another invocation, it fails with `resolve.not-applicable` and changes nothing, as `resolve <run> <inv>` does today. `resolve run/<id>` answers the outstanding one.
+- `renew`, `complete` and `fail` name the attempt by `--token` alone, as in 0.2: the token already carries the run, the invocation and the attempt, so a reporter that kept only `RUNSPORE_TOKEN` can still report. `-o name` prints the attempt as `step/<run>:<node>`, read from the token.
 
 Why settled: `TYPE/NAME` with plural, singular and short names is kubectl's form; prefix matching that refuses ambiguity is git's and Restate's. Start keys are unique per database (`UNIQUE (tenant, start_key)`, C16), so they are safe names.
 
@@ -147,7 +148,7 @@ Why settled: gh (`--json fields`), kubectl (`-o`, `wait --for`), terraform and c
 
 ### L9. Old commands stay for two minor releases (standard practice)
 
-**Decision.** Every 0.2 command keeps working in 0.3 and 0.4 as a hidden alias that prints one warning line on stderr with its new form (`spore status is now: spore describe run/9f3a1c`) and adds a `deprecations` array to JSON. The 0.2 flags do too: `--native-kernel` and the six worker tuning flags stay accepted in their 0.2 places, `--fail` and `--complete <o>` on `resolve`, `--output` on `resolve` and `step complete`, each with the same warning. 0.5 removes them. The `ml-workflow` plugin and the build scripts under `work/build-0-2/` move to the new forms in 0.3.
+**Decision.** Every 0.2 command keeps working in 0.3 and 0.4 as a hidden alias that prints one warning line on stderr with its new form (`spore status is now: spore describe run/9f3a1c`) and adds a `deprecations` array to JSON. The 0.2 flags do too: `--native-kernel` and the six worker tuning flags stay accepted in their 0.2 places, `--fail` and `--complete <o>` on `resolve`, `--output` on `resolve` and `step complete`, `-o` and `--output` as the artifact path on `build`, each with the same warning. 0.5 removes them. The `ml-workflow` plugin and the build scripts under `work/build-0-2/` move to the new forms in 0.3.
 
 Why settled: Kubernetes' deprecation policy keeps CLI elements for at least two releases; docker's flat `docker ps` still works nine years after `docker container ls` came in.
 
