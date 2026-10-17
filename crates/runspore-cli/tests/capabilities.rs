@@ -79,6 +79,71 @@ fn a_build_that_is_not_a_release_says_so_with_its_commit_and_date() {
     );
 }
 
+/// The `spore` the database at `path` records as its writer.
+fn recorded_writer(path: &std::path::Path) -> String {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row("SELECT value FROM meta WHERE key = 'writer'", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_database_records_and_its_messages_name_the_version_spore_version_prints() {
+    let dir = Dir::new("writer");
+    let path = dir.file("runspore.db");
+    let (version, _) = built();
+    let this = format!("spore {version}");
+    drop(SqliteStore::open(&path).unwrap());
+    assert_eq!(recorded_writer(&path), version);
+
+    // As spore 0.3.0 left it.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "DROP TABLE workers; PRAGMA user_version = 11;
+             UPDATE meta SET value = '0.3.0' WHERE key = 'writer';",
+        )
+        .unwrap();
+    let (code, out) = json(&dir, &["list"]);
+    assert_eq!(code, Some(10), "{out}");
+    assert_eq!(out["error"]["code"], "schema.needs-migrate");
+    let message = out["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("older than {this} (")),
+        "{message}"
+    );
+
+    let text = dir.run(&["migrate"]).stdout;
+    assert!(
+        text.contains("from schema version 11 (spore 0.3.0) to "),
+        "{text}"
+    );
+    assert!(text.contains(&format!("({this})")), "{text}");
+    assert_eq!(recorded_writer(&path), version);
+    let (code, out) = json(&dir, &["migrate"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert_eq!(
+        (&out["fromWriter"], &out["writer"]),
+        (&json!(version), &json!(version))
+    );
+
+    // As a newer spore leaves it.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("PRAGMA user_version = 1000;")
+        .unwrap();
+    let (code, out) = json(&dir, &["list"]);
+    assert_eq!(code, Some(10), "{out}");
+    assert_eq!(out["error"]["code"], "schema.too-new");
+    let message = out["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("written by {this}, newer than {this} (")),
+        "{message}"
+    );
+}
+
 #[test]
 fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database() {
     let dir = Dir::new("capabilities");
