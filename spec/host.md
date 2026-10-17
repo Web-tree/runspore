@@ -1097,6 +1097,12 @@ The other endings of a call:
 | The module is not in the step files, or does not load as a `runner` | `Failure`, `component.module-missing` or `component.invalid`, not retryable | `unknown` | exit null |
 | The lease is lost or the engine shuts down, and the runner then calls the host | `Unknown`, `component.stopped`: that call traps | `unknown` | exit null |
 
+**Known limit.** `process-alive` and `signal-process` check that a handle's `program`
+is granted and that its group's leader has the recorded start time; they cannot tell
+that the runner started it. A runner that forges a handle naming a granted program can
+signal any process group of the worker's user whose leader's start time it knows.
+Signing handles is left to a later version.
+
 The start of a repeatable action must be repeatable by its effect key, as an async
 start command must (§3): a worker that dies after the runner started its process and
 before `hold_attempt` leaves no handle, and the next try runs `start` again. The work
@@ -1333,4 +1339,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H41 | **0.2.** A `component` action whose runner starts a detached process and returns its handle; the worker SIGKILLed after `hold_attempt`; a second worker | The attempt is held with the handle; the process survives the worker; the second worker's `probe_step` answers `alive` through the runner, its `cancel` runs the runner's `stop`, which ends the process, and a probe then answers `dead` |
 | H42 | **0.2.** Runners that start a program, reach a socket and read a file outside their grants; one granted each | Each ungranted call fails the step with `component.not-granted` naming the grant and the value, not retryable, with nothing started; a granted one works; an ungranted probe answers `unknown` |
 | H43 | **0.2.** `validate_workflow`, `start` and `start_artifact` with a `component` action whose grants name another kind, without an artifact, whose module the artifact lacks, that is not a component, and that imports an interface outside `runner` | Each is refused with its code and no run |
-| H44 | **0.2.** Crash at `host.component.after-spawn` and `host.component.after-start` during a run whose `component` step follows a command step, then restart | The run completes; the command step ran once; the runner's start ran again on the next try and its work reported once |
+| H44 | **0.2.** Crash at `host.component.after-spawn` and `host.component.after-start` during a run whose `component` step follows a command step, then restart | The run completes; the command step ran once; the runner's start ran at most once per try, and the step completed once |

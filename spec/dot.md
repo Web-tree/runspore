@@ -294,7 +294,8 @@ action: steps may run it too, and its `argv` mappings read the params under `par
 5. Check and strip the file references, and collect the files they name: each
    `instructions` file as an `instructions` entry owned by its node, each asset,
    each `./` probe, watch and stop program, and (0.2) each `component` action's
-   `module` and `./` program grant as an `asset` entry owned by its action,
+   `module` and `./` program grant as an `asset` entry owned by its action (both
+   stay in the package, where the host reads them),
    each schema file as a `source` entry. Read each `outputSchemas` file and the
    `inputSchema` file, inline the `$ref`s and check every schema against the subset
    at its place in the package (schema.md §1), the input schema also for its object

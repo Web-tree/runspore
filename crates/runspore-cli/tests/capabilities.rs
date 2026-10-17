@@ -74,7 +74,7 @@ fn a_build_that_is_not_a_release_says_so_with_its_commit_and_date() {
     assert_eq!(out.get("commitDate"), date.map(Value::from).as_ref());
     let human = dir.run(&["capabilities"]).stdout;
     assert!(
-        human.starts_with(&format!("version         {text}\n")),
+        human.starts_with(&format!("version          {text}\n")),
         "{human}"
     );
 }

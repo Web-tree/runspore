@@ -1,0 +1,210 @@
+//! `component` actions through the compiled binary (spec/host.md §3, `component`; H41,
+//! H44): a step runner sealed into the workflow starts a detached process that
+//! outlives its SIGKILLed worker, and a second `spore` probes and stops it through the
+//! runner; a crash at each of the component failpoints leaves every completed step
+//! done once.
+
+mod common;
+
+use std::time::{Duration, Instant};
+
+use common::{Dir, BIN};
+use nix::errno::Errno;
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
+use serde_json::{json, Value};
+
+const FAST: [&str; 7] = [
+    "--native-kernel",
+    "--poll-ms",
+    "20",
+    "--lease-ms",
+    "1000",
+    "--heartbeat-ms",
+    "100",
+];
+
+/// `prep`, a command logged to the effects log, then `job`, the test runner given
+/// `input`, then `done`.
+fn flow(grants: Value, input: Value) -> Value {
+    json!({
+        "format": "runspore.workflow/0.2", "name": "runner", "start": "prep",
+        "actions": {
+            "prep": {"kind": "command", "effect": "idempotent",
+                     "argv": common::effect_argv("prep", "true")},
+            "job": {"kind": "component", "module": "runner.wasm", "effect": "idempotent",
+                    "grants": grants, "retry": {"maxAttempts": 3, "backoffMs": "10"}}
+        },
+        "nodes": {
+            "prep": {"kind": "activity", "action": "prep", "outcomes": {"ok": "job"}},
+            "job": {"kind": "activity", "action": "job", "input": {"$literal": input},
+                    "outcomes": {"ok": "done"}},
+            "done": {"kind": "complete"}
+        }
+    })
+}
+
+fn folder(dir: &Dir, flow: &Value) {
+    let path = dir.folder("flow", flow);
+    std::fs::write(path.join("runner.wasm"), runspore_wasmtime::TEST_RUNNER).unwrap();
+}
+
+#[test]
+fn validate_refuses_a_runner_outside_the_world_and_a_grant_spore_does_not_offer() {
+    const CLOCK_RUNNER: &[u8] = include_bytes!(
+        "../../runspore-build/catalogue/examples/component.import-unsupported/runner.wasm"
+    );
+    let dir = Dir::new("component-validate");
+    let grants = json!({"programs": ["sleep"], "network": ["api.example.com"]});
+    folder(&dir, &flow(grants, json!({})));
+    let codes = |dir: &Dir| -> Vec<Value> {
+        let (code, out) = spore(dir, None, &["validate", "flow"]);
+        assert_eq!(code, Some(2), "{out}");
+        let report: Value = serde_json::from_str(out.trim()).unwrap();
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["code"].clone())
+            .collect()
+    };
+    assert_eq!(codes(&dir), [json!("component.grant-unsupported")]);
+    folder(&dir, &flow(json!({"programs": ["sleep"]}), json!({})));
+    std::fs::write(dir.file("flow/runner.wasm"), CLOCK_RUNNER).unwrap();
+    assert_eq!(codes(&dir), [json!("component.import-unsupported")]);
+    std::fs::write(dir.file("flow/runner.wasm"), runspore_wasmtime::TEST_RUNNER).unwrap();
+    let (code, out) = spore(&dir, None, &["validate", "flow"]);
+    assert_eq!(code, Some(0), "{out}");
+}
+
+/// `spore --json …` with the fast flags: the exit code and what it printed.
+fn spore(dir: &Dir, failpoint: Option<&str>, extra: &[&str]) -> (Option<i32>, String) {
+    let mut all = FAST.to_vec();
+    all.push("--json");
+    all.extend_from_slice(extra);
+    let mut cmd = dir.cmd(&all);
+    if let Some(failpoint) = failpoint {
+        cmd.env("RUNSPORE_FAILPOINTS", failpoint);
+    }
+    let out = common::run(cmd);
+    (out.code(), out.stdout)
+}
+
+fn json(dir: &Dir, extra: &[&str]) -> Value {
+    let (_, out) = spore(dir, None, extra);
+    serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{e}: {out}"))
+}
+
+fn alive(pid: i32) -> bool {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"));
+    match stat {
+        // A zombie has ended; only its parent's reaping is left.
+        Ok(stat) => !stat
+            .rsplit(')')
+            .next()
+            .unwrap_or("")
+            .trim_start()
+            .starts_with('Z'),
+        Err(_) => kill(Pid::from_raw(pid), None) != Err(Errno::ESRCH) && !cfg!(target_os = "linux"),
+    }
+}
+
+#[test]
+fn h41_a_runner_s_process_outlives_its_killed_worker_and_a_second_spore_stops_it() {
+    let dir = Dir::new("component-h41");
+    folder(
+        &dir,
+        &flow(
+            json!({"programs": ["sleep"]}),
+            json!({"spawn": ["sleep", "300"]}),
+        ),
+    );
+    let (code, started) = spore(&dir, None, &["start", "flow", "--key", "h41"]);
+    assert_eq!(code, Some(0), "{started}");
+    let run = serde_json::from_str::<Value>(&started).unwrap()["runId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut args = FAST.to_vec();
+    args.push("worker");
+    let mut worker = dir.spawn(&args);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let holder = loop {
+        let status = json(&dir, &["status", &run, "--no-probe"]);
+        if status["step"]["state"] == "held" {
+            assert_eq!(status["step"]["kind"], "component", "{status}");
+            break status["step"]["holder"].clone();
+        }
+        assert!(Instant::now() < deadline, "never held: {status}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let pid = i32::try_from(holder["process"]["pgid"].as_i64().unwrap()).unwrap();
+    assert!(alive(pid), "the runner's process runs: {holder}");
+    kill(Pid::from_raw(worker.id() as i32), Signal::SIGKILL).unwrap();
+    let _ = worker.wait();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(alive(pid), "the process went with its worker");
+
+    // A second spore probes through the runner: the holder is alive, the step held.
+    let probed = json(&dir, &["status", &run]);
+    assert_eq!(probed["step"]["state"], "held", "{probed}");
+    let cancelled = json(&dir, &["cancel", &run]);
+    assert_eq!(cancelled["status"], "cancelled", "{cancelled}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while alive(pid) {
+        assert!(
+            Instant::now() < deadline,
+            "the runner's stop left {pid} running"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(dir.effects().len(), 1, "prep ran once");
+}
+
+/// The test runner's `start` input that starts a job reporting the step done with the
+/// attempt's token, after logging itself to the effects log.
+fn reporting_job() -> Value {
+    let script = "echo \"job $RUNSPORE_ATTEMPT $RUNSPORE_EFFECT_KEY\" >> \"$EFFECTS_LOG\"; \
+                  \"$0\" --native-kernel --json step complete \"$RUNSPORE_TOKEN\" \
+                  --outcome ok > /dev/null 2>&1";
+    json!({"spawn": ["/bin/sh", "-c", script, BIN]})
+}
+
+#[test]
+fn h44_a_crash_at_each_component_failpoint_runs_no_completed_step_again() {
+    for failpoint in ["host.component.after-spawn", "host.component.after-start"] {
+        let dir = Dir::new("component-h44");
+        folder(
+            &dir,
+            &flow(json!({"programs": ["/bin/sh"]}), reporting_job()),
+        );
+        let run = json(&dir, &["start", "flow", "--key", "h44"])["runId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (code, out) = spore(&dir, Some(failpoint), &["run", "flow", "--key", "h44"]);
+        assert_eq!(code, None, "{failpoint}: the run did not abort: {out}");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let (code, out) = spore(&dir, None, &["worker", "--run", &run, "--until-parked"]);
+            if code == Some(0) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{failpoint}: never completed: exit {code:?}, {out}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let effects = dir.effects();
+        let preps = effects.iter().filter(|e| e.node == "prep").count();
+        assert_eq!(preps, 1, "{failpoint}: prep ran again: {effects:?}");
+        let jobs = effects.iter().filter(|e| e.node == "job").count();
+        assert!(
+            (1..=3).contains(&jobs),
+            "{failpoint}: {jobs} jobs: {effects:?}"
+        );
+        let status = json(&dir, &["status", &run]);
+        assert_eq!(status["status"], "completed", "{failpoint}: {status}");
+    }
+}
