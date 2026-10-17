@@ -793,7 +793,9 @@ write it. A run whose stored artifact cannot be read stops quarantined with code
 
 ## Databases from another version (0.2)
 
-A database records which `spore` wrote its schema (store.md §3). Every command that
+A database records which `spore` wrote its schema (store.md §3), by the version
+`spore --version` prints, such as `0.4.0-dev+a65d8d1` on a build that is not a
+release; the messages below name this `spore` by the same version. Every command that
 opens one, whether it reads or writes, first checks that version, and refuses the
 file with exit 10 before it reads or changes anything else:
 

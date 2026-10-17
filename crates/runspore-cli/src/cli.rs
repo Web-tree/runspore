@@ -14,7 +14,7 @@ use runspore_host::{
     FILES_UNWRITABLE,
 };
 use runspore_kernel::NativeReducer;
-use runspore_store_sqlite::{Migration, SqliteStore, WRITER};
+use runspore_store_sqlite::{Migration, SqliteStore, COMMIT_DATE, VERSION, VERSION_TEXT};
 use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::digest;
 use runspore_types::model::{event_kind, ErrorInfo, Resolution, RunStatus, State};
@@ -46,11 +46,6 @@ const CONTRACTS: [(&str, &str); 7] = [
 /// `run` and `worker --until-parked` when the run had not parked yet.
 const EXIT_INTERRUPTED: u8 = 130;
 
-/// The version of this `spore` (build.rs): the release's on the commit its tag names,
-/// else a pre-release of the next minor version named by its commit.
-const VERSION: &str = env!("SPORE_BUILD_VERSION");
-/// [`VERSION`] as `spore --version` prints it: with the commit's date on a pre-release.
-const VERSION_TEXT: &str = env!("SPORE_BUILD_VERSION_TEXT");
 /// How often a working `spore` renews its worker record, and how long each renewal
 /// keeps it fresh: three beats, so one that waits on a busy database does not let it
 /// lapse (spec/cli.md, Databases from another version).
@@ -731,7 +726,7 @@ fn capabilities() -> Result<Output, Fail> {
     let mut object = json!({"version": VERSION, "contracts": contracts,
                             "actionKinds": set.action_kinds, "asyncKinds": set.async_kinds,
                             "resultChannels": set.result_channels});
-    if let Some(date) = option_env!("SPORE_BUILD_DATE") {
+    if let Some(date) = COMMIT_DATE {
         object["commitDate"] = json!(date);
     }
     done(object, text)
@@ -1135,17 +1130,17 @@ fn migrate(database: &project::Database) -> Result<Output, Fail> {
     let text = match from {
         0 => format!("initialized {} at schema version {to}", db.display()),
         _ if from == to => format!(
-            "{} is at schema version {to} of spore {WRITER}: nothing to migrate",
+            "{} is at schema version {to} of spore {VERSION}: nothing to migrate",
             db.display()
         ),
         _ => format!(
-            "migrated {} from schema version {from} ({was}) to {to} (spore {WRITER})",
+            "migrated {} from schema version {from} ({was}) to {to} (spore {VERSION})",
             db.display()
         ),
     };
     done(
         json!({"db": db, "migrated": from != to, "from": from, "fromWriter": from_writer,
-               "to": to, "writer": WRITER}),
+               "to": to, "writer": VERSION}),
         text,
     )
 }

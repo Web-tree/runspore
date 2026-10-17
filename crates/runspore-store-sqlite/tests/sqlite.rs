@@ -176,7 +176,7 @@ async fn q04_newer_schema_is_refused_naming_its_writer() {
     );
     for wanted in [
         "spore 9.9.9",
-        runspore_store_sqlite::WRITER,
+        runspore_store_sqlite::VERSION,
         "move the file aside",
     ] {
         assert!(
@@ -455,7 +455,7 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     let store = SqliteStore::open_with_clock(&path, ManualClock::new(1_000)).unwrap();
     assert_eq!(
         store.writer().unwrap().as_deref(),
-        Some(runspore_store_sqlite::WRITER),
+        Some(runspore_store_sqlite::VERSION),
         "a fresh file records its writer"
     );
     let old = RunKey::new(DEFAULT_TENANT, "old");
@@ -489,7 +489,7 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
     assert_eq!(
         store.writer().unwrap().as_deref(),
-        Some(runspore_store_sqlite::WRITER)
+        Some(runspore_store_sqlite::VERSION)
     );
     let kept = store.get_run(&old).await.unwrap().expect("old run kept");
     assert_eq!(kept.revision, 0);
@@ -889,7 +889,7 @@ async fn q17_a_version_11_file_is_migrated() {
     assert!(store.get_run(&attempt.key).await.unwrap().is_some());
     assert_eq!(
         store.writer().unwrap().as_deref(),
-        Some(runspore_store_sqlite::WRITER)
+        Some(runspore_store_sqlite::VERSION)
     );
     drop(store);
 
@@ -917,7 +917,7 @@ async fn q18_an_older_file_is_not_upgraded_by_opening_it() {
     for wanted in [
         "schema version 11",
         "spore 0.3.0",
-        runspore_store_sqlite::WRITER,
+        runspore_store_sqlite::VERSION,
         "spore migrate",
     ] {
         assert!(

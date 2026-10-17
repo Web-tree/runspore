@@ -337,7 +337,7 @@ fn migrate_waits_for_the_workers_of_the_older_spore() {
     assert_eq!(registered.len(), 1, "{registered:?}");
     let (worker_id, version) = &registered[0];
     assert!(worker_id.starts_with("worker-"), "{worker_id}");
-    assert_eq!(version, runspore_store_sqlite::WRITER);
+    assert_eq!(version, runspore_store_sqlite::VERSION);
 
     // The file as spore 0.3.0 left it, whose workers record no version: this worker
     // stands in for one of them.

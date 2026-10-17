@@ -366,7 +366,10 @@ quarantine. Read views show status `cancelled` and the cancel record.
   `unavailable` / `store.busy`.
 - The schema carries a version, and (**0.2**) the database records which `spore`
   wrote its schema: the version of the binary that initialized or last upgraded it.
-  An empty file is initialized and records the writer. Opening a file is refused with
+  That version, and the one each message below names for this `spore`, is the one
+  `spore --version` prints, without the date: on a build that is not a release, the
+  pre-release named by its commit, such as `0.4.0-dev+a65d8d1` (release.md §7), as
+  rustc's error reports carry its commit-qualified version. An empty file is initialized and records the writer. Opening a file is refused with
   kind `incompatible` when:
   - its schema is newer than this adapter's: `schema.too-new`. The message names the
     version that wrote it, as the file records it, and the fix: finish its runs with

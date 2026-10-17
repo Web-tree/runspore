@@ -26,9 +26,15 @@ const SCHEMA_VERSION_WORKERS: i64 = 12;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
 /// refused, never upgraded (spec/store.md §3).
 const SCHEMA_VERSION_0_1: i64 = 1;
-/// The `spore` this adapter ships in, recorded as the writer of every schema it
-/// initializes or upgrades.
-pub const WRITER: &str = env!("CARGO_PKG_VERSION");
+/// The version of the `spore` this adapter ships in (build.rs), the one `spore
+/// --version` prints: the release's on the commit its tag names, else a pre-release of
+/// the next minor version named by its commit, such as `0.4.0-dev+a65d8d1`. Recorded as
+/// the writer of every schema it initializes or upgrades, and named in its messages.
+pub const VERSION: &str = env!("SPORE_BUILD_VERSION");
+/// [`VERSION`] as `spore --version` prints it: with the commit's date on a pre-release.
+pub const VERSION_TEXT: &str = env!("SPORE_BUILD_VERSION_TEXT");
+/// The date of the commit a pre-release is built from; `None` for a release.
+pub const COMMIT_DATE: Option<&str> = option_env!("SPORE_BUILD_DATE");
 const SCHEMA: &str = include_str!("schema.sql");
 /// Upgrades a version 2 database to version 3: the run's base folder.
 const UPGRADE_2: &str = "ALTER TABLE runs ADD COLUMN base_dir TEXT;";
@@ -130,7 +136,7 @@ fn guard(conn: &Connection, version: i64, migrate: bool) -> R<()> {
             "schema.needs-migrate",
             format!(
                 "this database has schema version {version}, written by {writer}, older \
-                 than spore {WRITER} (schema version {SCHEMA_VERSION}): run `spore migrate` \
+                 than spore {VERSION} (schema version {SCHEMA_VERSION}): run `spore migrate` \
                  to upgrade it once no older worker uses it, or keep using {writer}"
             ),
         ));
@@ -143,7 +149,7 @@ fn guard(conn: &Connection, version: i64, migrate: bool) -> R<()> {
             StoreFailureKind::Incompatible,
             "schema.too-new",
             format!(
-                "this database was written by {writer}, newer than spore {WRITER} \
+                "this database was written by {writer}, newer than spore {VERSION} \
                  (schema version {SCHEMA_VERSION}): {FIX}"
             ),
         ));
@@ -153,7 +159,7 @@ fn guard(conn: &Connection, version: i64, migrate: bool) -> R<()> {
             StoreFailureKind::Incompatible,
             "schema.too-old",
             format!(
-                "this database belongs to spore 0.1, which spore {WRITER} does not read: \
+                "this database belongs to spore 0.1, which spore {VERSION} does not read: \
                  finish its runs with the 0.1 binary, or move the file aside"
             ),
         ));
@@ -188,7 +194,7 @@ fn live_workers(conn: &Connection, version: i64, now: u64) -> R<Vec<String>> {
             .map_err(db)?;
         for row in rows {
             let (id, writer, host, pid, beat_at_ms) = row.map_err(db)?;
-            if writer != WRITER {
+            if writer != VERSION {
                 let ago = (i(now) - beat_at_ms).max(0);
                 found.push(format!(
                     "worker {id} of spore {writer} (pid {pid} on {host}, last heartbeat {ago} ms ago)"
@@ -632,7 +638,7 @@ impl SqliteStore {
                     StoreFailureKind::Unavailable,
                     "migrate.workers-live",
                     format!(
-                        "spore {WRITER} does not upgrade this database while a worker of \
+                        "spore {VERSION} does not upgrade this database while a worker of \
                          another spore uses it: {}; stop them, or let them finish, then \
                          migrate again",
                         live.join("; ")
@@ -662,7 +668,7 @@ impl SqliteStore {
                 .map_err(db)?;
             tx.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES ('writer', ?1)",
-                [WRITER],
+                [VERSION],
             )
             .map_err(db)?;
         }
@@ -698,7 +704,7 @@ impl SqliteStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     worker_id,
-                    WRITER,
+                    VERSION,
                     host,
                     pid,
                     i(now),
