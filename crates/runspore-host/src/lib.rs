@@ -15,6 +15,7 @@ mod external;
 mod files;
 pub mod guard;
 mod holder;
+pub mod needs;
 pub mod process;
 pub mod progress;
 

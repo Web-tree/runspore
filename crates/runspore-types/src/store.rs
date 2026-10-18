@@ -669,6 +669,11 @@ impl RunView {
             "completed" | "failed" | STATUS_CANCELLED
         )
     }
+
+    /// Whether the run has accepted an event it has not applied yet.
+    pub fn pending(&self) -> bool {
+        self.applied_sequence + 1 < self.next_sequence
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

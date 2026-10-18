@@ -1,13 +1,14 @@
 //! Argument parsing and the commands of spec/cli.md.
 
 use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
+use runspore_host::needs::{Need, Needs};
 use runspore_host::{
     validate_artifact, ActivityRegistry, Engine, EngineConfig, HeldSlot, HostError, NativeRunner,
     Observer, StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
@@ -1428,7 +1429,7 @@ fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output
     let exit = if interrupted {
         EXIT_INTERRUPTED
     } else {
-        view::exit_for(view, shown.step.as_ref())
+        view::exit_for(view, shown.step())
     };
     let mut json = shown.json(view);
     json["db"] = json!(db);
@@ -1465,8 +1466,8 @@ async fn continue_run(
             None => return Ok(nothing_to_continue(cwd)),
         },
     };
-    let (view, interrupted) = match view::needs(&view, None) {
-        Some("quarantined") | None => (view, false),
+    let (view, interrupted) = match engine.needs(&view, &[]).await?.need {
+        Some(Need::Quarantined) | None => (view, false),
         Some(_) => {
             let shown = Shown::read(engine, &view).await?;
             let worker = &engine.config().worker_id;
@@ -1488,13 +1489,13 @@ async fn continue_run(
     let shown = Shown::read(engine, &view).await?;
     // A holder that waits for a person: its watch stops with its process group, and the
     // attempt stays held for the next driver.
-    if shown.step.as_ref().is_some_and(|s| s.waits.is_some()) {
+    if shown.step().is_some_and(|s| s.waits.is_some()) {
         engine.shutdown().await;
     }
     let mut out = parked(&view, &shown, db, interrupted);
     if !interrupted {
         let mut next = shown.next(&view);
-        if next.needs == Some("child") {
+        if next.needs == Some(Need::Child) {
             below_next(engine, &shown, &mut next).await?;
         }
         out.json["needs"] = json!(next.needs);
@@ -1510,7 +1511,7 @@ async fn continue_run(
 async fn below_next(engine: &Engine, shown: &Shown, next: &mut view::Next) -> Result<(), Fail> {
     let tree = &shown.children;
     for row in &tree.rows {
-        if matches!(row.needs, None | Some("child")) {
+        if matches!(row.needs, None | Some(Need::Child)) {
             continue;
         }
         let below = &tree.runs[row.index];
@@ -1531,7 +1532,7 @@ fn running_elsewhere(view: &RunView, shown: &Shown, slot: &HeldSlot, db: &Path) 
         view::elsewhere_text(slot, shown.now_ms),
         commands[0]
     );
-    out.json["needs"] = json!("working");
+    out.json["needs"] = json!(Need::Working);
     out.json["commands"] = json!(commands);
     out.exit = 0;
     out
@@ -1601,7 +1602,7 @@ impl Shown {
             arrival: engine.arrival(view).await?,
             package: package(engine, view).await?,
             invocations: engine.list_invocations(&view.key).await?,
-            step: engine.async_step(view).await?,
+            needs: engine.needs(view, &runs).await?,
             last_result: last_result(engine, view).await?,
             children: read_tree(engine, runs, Some(&view.key.run)).await?,
             slots: engine.held_slots(now).await?,
@@ -1659,26 +1660,13 @@ async fn read_tree(
         .enumerate()
         .map(|(i, r)| (r.key.run.as_str(), i))
         .collect();
-    let waited_on: HashSet<&str> = runs
-        .iter()
-        .filter(|r| !r.ended())
-        .filter_map(|r| r.parent.as_ref().map(|p| p.run_id.as_str()))
-        .collect();
     let mut names = HashMap::new();
     let mut rows = Vec::new();
-    let now = now_ms();
     for (run, depth) in view::tree(&runs, root) {
         let (node_id, since_ms) = whereabouts(engine, run).await?;
-        let step = engine.async_step(run).await?;
-        let child_unfinished = waited_on.contains(run.key.run.as_str());
-        let mut needs = view::needs_below(run, step.as_ref(), child_unfinished);
-        if needs == Some("working") && step.is_none() {
-            let invocations = engine.list_invocations(&run.key).await?;
-            let cut_off = view::cut_off_of(run, &invocations, now);
-            needs = view::needs_driver(needs, cut_off.as_ref());
-        }
+        let Needs { need, step, .. } = engine.needs(run, &runs).await?;
         let actor = step
-            .filter(|_| matches!(needs, Some("external-ready" | "held")))
+            .filter(|_| matches!(need, Some(Need::ExternalReady | Need::Held)))
             .and_then(|s| s.actor);
         if !names.contains_key(&run.package_digest) {
             let name = package(engine, run)
@@ -1692,7 +1680,7 @@ async fn read_tree(
             node_id,
             since_ms,
             workflow: names[&run.package_digest].clone(),
-            needs,
+            needs: need,
             actor,
         });
     }

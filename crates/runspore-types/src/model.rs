@@ -396,6 +396,19 @@ impl RunStatus {
             RunStatus::Failed => "failed",
         }
     }
+
+    /// The status of a wire string; `None` for any other, such as a store's `created`.
+    pub fn parse(status: &str) -> Option<Self> {
+        [
+            RunStatus::Running,
+            RunStatus::Waiting,
+            RunStatus::NeedsIntervention,
+            RunStatus::Completed,
+            RunStatus::Failed,
+        ]
+        .into_iter()
+        .find(|s| s.as_str() == status)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use runspore_host::disk::DiskFull;
+use runspore_host::needs::{Need, Needs};
 use runspore_host::progress::{Change, Happened, Progress};
 use runspore_host::Cancelled;
 use runspore_host::{
@@ -157,7 +158,8 @@ pub struct Shown {
     pub arrival: Arrival,
     pub package: Option<Value>,
     pub invocations: Vec<InvocationView>,
-    pub step: Option<AsyncStep>,
+    /// What the run needs, with its async step and its cut-off try.
+    pub needs: Needs,
     pub last_result: Option<Value>,
     pub children: Tree,
     pub slots: Vec<HeldSlot>,
@@ -174,16 +176,16 @@ impl Shown {
     /// The `status` object of spec/cli.md.
     pub fn json(&self, view: &RunView) -> Value {
         let mut json = status_json(view, self);
-        json["step"] = step_json(self.step.as_ref(), self.now_ms);
+        json["step"] = step_json(self.step(), self.now_ms);
         json["children"] = self.children.json();
-        json["paused"] = paused_json(self.paused_for(view));
+        json["paused"] = paused_json(self.paused_for());
         json
     }
 
     pub fn text(&self, view: &RunView) -> String {
-        let mut text = paused_text(self.paused_for(view))
+        let mut text = paused_text(self.paused_for())
             + &status_text(view, self)
-            + &step_text(self.step.as_ref(), self.now_ms);
+            + &step_text(self.step(), self.now_ms);
         if !self.children.rows.is_empty() {
             text += "children\n";
             text += &self.children.text(1, self.now_ms);
@@ -194,20 +196,9 @@ impl Shown {
 }
 
 impl Shown {
-    /// What the run needs, `child` while it waits on a run it started, `driver` while
-    /// its try is cut off.
-    pub fn needs(&self, view: &RunView) -> Option<&'static str> {
-        let child_unfinished = self.unfinished_children().next().is_some();
-        let needs = needs_below(view, self.step.as_ref(), child_unfinished);
-        needs_driver(needs, self.cut_off(view).as_ref())
-    }
-
-    /// The run's claimed try when nothing works it any more; never at an async step.
-    fn cut_off(&self, view: &RunView) -> Option<CutOff> {
-        match self.step {
-            Some(_) => None,
-            None => cut_off_of(view, &self.invocations, self.now_ms),
-        }
+    /// The async step the run is at, or the step this spore lacks a capability for.
+    pub fn step(&self) -> Option<&AsyncStep> {
+        self.needs.step.as_ref()
     }
 
     /// The runs the run started that have not ended.
@@ -219,8 +210,8 @@ impl Shown {
     }
 
     /// The pause, for a run that waits for a worker to take its step.
-    fn paused_for(&self, view: &RunView) -> Option<&DiskFull> {
-        let working = needs(view, self.step.as_ref()) == Some("working");
+    fn paused_for(&self) -> Option<&DiskFull> {
+        let working = matches!(self.needs.need, Some(Need::Working | Need::Driver));
         self.paused.as_ref().filter(|_| working)
     }
 }
@@ -243,7 +234,7 @@ pub fn paused_text(paused: Option<&DiskFull>) -> String {
 /// What `continue` prints once it has worked a run: what the run needs, the commands a
 /// person types next, and both as text (spec/cli.md, What a run needs).
 pub struct Next {
-    pub needs: Option<&'static str>,
+    pub needs: Option<Need>,
     pub commands: Vec<String>,
     pub text: String,
 }
@@ -252,7 +243,7 @@ impl Shown {
     pub fn next(&self, view: &RunView) -> Next {
         let s = status_json(view, self);
         let run = &view.key.run;
-        let needs = self.needs(view);
+        let needs = self.needs.need;
         let listed = |detail: &Value| -> Vec<String> {
             let commands = detail["commands"].as_array().into_iter().flatten();
             commands
@@ -284,7 +275,7 @@ impl Shown {
                 let why = error(&s["result"]["error"]);
                 (format!("run {run} failed{at}{why}"), Vec::new())
             }
-            Some("quarantined") => {
+            Some(Need::Quarantined) => {
                 let why = view
                     .quarantine
                     .as_ref()
@@ -292,7 +283,7 @@ impl Shown {
                 let release = format!("spore release {run}");
                 (format!("run {run} is quarantined{why}"), vec![release])
             }
-            Some("signal") => {
+            Some(Need::Signal) => {
                 let waiting = &s["waiting"];
                 let mut commands = vec![format!("spore step show {run}")];
                 commands.extend(listed(waiting));
@@ -302,7 +293,7 @@ impl Shown {
                     commands,
                 )
             }
-            Some("child") => {
+            Some(Need::Child) => {
                 let signal = text(&s["waiting"]["signal"]);
                 let below: Vec<&str> = self
                     .unfinished_children()
@@ -317,7 +308,7 @@ impl Shown {
                     Vec::new(),
                 )
             }
-            Some("stuck") => {
+            Some(Need::Stuck) => {
                 let intervention = &s["intervention"];
                 let at = text(&intervention["nodeId"]);
                 let why = match error(&intervention["error"]) {
@@ -329,8 +320,8 @@ impl Shown {
                     listed(intervention),
                 )
             }
-            Some("external-ready") => {
-                let actor = self.step.as_ref().and_then(|s| s.actor.as_deref());
+            Some(Need::ExternalReady) => {
+                let actor = self.step().and_then(|s| s.actor.as_deref());
                 let (who, flag) = match actor {
                     Some(actor) => (format!("actor {actor}"), format!(" --actor {actor}")),
                     None => ("an actor".to_string(), String::new()),
@@ -340,8 +331,8 @@ impl Shown {
                     vec![format!("spore step claim {run}{flag}")],
                 )
             }
-            Some("held") => {
-                let step = self.step.as_ref();
+            Some(Need::Held) => {
+                let step = self.step();
                 let who = match step {
                     Some(s) if s.kind == "command" => "the work its async command started",
                     s => s.and_then(|s| s.actor.as_deref()).unwrap_or("an actor"),
@@ -361,19 +352,19 @@ impl Shown {
                 }
                 (head, vec![format!("spore step abandon {run}")])
             }
-            Some("capability-missing") => {
-                let missing = self.step.as_ref().and_then(|s| s.missing.as_deref());
+            Some(Need::CapabilityMissing) => {
+                let missing = self.step().and_then(|s| s.missing.as_deref());
                 let why = missing.map_or_else(String::new, |m| format!(": {m}"));
                 (
                     format!("run {run} at {node} needs a spore that can run it{why}"),
                     Vec::new(),
                 )
             }
-            Some("driver") => (
+            Some(Need::Driver) => (
                 format!("run {run} at {node}: {}", cut_off_line(&s["running"])),
                 vec![format!("spore continue {run}")],
             ),
-            Some(_) => (
+            Some(Need::Working) => (
                 format!("run {run} is working at {node}"),
                 vec![format!("spore continue {run}")],
             ),
@@ -457,7 +448,7 @@ pub struct Row {
     pub node_id: Option<String>,
     pub since_ms: Option<u64>,
     pub workflow: Option<String>,
-    pub needs: Option<&'static str>,
+    pub needs: Option<Need>,
     pub actor: Option<String>,
 }
 
@@ -512,53 +503,13 @@ impl Tree {
                     v.key.run,
                     r.workflow.as_deref().unwrap_or("-"),
                     r.node_id.as_deref().unwrap_or("-"),
-                    r.needs.unwrap_or("-"),
+                    r.needs.map_or("-", Need::as_str),
                     v.start_key,
                     quarantine_row_text(v)
                 )
             })
             .collect();
         lines.join("\n")
-    }
-}
-
-/// What an unfinished run needs from someone (spec/cli.md, What a run needs); `None`
-/// once it has finished. `step` is the async step it is at, if any.
-pub fn needs(view: &RunView, step: Option<&AsyncStep>) -> Option<&'static str> {
-    if view.quarantine.is_some() {
-        return Some("quarantined");
-    }
-    let pending = view.applied_sequence + 1 < view.next_sequence;
-    match view.status.as_str() {
-        "completed" | "failed" | STATUS_CANCELLED => None,
-        _ if pending => Some("working"),
-        "waiting" => Some("signal"),
-        "needs-intervention" => Some("stuck"),
-        _ => Some(match step.map(|s| s.state) {
-            Some(StepState::Ready) => "external-ready",
-            Some(StepState::Held) => "held",
-            Some(StepState::CapabilityMissing) => "capability-missing",
-            None => "working",
-        }),
-    }
-}
-
-/// The try the run is at when it is claimed and nothing works it any more (spec/cli.md,
-/// What a run needs): `invocations` are the run's.
-pub fn cut_off_of(view: &RunView, invocations: &[InvocationView], now_ms: u64) -> Option<CutOff> {
-    let invocation = state(view)?.invocation?;
-    let stored = invocations
-        .iter()
-        .find(|i| i.invocation_id == invocation.invocation_id)?;
-    runspore_host::cut_off(stored, now_ms)
-}
-
-/// `driver` for a `working` run whose try is cut off: no worker will report it, and it
-/// waits for a driver to run it again (spec/cli.md, What a run needs).
-pub fn needs_driver(needs: Option<&'static str>, cut_off: Option<&CutOff>) -> Option<&'static str> {
-    match needs {
-        Some("working") if cut_off.is_some() => Some("driver"),
-        needs => needs,
     }
 }
 
@@ -595,20 +546,6 @@ fn cut_off_line(running: &Value) -> String {
         running["attempt"],
         running["cutOff"]["message"].as_str().unwrap_or_default()
     )
-}
-
-/// `needs`, but `child` for a run that waits for a signal while a run it started has
-/// not ended: that run, or one below it, sends the signal, so the wait is no person's
-/// decision (spec/cli.md, What a run needs).
-pub fn needs_below(
-    view: &RunView,
-    step: Option<&AsyncStep>,
-    child_unfinished: bool,
-) -> Option<&'static str> {
-    match needs(view, step) {
-        Some("signal") if child_unfinished => Some("child"),
-        needs => needs,
-    }
 }
 
 /// The `status` object of spec/cli.md but `step`, plus `startKey` and the latest result
@@ -895,9 +832,7 @@ impl<'a> Stands<'a> {
         let claimed = stored.map(|i| i.status == InvocationStatus::Running);
         // A worker's try whose program, worker or lease is gone; an async step's hold
         // is the `step`'s to show.
-        let cut = stored
-            .filter(|_| self.shown.step.is_none())
-            .and_then(|i| runspore_host::cut_off(i, self.shown.now_ms));
+        let cut = self.shown.needs.cut_off.as_ref();
         let state = match (claimed, due) {
             (Some(true), _) if cut.is_some() => "cut-off",
             (Some(true), _) => "started",
@@ -905,7 +840,7 @@ impl<'a> Stands<'a> {
             _ => "queued",
         };
         let started = stored.filter(|_| matches!(state, "started" | "cut-off"));
-        let cut_off = cut.as_ref().map_or(Value::Null, |cut| {
+        let cut_off = cut.map_or(Value::Null, |cut| {
             json!({"reason": cut.reason.as_str(), "message": cut_off_text(cut),
                    "commands": [format!("spore continue {}", self.run_id)]})
         });
@@ -1039,7 +974,7 @@ fn status_text(view: &RunView, shown: &Shown) -> String {
     text += &intervention_text(&s["intervention"], &s["invocation"]);
     // An external step waits for an actor, and a capability-missing one for a spore
     // that can run it, not for a worker's slot; a quarantined run waits for a release.
-    let waits = shown.step.as_ref().map(|step| step.state);
+    let waits = shown.step().map(|step| step.state);
     if view.quarantine.is_none() {
         text += &running_text(&s["running"], waits);
         if s["running"].is_object() && waits.is_none() {

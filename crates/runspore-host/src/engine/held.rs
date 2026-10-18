@@ -56,7 +56,7 @@ pub(super) struct HeldAttempt {
 /// `needs` line, if any.
 pub(super) type Waits = Arc<Mutex<Option<String>>>;
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))

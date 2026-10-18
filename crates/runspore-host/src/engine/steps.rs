@@ -13,16 +13,17 @@ use runspore_types::model::{
 use runspore_types::store::*;
 use serde_json::{json, Value};
 
-use super::held::outcomes;
+use super::held::{now_ms, outcomes};
 use super::{
-    evidence, mutation, retry, Engine, TickReport, Undeliverable, ARTIFACT_UNREADABLE,
-    FILES_DIR_MISSING, FILES_UNWRITABLE,
+    cut_off, evidence, mutation, retry, CutOff, Engine, TickReport, Undeliverable,
+    ARTIFACT_UNREADABLE, FILES_DIR_MISSING, FILES_UNWRITABLE,
 };
 use crate::arrival::Arrow;
 use crate::error::HostError;
 use crate::external::{self, Async, External, StepToken};
 use crate::files::Unmade;
 use crate::holder::Answer;
+use crate::needs::{need, Facts, Needs};
 
 /// The largest result body an actor may report.
 const MAX_RESULT_BYTES: usize = 64 * 1024;
@@ -442,35 +443,48 @@ impl Engine {
         }))
     }
 
-    /// Whether the run waits on something outside this engine: it is `running` with no
-    /// pending event at a step this host falls short of, or at an async step this engine
-    /// does not watch, or whose watch says that the holder waits for a person.
-    pub(super) async fn waits_outside(&self, view: &RunView) -> Result<bool, HostError> {
-        let pending = view.applied_sequence + 1 < view.next_sequence;
-        if pending || view.quarantine.is_some() || view.status != "running" {
-            return Ok(false);
-        }
-        Ok(match self.async_step(view).await? {
-            None => false,
-            Some(step) => {
-                step.state != StepState::Held
-                    || !self.watches(&view.key, &step.invocation_id, step.attempt)
-            }
+    /// What the run needs (spec/cli.md, What a run needs), with the async step it is at
+    /// and its cut-off try. `runs` are where to look for the runs it started.
+    pub async fn needs(&self, view: &RunView, runs: &[RunView]) -> Result<Needs, HostError> {
+        let step = self.async_step(view).await?;
+        let child_unfinished = runs.iter().any(|run| {
+            !run.ended()
+                && run
+                    .parent
+                    .as_ref()
+                    .is_some_and(|p| p.run_id == view.key.run)
+        });
+        // A try held outside the worker is never cut off: its probe and its lease say.
+        let cut_off = match step.is_none() && !view.ended() {
+            true => self.cut_off_try(view).await?,
+            false => None,
+        };
+        let facts = Facts {
+            step: step.as_ref(),
+            cut_off: cut_off.is_some(),
+            child_unfinished,
+        };
+        Ok(Needs {
+            need: need(view, &facts),
+            cut_off,
+            step,
         })
     }
 
-    /// Whether the run, `running` with no pending event, is at an async step that needs
-    /// someone: a ready external step, a step this host falls short of, or a held step
-    /// whose watch says that the holder waits for a person.
-    pub(super) async fn needs_someone(&self, view: &RunView) -> Result<bool, HostError> {
-        let pending = view.applied_sequence + 1 < view.next_sequence;
-        if pending || view.quarantine.is_some() || view.status != "running" {
-            return Ok(false);
-        }
-        Ok(match self.async_step(view).await? {
-            None => false,
-            Some(step) => step.state != StepState::Held || step.waits.is_some(),
-        })
+    /// The run's claimed try when nothing works it any more.
+    async fn cut_off_try(&self, view: &RunView) -> Result<Option<CutOff>, HostError> {
+        let state: Option<State> = view
+            .snapshot
+            .as_deref()
+            .and_then(|bytes| canonical::decode(bytes).ok());
+        let Some(invocation) = state.and_then(|s| s.invocation) else {
+            return Ok(None);
+        };
+        let invocations = self.list_invocations(&view.key).await?;
+        Ok(invocations
+            .iter()
+            .find(|i| i.invocation_id == invocation.invocation_id)
+            .and_then(|i| cut_off(i, now_ms())))
     }
 
     /// Claims a ready external step whose action's label is `actor` (both absent counts

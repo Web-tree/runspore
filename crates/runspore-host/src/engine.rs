@@ -33,6 +33,7 @@ use crate::error::{HostError, Unrouted};
 use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
+use crate::needs::Need;
 use crate::process::{self, Leftover};
 use crate::progress::{self, Change, Happened, Progress};
 
@@ -459,8 +460,7 @@ fn snapshot_status(snapshot: &[u8]) -> Option<&'static str> {
 /// `None` unless its committed state is `waiting` there and no event is pending, so the
 /// next signal is taken by that node.
 fn waiter(view: &RunView, package: &Package, signal: &str) -> Option<(String, Vec<String>)> {
-    if view.status != RunStatus::Waiting.as_str() || view.applied_sequence + 1 != view.next_sequence
-    {
+    if view.status != RunStatus::Waiting.as_str() || view.pending() {
         return None;
     }
     let state: State = canonical::decode(view.snapshot.as_deref()?).ok()?;
@@ -524,22 +524,10 @@ fn activity_result(
     })
 }
 
-fn parked(view: &RunView) -> bool {
-    if view.quarantine.is_some() || view.ended() {
-        return true;
-    }
-    let pending = view.applied_sequence + 1 < view.next_sequence;
-    match serde_json::from_value::<RunStatus>(json!(view.status)) {
-        Ok(status) if status.is_terminal() => true,
-        Ok(RunStatus::Waiting | RunStatus::NeedsIntervention) => !pending,
-        _ => false,
-    }
-}
-
 /// Whether the run has no event left to apply, or has ended or is quarantined and
 /// applies none.
 fn applied(view: &RunView) -> bool {
-    view.ended() || view.quarantine.is_some() || view.applied_sequence + 1 >= view.next_sequence
+    view.ended() || view.quarantine.is_some() || !view.pending()
 }
 
 fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
@@ -1337,7 +1325,7 @@ impl Engine {
                 stops = stops
                     && match tree[0].ended() {
                         true => applied(view),
-                        false => self.stops(view, follow).await?,
+                        false => self.stops(view, &tree, follow).await?,
                     };
             }
             if !busy && stops {
@@ -1350,14 +1338,33 @@ impl Engine {
         }
     }
 
-    /// Whether `until` stops at this run: it is parked, or with `follow` needs someone,
-    /// else waits outside this engine.
-    async fn stops(&self, view: &RunView, follow: bool) -> Result<bool, HostError> {
-        Ok(parked(view)
-            || match follow {
-                true => self.needs_someone(view).await?,
-                false => self.waits_outside(view).await?,
-            })
+    /// Whether `until` stops at this run: it has ended, or needs what no worker of this
+    /// engine gives it (a signal, a resolution, a release, an actor or a host that can
+    /// run its step), or is at a held step: with `follow` one whose holder reported a
+    /// wait, else one this engine does not watch. `tree` holds the runs it started.
+    async fn stops(
+        &self,
+        view: &RunView,
+        tree: &[RunView],
+        follow: bool,
+    ) -> Result<bool, HostError> {
+        let needs = self.needs(view, tree).await?;
+        Ok(match needs.need {
+            None
+            | Some(
+                Need::Quarantined
+                | Need::Signal
+                | Need::Child
+                | Need::Stuck
+                | Need::ExternalReady
+                | Need::CapabilityMissing,
+            ) => true,
+            Some(Need::Held) => needs.step.as_ref().is_some_and(|step| match follow {
+                true => step.waits.is_some(),
+                false => !self.watches(&view.key, &step.invocation_id, step.attempt),
+            }),
+            Some(Need::Working | Need::Driver) => false,
+        })
     }
 
     /// The run, then the runs below it as `spore list` shows them: each run whose
