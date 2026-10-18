@@ -96,7 +96,7 @@ fn json_prints_one_object_per_change_and_one_result_on_stdout() {
         .collect();
     let run = out.json()["runId"].clone();
     for line in &lines {
-        assert_eq!(line["format"], "runspore.cli/0.2");
+        assert_eq!(line["format"], "runspore.cli/0.3");
         assert_eq!(line["runId"], run);
         assert_eq!(line["startKey"], "k");
         assert!(

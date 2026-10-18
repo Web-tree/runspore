@@ -146,6 +146,13 @@ pub struct WorkflowLimits {
     pub max_activations: u32,
 }
 
+impl Workflow {
+    /// The kernel's policy of action `action_id`: its outcomes, effect and retry.
+    pub fn policy(&self, action_id: &str) -> Option<ActionPolicy> {
+        serde_json::from_value(self.actions.get(action_id)?.clone()).ok()
+    }
+}
+
 impl WorkflowLimits {
     fn default_max_visits_per_node() -> u32 {
         16

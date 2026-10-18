@@ -22,6 +22,7 @@ runspore-host = { path = "../runspore-host" }
 runspore-store-sqlite = { path = "../runspore-store-sqlite" }
 runspore-wasmtime = { path = "../runspore-wasmtime" }
 clap = { version = "4.6.7", features = ["derive", "env"] }
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 

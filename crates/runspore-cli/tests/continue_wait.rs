@@ -206,8 +206,7 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
     assert_eq!(code, Some(0), "{waits}");
     assert_eq!(waits["needs"], "held", "{waits}");
     assert_eq!(waits["step"]["state"], "held", "{waits}");
-    assert_eq!(waits["step"]["waiting"], "person", "{waits}");
-    assert_eq!(waits["step"]["message"], "answer in pane 2", "{waits}");
+    assert_eq!(waits["step"]["waits"], "answer in pane 2", "{waits}");
     assert_eq!(
         waits["commands"],
         json!([format!("spore step abandon {run}")])
@@ -222,7 +221,11 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
         (&json!("held"), &json!(1)),
         "{status}"
     );
-    assert_eq!(status["step"].get("waiting"), None, "{status}");
+    assert_eq!(status["step"]["waits"], json!(null), "{status}");
+    assert_eq!(
+        status["needs"], "held",
+        "status says what the run needs: {status}"
+    );
     // Text output keeps the run's exit code.
     let again = dir.run(&args(&[
         "--stop-grace-ms",
@@ -235,7 +238,7 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
     assert!(
         again
             .stdout
-            .contains("; it waits for a person: answer in pane 2"),
+            .contains("; its holder waits: answer in pane 2"),
         "{}",
         again.stdout
     );

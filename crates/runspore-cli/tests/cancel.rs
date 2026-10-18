@@ -101,15 +101,15 @@ fn a_waiting_run_is_cancelled_and_keeps_its_position() {
             &json!([])
         )
     );
-    assert_eq!(cancelled["format"], "runspore.cli/0.2");
+    assert_eq!(cancelled["format"], "runspore.cli/0.3");
 
     let (code, status) = json(&dir, &["status", &run]);
     assert_eq!(code, Some(0), "{status}");
     assert_eq!(status["status"], "cancelled");
     assert_eq!(status["position"]["nodeId"], "approve", "position kept");
     assert_eq!(status["cancel"]["reason"], "no longer needed");
-    assert_eq!(status["cancel"]["at"], cancelled["cancel"]["at"]);
-    assert!(status["cancel"]["at"].is_string());
+    assert_eq!(status["cancel"]["atMs"], cancelled["cancel"]["atMs"]);
+    assert!(status["cancel"]["atMs"].is_string());
     assert!(status["end"].is_null() && status["waiting"].is_null() && status["step"].is_null());
 
     let (code, out) = json(&dir, &["continue", &run]);

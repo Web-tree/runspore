@@ -197,7 +197,7 @@ canonical JSON of at most 4 KiB kept with the attempt and shown by `status` (exi
 `holder.invalid`, otherwise). It prints:
 
 ```json
-{"format": "runspore.cli/0.2", "claimed": true, "token": "…",
+{"format": "runspore.cli/0.3", "claimed": true, "token": "…",
  "runId": "run_…", "nodeId": "review", "actionId": "review", "invocationId": "inv_…",
  "attempt": 1, "input": {…}, "params": {…}, "outcomes": ["approved", "changes"],
  "outputSchemas": {"changes": {…}}, "deadlineMs": "…", "leaseUntilMs": "…",
@@ -279,7 +279,7 @@ The `step` commands but `step show` are writing commands (§Project folder).
 before it starts anything. It reads no database and needs no project folder:
 
 ```json
-{"format": "runspore.cli/0.2", "version": "0.2.0",
+{"format": "runspore.cli/0.3", "version": "0.2.0",
  "contracts": {"artifact": "0.1", "cli": "0.2", "dot": "0.2", "host": "0.2",
                "kernel": "0.2", "schema": "0.2", "store": "0.2"},
  "actionKinds": ["command", "component", "external", "native"],
@@ -362,7 +362,7 @@ In JSON, each entry of `runs` is `{"runId", "startKey", "status", "revision",
 "quarantined", "parent", "depth", "nodeId", "sinceMs"}`, in the tree's order. `parent`
 is `{"runId", "nodeId"}` or null; `depth` is 0 at the top and one more per level;
 `nodeId` and `sinceMs` are null at no node. Each entry also carries `workflow`,
-`needs`, `since` and `actor` (§What a run needs). `status` carries the run's `parent` and,
+`needs`, `updatedAtMs` and `actor` (§What a run needs). `status` carries the run's `parent` and,
 as `children`, the runs below it in the same form and order, its direct children at
 depth 0; its text lists them under `children`.
 
@@ -410,8 +410,8 @@ run_7c…  coding-loop  fix        quarantined         1h09m  ticket-73  host.fi
 
 Each row of `list`, with or without `--unfinished`, carries beside the fields of §Runs
 that start runs: `workflow`, the name of the run's workflow (its graph id, kernel.md
-§2); `needs`, as above, null for a finished run; `since`, when the run last changed,
-the run's `updatedAtMs` (store.md §2), so a claim or an expiry counts as a change; and
+§2); `needs`, as above, null for a finished run; `updatedAtMs`, when the run last
+changed, the run's `updatedAtMs` (store.md §2), so a claim or an expiry counts as a change; and
 `actor`, the label of the external step it is at (`external-ready` or `held`), else
 null. With `--unfinished`, `depth` is 0.
 
@@ -464,7 +464,7 @@ With `<runId>`, or the one unfinished run, it:
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
-   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, the message when its watch said that the holder waits for a person, and `spore step abandon <runId>` | 6 |
+   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, the message when its watch said that the holder waits, and `spore step abandon <runId>` | 6 |
    | at a `capability-missing` step | the step and what this `spore` lacks and what to restore, as `status` gives it in `step.missing`; no command | 6 |
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
@@ -487,9 +487,9 @@ where `continue` would stop with exit 6 (host.md §2, `follow`):
   its process group and goes on from the run's new state. A watch that ends without a
   result leaves the attempt held, and the step is waited on as below until the next
   sweep starts a watch again.
-- **The watch says that its holder waits for a person.** It stops the watch with its
+- **The watch says that its holder waits.** It stops the watch with its
   process group, leaves the attempt held, and returns exit 6 with `needs` `held` and
-  the step's `waiting` `person` and `message` (§JSON output). The next `continue
+  the step's `waits`, the message the holder reported (§JSON output). The next `continue
   --wait` starts the watch again.
 - **The step has no watch, or no watch runs.** It waits. It reloads the run every
   `--poll-ms` (200 ms by default), so a report from elsewhere, such as `spore step
@@ -520,7 +520,7 @@ unfinished run; with none it exits 2 with `run.none-unfinished`, and with severa
 exits 2 with `run.several`, as `continue` does. JSON:
 
 ```json
-{"format": "runspore.cli/0.2", "runId": "run_…", "nodeId": "review",
+{"format": "runspore.cli/0.3", "runId": "run_…", "nodeId": "review",
  "nodeKind": "await-signal", "activationId": "review/1", "actionId": null,
  "signal": "approval", "outcomes": ["approved", "rejected"],
  "outputSchemas": {"rejected": {…}}, "files": "/…/steps/…/review",
@@ -571,7 +571,7 @@ already completed, failed or been cancelled succeeds and changes nothing, dispos
 
 It exits 0 once the run is `cancelled`, or when it had already ended, and prints
 `{"runId", "requestId", "disposition", "status", "cancel", "stops"}`: `status` is the
-run's status afterwards, `cancel` its `{"reason", "at"}` as in `status`, null for a run
+run's status afterwards, `cancel` its `{"reason", "atMs"}` as in `status`, null for a run
 that ended otherwise, and `stops` one `{"invocationId", "attempt", "exit"}` per stop
 that ran, `exit` null when it did not exit by itself. Text: `run <runId> cancelled
 (request ID <id>)` and a line per stop, or for a `duplicate` `run <runId> had already
@@ -1011,20 +1011,24 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities). For `continue --wait`, only a ready external step, a held step whose holder waits for a person (`step.waiting` is `person`), or a `capability-missing` step |
+| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities). For `continue --wait`, only a ready external step, a held step whose holder waits (`step.waits` is not null), or a `capability-missing` step |
 | 7 | **0.2.** For `run`, `worker --until-parked` and `continue`: the run was cancelled, before the command or while it worked (§Cancelling a run) |
 | 10 | Store or internal error, including a database written by 0.1, by a newer `spore` or, without `migrate`, by an earlier 0.2 `spore`, and a `migrate` refused while a worker of another `spore` uses the database (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
 
 ## JSON output
 
-Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
-`runspore.cli/0.1`. Revision, event-sequence and timestamp values are decimal strings;
-attempt, visit and maximum-attempt counts are JSON numbers. `status` output:
+Every object carries `"format": "runspore.cli/0.3"`, errors included; 0.1 wrote
+`runspore.cli/0.1` and 0.2 to 0.7 wrote `runspore.cli/0.2`. **0.3** renamed a `list`
+row's `since` to `updatedAtMs` and a cancel's `at` to `atMs`, put a held step's
+`waiting` and `message` into one `waits`, and added `needs` to `status`. A reader that
+does not know a `format` stops rather than guess at its fields. Revision, event-sequence
+and timestamp values are decimal strings; attempt, visit and maximum-attempt counts are
+JSON numbers. `status` output:
 
 ```json
-{"format": "runspore.cli/0.2", "runId": "run_…", "status": "needs-intervention",
- "revision": "4", "packageDigest": "sha256:…", "artifactDigest": "sha256:…",
+{"format": "runspore.cli/0.3", "runId": "run_…", "status": "needs-intervention",
+ "needs": "stuck", "revision": "4", "packageDigest": "sha256:…", "artifactDigest": "sha256:…",
  "position": {"nodeId": "deploy", "activationId": "deploy/1", "visit": 1,
               "from": {"nodeId": "test", "outcome": "ok"}},
  "invocation": {"invocationId": "inv_…", "attempt": 3, "maxAttempts": 3, "state": "stuck",
@@ -1043,6 +1047,9 @@ attempt, visit and maximum-attempt counts are JSON numbers. `status` output:
  "streaks": {"test": {"outcome": "red", "count": 2, "limit": 3}},
  "step": null, "result": null, "end": null, "quarantine": null, "cancel": null}
 ```
+
+**0.3:** `needs` is what the run needs, as `list` and `continue` show it (§What a run
+needs), null for a finished run.
 
 `position.from` is the arrow the run took into its position: the node whose result
 routed there and the outcome it routed on, the same arrow a mapping reads as `from`
@@ -1151,7 +1158,7 @@ its stream tails show there too.
 
 **0.2:** `status` carries `parent` and `children` (§Runs that start runs).
 
-**0.2:** a cancelled run shows `status: "cancelled"` and `cancel: {"reason", "at"}`:
+**0.2:** a cancelled run shows `status: "cancelled"` and `cancel: {"reason", "atMs"}`:
 the reason `cancel` was given (or null) and when the run was cancelled, a decimal
 string of milliseconds. `position`, `invocation`, `streaks` and `nodes` stay as the run
 had them when it was cancelled; `waiting`, `intervention`, `running`, `step`, `result`
@@ -1185,7 +1192,7 @@ record cleared; an attempt whose worker died keeps its record.
 **0.2:** `step` describes the async step the run is at (§Steps outside the
 worker), or a step this `spore` cannot act on (§Capabilities), or is null anywhere
 else: `{"kind", "actor", "state", "attempt", "holder", "deadlineMs", "leaseUntilMs",
-"missing", "candidate"}`. `kind` is the action's kind: `external`, or `command` for an async
+"missing", "candidate", "waits"}`. `kind` is the action's kind: `external`, or `command` for an async
 command. `actor` is the action's label or null. `state` is `ready` while nobody holds
 an external step and `held` while a claimed attempt runs, or an async command's
 attempt is held; `holder` is the handle given with `--holder` or printed by the start
@@ -1197,9 +1204,11 @@ answer the held attempt holds (§Steps outside the worker, `step propose`):
 `{"outcome", "sinceMs", "forMs"}`, its outcome, when it was stored and how long ago
 that was, or null; never its output. Text mode shows it as `candidate  <outcome> since
 … UTC, for …`.
-A held step whose watch, run by this `spore`, has said that its holder waits for a
-person (host.md §3, Async commands) also carries `"waiting": "person"` and `message`,
-the message of the watch's latest `needs` line (empty when the line had none). Only a
+`waits` is null, except at a held step whose watch, run by this `spore`, has said that
+its holder waits (host.md §3, Async commands): then it is the message of the watch's
+latest `needs` line (empty when the line had none). What the holder waits for is its
+own business; `spore` only passes the message on, as Temporal passes on an activity's
+heartbeat details. Only a
 command that works the run (`run`, `worker --until-parked`, `continue`) runs watches,
 so `status` never carries them.
 It never shows the step's input or the token.
@@ -1235,7 +1244,7 @@ through the kernel, as `status` finds `position.from`; the JSON is unchanged.
 
 **0.2:** a cancelled run's cancel is a store record, not an event. `events` lists it
 after the run's events: the text ends with a line `   -  <time>  run.cancelled
-store  <reason>  <requestId>`, and the JSON carries `cancel: {"reason", "at",
+store  <reason>  <requestId>`, and the JSON carries `cancel: {"reason", "atMs",
 "requestId"}` beside `events`, null for a run that is not cancelled.
 
 ## Interrupts

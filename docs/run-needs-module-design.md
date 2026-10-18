@@ -110,10 +110,14 @@ None. The JSON-shape and pull-request questions were deferred once and answered 
 
 ## Open threads
 
-- **The exact JSON tidy list.** Draw it up at the start of the work against spec/cli.md, and record it in the spec diff and the PR description. Principles:
-  - one typed model;
-  - field names in glossary words;
-  - no field re-derived by a reader.
+- **The JSON tidy list (settled during the build).** Recorded in spec/cli.md §JSON output:
+  - `status` gains `needs`.
+  - A `list` row's `since` becomes `updatedAtMs`, like every other time field.
+  - A cancel's `at` becomes `atMs` (in `status`, `cancel` and `events`).
+  - A held step's `"waiting": "person"` and `message` become one `waits`, the holder's message or null.
+  - The format moves to `runspore.cli/0.3`.
+
+  The plugin reads `since` from list rows, so it must follow; it reads none of the other renamed fields.
 - **"Person" wording in runspore's own spec and glossary.** Under the held decision, runspore has no notion of a person, yet:
   - CONTEXT.md says a `stuck` step "waits for a person's decision", and that an `unsafe` effect class "waits for a person";
   - host.md §3 has a holder's watch print `{"needs": "person"}`;

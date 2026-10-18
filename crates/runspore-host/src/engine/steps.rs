@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use runspore_types::canonical;
 use runspore_types::capabilities::STORE_CHANNEL;
 use runspore_types::model::{
-    ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, State, OUTCOME_EXHAUSTED,
+    ActivityResult, AttemptStatus, ErrorInfo, InvocationPhase, OUTCOME_EXHAUSTED,
 };
 use runspore_types::store::*;
 use serde_json::{json, Value};
@@ -279,10 +279,7 @@ impl Engine {
     /// (spec/host.md §2, Waiting on a step, The handshake): an external step, ready or
     /// held, or an async command's held attempt.
     pub async fn async_step(&self, view: &RunView) -> Result<Option<AsyncStep>, HostError> {
-        let state: Option<State> = view
-            .snapshot
-            .as_deref()
-            .and_then(|bytes| canonical::decode(bytes).ok());
+        let state = view.state();
         let Some(scheduled) = state
             .and_then(|s| s.invocation)
             .filter(|i| i.state == InvocationPhase::Scheduled)
@@ -378,10 +375,7 @@ impl Engine {
         if view.ended() {
             return Ok(None);
         }
-        let state: Option<State> = view
-            .snapshot
-            .as_deref()
-            .and_then(|bytes| canonical::decode(bytes).ok());
+        let state = view.state();
         let Some(position) = state
             .filter(|s| !s.status.is_terminal())
             .and_then(|s| s.position)
@@ -473,10 +467,7 @@ impl Engine {
 
     /// The run's claimed try when nothing works it any more.
     async fn cut_off_try(&self, view: &RunView) -> Result<Option<CutOff>, HostError> {
-        let state: Option<State> = view
-            .snapshot
-            .as_deref()
-            .and_then(|bytes| canonical::decode(bytes).ok());
+        let state = view.state();
         let Some(invocation) = state.and_then(|s| s.invocation) else {
             return Ok(None);
         };

@@ -83,7 +83,7 @@ fn run_stops_at_an_external_step_with_exit_6_and_status_shows_it() {
         status["step"],
         json!({"kind": "external", "actor": "reviewer", "state": "ready", "attempt": 1,
                "holder": null, "deadlineMs": null, "leaseUntilMs": null, "missing": null,
-               "candidate": null})
+               "candidate": null, "waits": null})
     );
     let (code, worked) = json(&dir, &["worker", "--run", &run, "--until-parked"]);
     assert_eq!(code, Some(6), "{worked}");
