@@ -12,7 +12,7 @@ build = "build/main.rs"
 
 [dependencies]
 runspore-types.workspace = true
-wasmtime = { version = "49.0.2", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
+wasmtime = { version = "50.0.0", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
 
 [build-dependencies]
 wit-component = { version = "0.262.0", default-features = false }
