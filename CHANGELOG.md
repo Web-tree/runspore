@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/Web-tree/runspore/compare/v0.7.0...v0.7.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate wasmtime to v50 ([#279](https://github.com/Web-tree/runspore/issues/279)) ([5031d8a](https://github.com/Web-tree/runspore/commit/5031d8ac23728225b546a0e59456bc97cd85a43e))
+
 ## [0.7.0](https://github.com/Web-tree/runspore/compare/v0.6.1...v0.7.0) (2026-10-17)
 
 
