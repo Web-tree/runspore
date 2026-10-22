@@ -227,6 +227,9 @@ impl<H: Hook> Store for Hooked<H> {
     async fn set_process(&self, r: SetProcess) -> StoreResult<Receipt<ProcessSet>> {
         self.inner.set_process(r).await
     }
+    async fn set_needs_person(&self, r: SetNeedsPerson) -> StoreResult<Receipt<NeedsPersonSet>> {
+        self.inner.set_needs_person(r).await
+    }
     async fn finish_attempt(&self, r: FinishAttempt) -> StoreResult<Receipt<ResultAccepted>> {
         self.inner.finish_attempt(r).await
     }

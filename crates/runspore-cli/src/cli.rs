@@ -263,6 +263,21 @@ pub enum StepCommand {
         #[arg(long)]
         retryable: bool,
     },
+    /// Mark the held step as needing a person, with a reason, or clear the mark. Its
+    /// attempt, lease and outcome are unchanged.
+    NeedsPerson {
+        token: String,
+        /// Why the holder waits for a person, as `status` shows it.
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        reason: Option<String>,
+        /// Clear the mark. Clearing a mark that is not set, or a step no longer held,
+        /// changes nothing.
+        #[arg(long)]
+        clear: bool,
+        /// The message ID; sending one again changes nothing. Generated when missing.
+        #[arg(long)]
+        id: Option<String>,
+    },
     /// Free the run's held async step at once.
     Abandon { run_id: String },
     /// Describe the step a run is at, the only unfinished one by default, without
@@ -1665,9 +1680,11 @@ async fn read_tree(
             let cut_off = view::cut_off_of(run, &invocations, now);
             needs = view::needs_driver(needs, cut_off.as_ref());
         }
-        let actor = step
-            .filter(|_| matches!(needs, Some("external-ready" | "held")))
-            .and_then(|s| s.actor);
+        let step = step.filter(|_| matches!(needs, Some("external-ready" | "held")));
+        let waits = step
+            .as_ref()
+            .and_then(|s| Some((s.waits.clone()?, s.waits_since_ms)));
+        let actor = step.and_then(|s| s.actor);
         if !names.contains_key(&run.package_digest) {
             let name = package(engine, run)
                 .await?
@@ -1682,6 +1699,7 @@ async fn read_tree(
             workflow: names[&run.package_digest].clone(),
             needs,
             actor,
+            waits,
         });
     }
     Ok(Tree {
@@ -1883,6 +1901,38 @@ async fn step(engine: &Engine, command: &StepCommand) -> Result<Output, Fail> {
         } => {
             let code = code.as_deref();
             reported(engine.fail_step(token, error, code, *retryable).await?)
+        }
+        StepCommand::NeedsPerson {
+            token, reason, id, ..
+        } => {
+            let marked = engine
+                .mark_step(token, reason.as_deref(), id.as_deref())
+                .await?;
+            let text = match (&marked.mark, marked.held) {
+                (Some(mark), _) => format!(
+                    "step {} attempt {} needs a person since {}: {}",
+                    marked.node_id,
+                    marked.attempt,
+                    view::utc_text(mark.since_ms),
+                    mark.reason
+                ),
+                (None, true) => format!(
+                    "step {} attempt {} no longer needs a person",
+                    marked.node_id, marked.attempt
+                ),
+                (None, false) => format!(
+                    "step {} attempt {} is no longer held; nothing to clear",
+                    marked.node_id, marked.attempt
+                ),
+            };
+            done(
+                json!({"runId": marked.key.run, "nodeId": marked.node_id,
+                       "attempt": marked.attempt, "held": marked.held,
+                       "needsPerson": marked.mark.as_ref().map(|m| json!({
+                           "reason": m.reason, "sinceMs": m.since_ms.to_string()})),
+                       "disposition": disposition(&marked.disposition)}),
+                text,
+            )
         }
         StepCommand::Abandon { run_id } => {
             let key = existing(engine, run_id).await?.key;

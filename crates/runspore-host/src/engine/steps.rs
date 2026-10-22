@@ -68,9 +68,12 @@ pub struct AsyncStep {
     pub lease_until_ms: Option<u64>,
     /// While `capability-missing`: what this host lacks and what to restore.
     pub missing: Option<String>,
-    /// While held: the message of the latest `needs` line a watch this engine runs
-    /// printed, when the holder waits for a person (empty when the line had none).
+    /// While held: why the holder waits for a person, from its needs-person mark, else
+    /// the message of the latest `needs` line a watch this engine runs printed (empty
+    /// when the line had none).
     pub waits: Option<String>,
+    /// While held and marked as needing a person: since when, by the store's clock.
+    pub waits_since_ms: Option<u64>,
 }
 
 /// What an actor gets from a claim: everything needed to do the step.
@@ -105,6 +108,18 @@ pub struct StepReport {
     pub key: RunKey,
     pub invocation_id: String,
     pub attempt: u32,
+    pub disposition: Disposition,
+}
+
+/// A needs-person mark set or cleared. `held` is false when a clear found the attempt
+/// no longer held, which changes nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepMarked {
+    pub key: RunKey,
+    pub node_id: String,
+    pub attempt: u32,
+    pub held: bool,
+    pub mark: Option<PersonMark>,
     pub disposition: Disposition,
 }
 
@@ -243,6 +258,7 @@ impl Engine {
             lease_until_ms: None,
             missing: None,
             waits: None,
+            waits_since_ms: None,
         };
         // An async command is held only once its start has handed over: a pending one
         // waits for a worker, and a running one without a deadline is still starting
@@ -264,7 +280,11 @@ impl Engine {
                     None => StepState::Held,
                 };
                 step.missing = missing;
-                step.waits = self.holder_waits(&view.key);
+                step.waits = match &invocation.needs_person {
+                    Some(mark) => Some(mark.reason.clone()),
+                    None => self.holder_waits(&view.key),
+                };
+                step.waits_since_ms = invocation.needs_person.as_ref().map(|m| m.since_ms);
                 step.holder = invocation
                     .holder
                     .as_deref()
@@ -626,6 +646,56 @@ impl Engine {
             key: held.attempt.key,
             lease_until_ms: receipt.value.lease_until_ms,
             deadline_ms: held.deadline_ms,
+        })
+    }
+
+    /// Marks the held attempt `token` names as needing a person, with `reason`, or with
+    /// `None` clears the mark (spec/cli.md, Steps outside the worker). The same `id`
+    /// again changes nothing. A clear of an attempt that is no longer held changes
+    /// nothing and succeeds; a mark of one is `lease.lost`.
+    pub async fn mark_step(
+        &self,
+        token: &str,
+        reason: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<StepMarked, HostError> {
+        if let Some(reason) = reason.filter(|r| r.len() > MAX_PERSON_REASON_BYTES) {
+            return Err(HostError::invalid(
+                "step.reason-too-long",
+                format!(
+                    "the reason is {} bytes; at most {MAX_PERSON_REASON_BYTES}",
+                    reason.len()
+                ),
+            ));
+        }
+        let held = self.held(token).await?;
+        let attempt = held.attempt;
+        let request_id = match id {
+            Some(id) => format!("needs-person/{}/{id}", attempt.attempt_id),
+            None => self
+                .inner
+                .unique(&format!("needs-person/{}", attempt.attempt_id)),
+        };
+        let request = SetNeedsPerson {
+            mutation: mutation("set_needs_person", request_id, json!([attempt, reason]))?,
+            attempt: attempt.clone(),
+            reason: reason.map(String::from),
+        };
+        let (still_held, mark, disposition) =
+            match retry(true, || self.inner.store.set_needs_person(request.clone())).await {
+                Ok(receipt) => (true, receipt.value.mark, receipt.disposition),
+                Err(f) if f.kind == StoreFailureKind::Stale && reason.is_none() => {
+                    (false, None, Disposition::Applied)
+                }
+                Err(f) => return Err(f.into()),
+            };
+        Ok(StepMarked {
+            key: attempt.key,
+            node_id: held.node_id,
+            attempt: held.number,
+            held: still_held,
+            mark,
+            disposition,
         })
     }
 

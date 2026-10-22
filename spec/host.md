@@ -254,7 +254,8 @@ never claims again.
 `needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or
 cancelled, by any process, once its in-flight attempts have stopped. **0.2:** or at
 an async step (Steps outside the worker, below) that this engine does not watch, or
-whose watch has said that its holder waits for a person (§3, Async commands).
+whose holder waits for a person: its watch has said so (§3, Async commands), or it is
+marked as needing a person (`mark_step`, below).
 **0.2:** its ticks coordinate and dispatch that run only; the sweep still covers every
 run. Another run takes no turn and has no attempt claimed, so a caller that exits when
 its run parks leaves no other run's try cut off, or claimed and never started. As in
@@ -275,12 +276,13 @@ step whose holder does not wait for a person: it returns only when the run is
 terminal, `waiting`, `needs-intervention` or quarantined, or at an async step that
 needs someone: a ready external step, a step this host falls short of (The
 handshake, below), or a held step whose watch has said that its holder waits for a
-person. It works the runs below the run as `run_until_parked` does, each of them
+person, or that is marked as needing a person. It works the runs below the run as `run_until_parked` does, each of them
 stopping as the run does. While the step is held it keeps ticking, sleeping `poll_ms` after a tick that
 did nothing, so a report from elsewhere is applied within one poll; its sweep expires
 the attempt at its lease or deadline, and probes and watches it at most every 30 s
 (§2 `tick`). `async_step` reports a held step whose watch said so with that watch's
-message.
+message, and a marked step with the mark's reason and since when; the mark wins
+when both say so.
 
 **0.2:** shutdown stops every watch the engine runs with its process group; the
 attempts they watched stay held for the next worker.
@@ -478,6 +480,16 @@ way.
   error (code `step.failed` unless the actor names one of the pattern
   `[a-z0-9][a-z0-9.-]{0,63}`) and whether another try could help, which the kernel
   then honours up to `maxAttempts`.
+- `mark_step(token, reason, id)`: **0.2.** marks the held attempt the token names as
+  needing a person, with `reason`, or with no reason clears the mark, through
+  `set_needs_person` (store §2). The request ID is `needs-person/<attemptId>/<id>`, so
+  the same `id` again for the same attempt is a `duplicate` and changes nothing; a
+  missing `id` is generated. It changes the attempt's mark only, never its number,
+  lease, deadline or result, and records no event. A reason over 1 KiB is
+  `invalid-input` / `step.reason-too-long`. A clear whose attempt has ended returns
+  with the attempt no longer held and changes nothing; a mark of one is `stale` /
+  `lease.lost`. Whoever does the step's work sets it, such as a Claude Code hook
+  when Claude waits on a permission prompt, and clears it when the work goes on.
 - `abandon_step(key)`: expires the run's held async attempt at once with reason
   `abandoned` (store §2), whatever its lease; the effect class then decides. A run with
   no held async step is `invalid-input` / `step.not-held`. It is a person's act,
