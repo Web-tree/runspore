@@ -102,7 +102,7 @@ fn a_database_records_and_its_messages_name_the_version_spore_version_prints() {
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute_batch(
-            "DROP TABLE workers; PRAGMA user_version = 11;
+            "DROP TABLE workers; ALTER TABLE attempts DROP COLUMN person_reason; ALTER TABLE attempts DROP COLUMN person_since_ms; PRAGMA user_version = 11;
              UPDATE meta SET value = '0.3.0' WHERE key = 'writer';",
         )
         .unwrap();

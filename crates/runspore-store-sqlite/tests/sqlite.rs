@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q19 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q20 of `spec/store.md` section 4.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runspore_store_conformance::{
-    cancel, claim, claim_held, create_run, expire, expire_for, schedule, schedule_with, ManualClock,
+    cancel, claim, claim_held, create_run, expire, expire_for, schedule, schedule_with,
+    set_needs_person, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
@@ -15,13 +16,14 @@ use runspore_types::store::{
 };
 use serde_json::{json, Value};
 
-const OPS: [(&str, &str); 9] = [
+const OPS: [(&str, &str); 10] = [
     ("create-run", "create"),
     ("append-event", "append"),
     ("commit-turn", "commit"),
     ("claim-attempt", "claim"),
     ("heartbeat", "hb"),
     ("set-process", "process"),
+    ("set-needs-person", "person"),
     ("finish-attempt", "finish"),
     ("expire-attempt", "expire"),
     ("cancel-run", "cancel"),
@@ -84,6 +86,7 @@ async fn effect(store: &SqliteStore, op: &str) -> bool {
         "claim-attempt" => status == Some(InvocationStatus::Running),
         "heartbeat" => invocations[0].lease_until_ms == Some(1_200),
         "set-process" => invocations[0].process.is_some(),
+        "set-needs-person" => invocations[0].needs_person.is_some(),
         "cancel-run" => run.status == "cancelled" && status == Some(InvocationStatus::Settled),
         _ => {
             status == Some(InvocationStatus::Settled)
@@ -105,7 +108,14 @@ async fn q01_records_survive_reopen() {
     let key = RunKey::new(DEFAULT_TENANT, "crash");
     assert_eq!(store.list_events(&key, 0, 10).await.unwrap().items.len(), 3);
     for (_, request) in OPS.iter().filter(|(op, _)| {
-        !["heartbeat", "set-process", "expire-attempt", "cancel-run"].contains(op)
+        ![
+            "heartbeat",
+            "set-process",
+            "set-needs-person",
+            "expire-attempt",
+            "cancel-run",
+        ]
+        .contains(op)
     }) {
         assert!(
             store.get_receipt(&key, request).await.unwrap().is_some(),
@@ -316,6 +326,8 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
          DROP TABLE meta;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 1;",
     )
     .unwrap();
@@ -375,6 +387,8 @@ async fn q07_a_version_2_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
          DROP TABLE meta;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 2;",
     )
     .unwrap();
@@ -420,6 +434,8 @@ async fn q08_a_version_3_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN artifact_digest;
          DROP TABLE artifacts;
          DROP TABLE meta;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 3;",
     )
     .unwrap();
@@ -478,6 +494,8 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          DROP TABLE meta;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 4;",
     )
     .unwrap();
@@ -515,6 +533,8 @@ async fn q10_a_version_5_file_is_upgraded() {
          ALTER TABLE invocations DROP COLUMN params;
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 5;",
     )
     .unwrap();
@@ -585,6 +605,8 @@ async fn q12_a_version_6_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
          ALTER TABLE invocations DROP COLUMN params;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 6;",
     )
     .unwrap();
@@ -640,6 +662,8 @@ async fn q13_a_version_7_file_is_upgraded() {
          ALTER TABLE attempts DROP COLUMN claimed_at_ms;
          ALTER TABLE runs DROP COLUMN parent_run_id;
          ALTER TABLE runs DROP COLUMN parent_node_id;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 7;",
     )
     .unwrap();
@@ -678,6 +702,8 @@ async fn q14_a_version_8_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
          ALTER TABLE attempts DROP COLUMN claimed_at_ms;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 8;",
     )
     .unwrap();
@@ -733,6 +759,8 @@ async fn q15_a_version_9_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
          ALTER TABLE runs DROP COLUMN result_channels;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 9;",
     )
     .unwrap();
@@ -766,6 +794,8 @@ async fn q16_a_version_10_file_is_upgraded() {
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 10;",
     )
     .unwrap();
@@ -816,6 +846,8 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
          ALTER TABLE attempts DROP COLUMN holder;
          ALTER TABLE attempts DROP COLUMN deadline_ms;
          DROP TABLE meta;
+         ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
          PRAGMA user_version = 4;",
     )
     .unwrap();
@@ -844,11 +876,25 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
 /// Turns the file at `path` into the version 11 file `spore` 0.3.0 wrote: no
 /// `workers` table.
 fn as_version_11(path: &Path) {
+    as_version_12(path);
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute_batch(
         "DROP TABLE workers;
          UPDATE meta SET value = '0.3.0' WHERE key = 'writer';
          PRAGMA user_version = 11;",
+    )
+    .unwrap();
+}
+
+/// Makes the file at `path` look as `spore` 0.7.0 left it: schema version 12, before
+/// an attempt's needs-person mark.
+fn as_version_12(path: &Path) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE attempts DROP COLUMN person_reason;
+         ALTER TABLE attempts DROP COLUMN person_since_ms;
+         UPDATE meta SET value = '0.7.0' WHERE key = 'writer';
+         PRAGMA user_version = 12;",
     )
     .unwrap();
 }
@@ -1004,4 +1050,72 @@ async fn q19_migrate_waits_for_the_older_workers() {
     for key in &keys {
         assert!(store.get_run(key).await.unwrap().is_some());
     }
+}
+
+/// Q20: `migrate` upgrades a version 12 file: its attempts are kept with no mark, and a
+/// running one can then be marked as needing a person.
+#[tokio::test]
+async fn q20_a_version_12_file_is_migrated() {
+    let path = fresh_path();
+    let clock = ManualClock::new(1_000);
+    let store = SqliteStore::open_with_clock(&path, clock.clone()).unwrap();
+    let key = RunKey::new(DEFAULT_TENANT, "held");
+    store
+        .create_run(create_run(&key, "create", 0))
+        .await
+        .unwrap();
+    let event = store
+        .list_events(&key, 0, 1)
+        .await
+        .unwrap()
+        .items
+        .remove(0)
+        .event;
+    let turn = Turn {
+        key: key.clone(),
+        revision: 0,
+        applied_sequence: 0,
+        package_digest: String::new(),
+        snapshot: None,
+        snapshot_digest: None,
+        next_event: event,
+    };
+    let (command, invocation) = schedule(&key, "review", 0);
+    store
+        .commit_turn(runspore_store_conformance::commit(
+            &turn,
+            "commit",
+            0,
+            vec![command],
+        ))
+        .await
+        .unwrap();
+    let attempt = store
+        .claim_attempt(claim(&key, "claim", &invocation, "actor-ab", 1_000))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    drop(store);
+    as_version_12(&path);
+
+    let (store, migration) = SqliteStore::migrate_with_clock(&path, clock).unwrap();
+    assert_eq!(
+        (migration.from, migration.from_writer.as_deref()),
+        (12, Some("0.7.0"))
+    );
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    assert_eq!(
+        store.list_invocations(&key).await.unwrap()[0].needs_person,
+        None
+    );
+    store
+        .set_needs_person(set_needs_person(&attempt, "person", Some("permission")))
+        .await
+        .unwrap();
+    let mark = store.list_invocations(&key).await.unwrap()[0]
+        .needs_person
+        .clone()
+        .expect("marked");
+    assert_eq!(mark.reason, "permission");
 }

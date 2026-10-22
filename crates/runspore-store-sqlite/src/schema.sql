@@ -111,6 +111,8 @@ CREATE TABLE attempts (
     holder BLOB,
     deadline_ms INTEGER,
     claimed_at_ms INTEGER,
+    person_reason TEXT,
+    person_since_ms INTEGER,
     PRIMARY KEY (tenant, run_id, attempt_id),
     UNIQUE (tenant, run_id, invocation_id, attempt_number),
     UNIQUE (tenant, run_id, fence),

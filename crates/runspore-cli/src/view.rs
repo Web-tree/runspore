@@ -35,7 +35,7 @@ pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
 
 /// The `step` object of `status`: the async step the run is at, or the step this spore
 /// lacks a capability for, or null. Never its input or token.
-fn step_json(step: Option<&AsyncStep>) -> Value {
+fn step_json(step: Option<&AsyncStep>, now_ms: u64) -> Value {
     step.map_or(Value::Null, |s| {
         let mut json = json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
@@ -45,12 +45,16 @@ fn step_json(step: Option<&AsyncStep>) -> Value {
         if let Some(message) = &s.waits {
             json["waiting"] = json!("person");
             json["message"] = json!(message);
+            json["waitingSinceMs"] = json!(s.waits_since_ms.map(|t| t.to_string()));
+            json["waitingForMs"] = json!(s
+                .waits_since_ms
+                .map(|t| now_ms.saturating_sub(t).to_string()));
         }
         json
     })
 }
 
-fn step_text(step: Option<&AsyncStep>) -> String {
+fn step_text(step: Option<&AsyncStep>, now_ms: u64) -> String {
     let Some(s) = step else {
         return String::new();
     };
@@ -72,9 +76,25 @@ fn step_text(step: Option<&AsyncStep>) -> String {
         text += &format!("missing    {missing}\n");
     }
     if let Some(message) = &s.waits {
-        text += &format!("waiting    for a person{}\n", told(message));
+        text += &format!(
+            "waiting    for a person{}{}\n",
+            waits_since(s, now_ms),
+            told(message)
+        );
     }
     text
+}
+
+/// ` since <time>, for <duration>` of a held step marked as needing a person; nothing
+/// when only its watch said so.
+fn waits_since(step: &AsyncStep, now_ms: u64) -> String {
+    step.waits_since_ms.map_or_else(String::new, |since| {
+        format!(
+            " since {}, for {}",
+            utc_text(since),
+            duration_text(now_ms.saturating_sub(since))
+        )
+    })
 }
 
 /// A watch's message after a colon, or nothing when it gave none.
@@ -150,7 +170,7 @@ impl Shown {
     /// The `status` object of spec/cli.md.
     pub fn json(&self, view: &RunView) -> Value {
         let mut json = status_json(view, self);
-        json["step"] = step_json(self.step.as_ref());
+        json["step"] = step_json(self.step.as_ref(), self.now_ms);
         json["children"] = self.children.json();
         json["paused"] = paused_json(self.paused_for(view));
         json
@@ -159,7 +179,7 @@ impl Shown {
     pub fn text(&self, view: &RunView) -> String {
         let mut text = paused_text(self.paused_for(view))
             + &status_text(view, self)
-            + &step_text(self.step.as_ref());
+            + &step_text(self.step.as_ref(), self.now_ms);
         if !self.children.rows.is_empty() {
             text += "children\n";
             text += &self.children.text(1, self.now_ms);
@@ -332,7 +352,11 @@ impl Shown {
                         head += &format!(", deadline {}", utc_text(deadline));
                     }
                     if let Some(message) = &step.waits {
-                        head += &format!("; it waits for a person{}", told(message));
+                        head += &format!(
+                            "; it waits for a person{}{}",
+                            waits_since(step, self.now_ms),
+                            told(message)
+                        );
                     }
                 }
                 (head, vec![format!("spore step abandon {run}")])
@@ -435,6 +459,9 @@ pub struct Row {
     pub workflow: Option<String>,
     pub needs: Option<&'static str>,
     pub actor: Option<String>,
+    /// At a held step whose holder waits for a person: why, and since when when it was
+    /// marked so.
+    pub waits: Option<(String, Option<u64>)>,
 }
 
 impl Tree {
@@ -483,8 +510,14 @@ impl Tree {
                     .actor
                     .as_deref()
                     .map_or_else(String::new, |a| format!("  actor {a}"));
+                let person = r.waits.as_ref().map_or_else(String::new, |(m, t)| {
+                    let lasted = t.map_or_else(String::new, |t| {
+                        format!(" for {}", duration_text(now_ms.saturating_sub(t)))
+                    });
+                    format!("  needs a person{lasted}{}", told(m))
+                });
                 format!(
-                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}{}",
+                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}{person}{}",
                     v.key.run,
                     r.workflow.as_deref().unwrap_or("-"),
                     r.node_id.as_deref().unwrap_or("-"),
@@ -1234,7 +1267,7 @@ fn slots_text(slots: &Value) -> String {
 }
 
 /// A time in milliseconds since the Unix epoch, in UTC: `2026-10-14T20:46:03Z`.
-fn utc_text(ms: u64) -> String {
+pub fn utc_text(ms: u64) -> String {
     let secs = ms / 1000;
     let (days, rest) = (secs / 86_400, secs % 86_400);
     // The civil date of a day count since 1970-01-01 (Howard Hinnant's days_from_civil
@@ -1324,6 +1357,9 @@ fn tree_json(v: &RunView, run: &Row) -> Value {
         "sinceMs": run.since_ms.map(|s| s.to_string()),
         "workflow": run.workflow, "needs": run.needs,
         "since": v.updated_at_ms.to_string(), "actor": run.actor,
+        "waiting": run.waits.as_ref().map(|_| "person"),
+        "message": run.waits.as_ref().map(|(m, _)| m),
+        "waitingSinceMs": run.waits.as_ref().and_then(|(_, t)| t.map(|t| t.to_string())),
     })
 }
 

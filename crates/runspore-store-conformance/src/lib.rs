@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S34 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S35 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::collections::BTreeMap;
@@ -331,6 +331,18 @@ pub fn set_process(
         mutation: mutation("set_process", request_id, json!([attempt, process])),
         attempt: attempt.clone(),
         process,
+    }
+}
+
+pub fn set_needs_person(
+    attempt: &AttemptRef,
+    request_id: &str,
+    reason: Option<&str>,
+) -> SetNeedsPerson {
+    SetNeedsPerson {
+        mutation: mutation("set_needs_person", request_id, json!([attempt, reason])),
+        attempt: attempt.clone(),
+        reason: reason.map(String::from),
     }
 }
 
@@ -2310,6 +2322,154 @@ pub async fn s34_cancel_ended(factory: &dyn StoreFactory) {
     );
 }
 
+/// S35: a running attempt's needs-person mark is set, kept, cleared, and gone once the
+/// attempt ends; nobody else may set it.
+pub async fn s35_needs_person(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s35").await;
+    let invocation = w.scheduled(0).await;
+    let attempt = w
+        .store()
+        .claim_attempt(claim(&w.key, "claim", &invocation, "w1", 1_000))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    assert_eq!(w.invocations().await[0].needs_person.clone(), None);
+    let updated = w.run().await.updated_at_ms;
+
+    w.clock.set(1_010);
+    let set = w
+        .store()
+        .set_needs_person(set_needs_person(&attempt, "person-1", Some("permission")))
+        .await
+        .unwrap();
+    let mark = PersonMark {
+        reason: "permission".into(),
+        since_ms: 1_010,
+    };
+    assert_eq!(
+        (set.disposition, &set.value.mark),
+        (Disposition::Applied, &Some(mark.clone()))
+    );
+    assert_eq!(
+        w.invocations().await[0].needs_person.clone(),
+        Some(mark.clone())
+    );
+    let run = w.run().await;
+    assert_eq!(
+        run.updated_at_ms, updated,
+        "a mark is not a change of the run"
+    );
+    assert_eq!(
+        w.invocations().await[0].lease_until_ms,
+        Some(2_000),
+        "the lease is not extended"
+    );
+
+    w.clock.set(1_020);
+    let again = w
+        .store()
+        .set_needs_person(set_needs_person(&attempt, "person-2", Some("idle")))
+        .await
+        .unwrap();
+    let idle = PersonMark {
+        reason: "idle".into(),
+        since_ms: 1_010,
+    };
+    assert_eq!(
+        again.value.mark,
+        Some(idle.clone()),
+        "a mark already set keeps its time"
+    );
+
+    for request in ["clear-1", "clear-2"] {
+        let cleared = w
+            .store()
+            .set_needs_person(set_needs_person(&attempt, request, None))
+            .await
+            .unwrap();
+        assert_eq!(
+            (cleared.disposition, cleared.value.mark),
+            (Disposition::Applied, None)
+        );
+    }
+    assert_eq!(w.invocations().await[0].needs_person.clone(), None);
+    let replay = w
+        .store()
+        .set_needs_person(set_needs_person(&attempt, "person-1", Some("permission")))
+        .await
+        .unwrap();
+    assert_eq!(
+        (replay.disposition, replay.value.mark),
+        (Disposition::Duplicate, Some(mark))
+    );
+    assert_eq!(
+        w.invocations().await[0].needs_person.clone(),
+        None,
+        "a replay wrote"
+    );
+    let mismatch = w
+        .store()
+        .set_needs_person(set_needs_person(&attempt, "person-1", Some("other")))
+        .await;
+    assert_eq!(
+        failure(mismatch),
+        (StoreFailureKind::Conflict, "request.digest-mismatch".into())
+    );
+    let long = "x".repeat(MAX_PERSON_REASON_BYTES + 1);
+    let large = w
+        .store()
+        .set_needs_person(set_needs_person(&attempt, "large", Some(&long)))
+        .await;
+    assert_eq!(
+        failure(large),
+        (StoreFailureKind::Quota, "person.reason-too-large".into())
+    );
+
+    let mut wrong_owner = attempt.clone();
+    wrong_owner.owner = "w2".to_string();
+    let mut wrong_fence = attempt.clone();
+    wrong_fence.fence += 1;
+    for (n, stranger) in [wrong_owner, wrong_fence].iter().enumerate() {
+        let refused = w
+            .store()
+            .set_needs_person(set_needs_person(
+                stranger,
+                &format!("stranger-{n}"),
+                Some("x"),
+            ))
+            .await;
+        assert_eq!(
+            failure(refused),
+            (StoreFailureKind::Stale, "lease.lost".into())
+        );
+    }
+
+    w.store()
+        .set_needs_person(set_needs_person(&attempt, "person-3", Some("idle")))
+        .await
+        .unwrap();
+    w.store()
+        .finish_attempt(finish(&attempt, "finish", 1))
+        .await
+        .unwrap();
+    assert_eq!(
+        w.invocations().await[0].needs_person.clone(),
+        None,
+        "the mark ends with its attempt"
+    );
+    for (request, reason) in [("after-set", Some("idle")), ("after-clear", None)] {
+        let after = w
+            .store()
+            .set_needs_person(set_needs_person(&attempt, request, reason))
+            .await;
+        assert_eq!(
+            failure(after),
+            (StoreFailureKind::Stale, "lease.lost".into())
+        );
+    }
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -2324,7 +2484,7 @@ macro_rules! store_conformance_tests {
             s22_params s23_parent s24_claimed_at s25_updated_at
             s26_hold_attempt s27_result_channels s28_cancel_waiting s29_cancel_stuck
             s30_cancel_quarantined s31_cancel_running s32_cancel_held s33_cancel_race
-            s34_cancel_ended);
+            s34_cancel_ended s35_needs_person);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(
