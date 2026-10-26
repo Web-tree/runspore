@@ -966,7 +966,7 @@ impl Status<'_> {
             _ => "gave up and has no failed arrow",
         };
         let mut text = format!(
-            "needs      a person: step {} {why}{}\n",
+            "needs      resolving: step {} {why}{}\n",
             intervention.node_id,
             since_text(
                 intervention.since_ms.as_deref(),
@@ -1040,8 +1040,8 @@ impl Status<'_> {
     }
 }
 
-/// What `continue` prints once it has worked a run: what the run needs, the commands a
-/// person types next, and both as text (spec/cli.md, What a run needs).
+/// What `continue` prints once it has worked a run: what the run needs, the commands to
+/// type next, and both as text (spec/cli.md, What a run needs).
 pub struct Next {
     pub needs: Option<Need>,
     pub commands: Vec<String>,
@@ -1120,7 +1120,7 @@ impl Shown {
                     _ => ": the outcome of its last attempt is unknown".to_string(),
                 };
                 let commands = intervention.map_or_else(Vec::new, |i| i.commands.clone());
-                (format!("run {run} needs a person at {at}{why}"), commands)
+                (format!("run {run} is stuck at {at}{why}"), commands)
             }
             Some(Need::ExternalReady) => {
                 let actor = self.step().and_then(|s| s.actor.as_deref());

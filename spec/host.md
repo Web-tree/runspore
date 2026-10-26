@@ -254,7 +254,7 @@ never claims again.
 `needs-intervention`, or quarantined, and nothing of it is in flight. **0.2:** or
 cancelled, by any process, once its in-flight attempts have stopped. **0.2:** or at
 an async step (Steps outside the worker, below) that this engine does not watch, or
-whose watch has said that its holder waits for a person (§3, Async commands).
+whose watch has said that its holder waits (§3, Async commands).
 **0.2:** its ticks coordinate and dispatch that run only; the sweep still covers every
 run. Another run takes no turn and has no attempt claimed, so a caller that exits when
 its run parks leaves no other run's try cut off, or claimed and never started. As in
@@ -271,11 +271,11 @@ still take turns, so a step of theirs that finishes is applied; it returns when 
 of them is in flight and none of them has an event left to apply.
 
 **0.2:** `follow(key)` ticks as `run_until_parked` does, but goes on past a held async
-step whose holder does not wait for a person: it returns only when the run is
+step whose holder has not said it waits: it returns only when the run is
 terminal, `waiting`, `needs-intervention` or quarantined, or at an async step that
-needs someone: a ready external step, a step this host falls short of (The
-handshake, below), or a held step whose watch has said that its holder waits for a
-person. It works the runs below the run as `run_until_parked` does, each of them
+needs something from outside: a ready external step, a step this host falls short of
+(The handshake, below), or a held step whose watch has said that its holder waits. It
+works the runs below the run as `run_until_parked` does, each of them
 stopping as the run does. While the step is held it keeps ticking, sleeping `poll_ms` after a tick that
 did nothing, so a report from elsewhere is applied within one poll; its sweep expires
 the attempt at its lease or deadline, and probes and watches it at most every 30 s
@@ -1037,12 +1037,13 @@ on stdin and the probe's variables.
   apart from its slots. It starts one at once when its own start command hands over a
   handle, and in the sweep for the held attempts of the tenant it does not watch yet,
   whoever started them; several workers may each watch one attempt.
-- While it runs, a watch may print a line `{"needs": "person", "message": "<text>"}`
-  (`message` optional): its holder waits for a person, and the job is alive. The line
-  is not a result. The engine keeps the latest message while the watch runs
-  (`Engine::holder_waits(key)`), and `run_until_parked` returns, so a driver that
-  follows the run can tell the person.
-- On exit 0, the rest of stdout, the `needs` lines left out, is one result in result
+- While it runs, a watch may print a line `{"waits": "<text>"}`: the job is alive, and
+  its holder waits for what the text says, as a Temporal activity's heartbeat details
+  say what it is doing. The line is not a result, and spore gives the text no meaning.
+  The engine keeps the latest text while the watch runs (`Engine::holder_waits(key)`)
+  and shows it as the step's `waits`, and `run_until_parked` returns, so a driver that
+  follows the run can pass it on.
+- On exit 0, the rest of stdout, the `waits` lines left out, is one result in result
   mode's shapes (Result mode, above): `{"outcome", "output"}` or `{"error",
   "retryable"}`. It is recorded like a sync command's result: an outcome the action
   does not declare is `command.undeclared-outcome`, not retryable, and the output is
@@ -1420,7 +1421,7 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H29 | **0.2.** `onIntervention` on a run whose step gets stuck, is resolved with `retry` and gets stuck again; on a run that ends at a fail node; on a run that completes; with an action that fails; and `validate_workflow` with an unknown or `external` action and `params` rooted at `from` | Each entry into `needs-intervention` and the failure tell once, with `{run, node, status, reason, error}` and the evaluated params, and further ticks tell nobody again; a completed run tells nobody; the failing action's error is one `on-intervention.failed` event, consumed with no change; each bad `onIntervention` is `workflow.invalid` |
 | H30 | **0.2.** A signal for the node a run waits at with an outcome the node does not route, with `exhausted`, and with none; another signal name; then the same unrouted outcome sent before the run waits | Each unrouted one is `signal.outcome-unrouted` with the node's outcomes and appends nothing; the other name and a routed outcome are applied; the early signal is applied and dropped with the diagnostic `signal.outcome-unrouted` |
 | H28 | **0.2.** External attempts past their lease and past their deadline, with a repeatable and an `unsafe` effect | The sweep expires each; the repeatable step is ready again with the next attempt, the `unsafe` one needs intervention; renewals never pass the deadline |
-| H31 | **0.2.** An async command whose start command detaches a job and prints its handle, the job reporting with `RUNSPORE_TOKEN`; one whose watch prints a `needs` line, then a result; one whose watch result does not fit its schema; then a `complete_step` after the watch's result; and a start that prints no JSON or over 4 KiB | The start's input, token and result channel reach it; the attempt is held with the handle and the async deadline, takes no slot, and `run_until_parked` returns there; the job's report completes the run; the `needs` message is kept and `run_until_parked` returns while the watch runs, then the watch's result completes the run; the misfit is `output.invalid`; the late report is `lease.lost` and kept as late evidence; the bad starts are `command.malformed-output` and `command.output-too-large` |
+| H31 | **0.2.** An async command whose start command detaches a job and prints its handle, the job reporting with `RUNSPORE_TOKEN`; one whose watch prints a `waits` line, then a result; one whose watch result does not fit its schema; then a `complete_step` after the watch's result; and a start that prints no JSON or over 4 KiB | The start's input, token and result channel reach it; the attempt is held with the handle and the async deadline, takes no slot, and `run_until_parked` returns there; the job's report completes the run; the `waits` text is kept and `run_until_parked` returns while the watch runs, then the watch's result completes the run; the misfit is `output.invalid`; the late report is `lease.lost` and kept as late evidence; the bad starts are `command.malformed-output` and `command.output-too-large` |
 | H32 | **0.2.** A held async step probed by the sweep, by `probe_step` and by `claim_step`, with a probe that answers `alive`, `dead`, `unknown`, crashes, times out and prints something else | Only `dead` expires the attempt, with reason `probe-dead`; a repeatable step then gets its next try and an `unsafe` one needs intervention; every other answer leaves it held |
 | H33 | **0.2.** SIGKILL the worker after `hold_attempt`, while the job its async start command detached runs | The job survives; its report reaches the run, which the next worker completes |
 | H34 | **0.2.** SIGKILL the worker and its guard together while an async start command runs | The next sweep stops the start command's recorded group before it expires the attempt; the next try starts only after the group is gone |

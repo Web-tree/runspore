@@ -69,8 +69,8 @@ pub struct AsyncStep {
     pub lease_until_ms: Option<u64>,
     /// While `capability-missing`: what this host lacks and what to restore.
     pub missing: Option<String>,
-    /// While held: the message of the latest `needs` line a watch this engine runs
-    /// printed, when the holder waits for a person (empty when the line had none).
+    /// While held: what the latest `waits` line a watch this engine runs printed says
+    /// the holder waits for.
     pub waits: Option<String>,
     /// While held: the candidate answer the attempt holds.
     pub candidate: Option<Candidate>,

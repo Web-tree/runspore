@@ -32,19 +32,21 @@ The bug fixes cluster in this rule:
 ### Scope: the rule and the output rework, in one pull request
 - **Decision.** Move the rule into the host. Rebuild `status`, `list`, `continue` and `step show` output from one typed run view, with JSON and text as two adapters. All of it lands in a single pull request.
 - **Rejected: the rule only, output unchanged.** This was the first answer. It was reopened once the JSON tidy was chosen, because a tidy with no rework has nothing to act on.
-- **Rejected: two pull requests in a row.** Easier to review and to trace, but the person chose one change.
+- **Rejected: two pull requests in a row.** Easier to review and to trace, but the maintainer chose one change.
 
 ### A holder's reported wait is a detail of `held`, not a new need
 - **Decision.** From runspore's point of view there is no person. There are only signals, actor labels and holders, as in Temporal or n8n. The need stays `held`. Whatever the holder reported while it waits (today, a message from its watch) is carried as a detail of the answer. Who reads that detail is the caller's business.
 - **Rejected: a new need value, "waiting for a person".** It puts a person into a generic orchestrator, and it conflicts with the convention backlog issue #272 already set: the need stays coarse, and a field says who is waited on.
+- **Decision.** The watch line that carries the detail names no one either. A watch prints `{"waits": "<text>"}` instead of `{"needs": "person", "message": "<text>"}`, and the text lands in `step.waits` unchanged. The old line is no longer recognised: the plugin, its only writer, ships in step with this release.
+- **Decision.** No output says "a person". A stuck step reads `needs resolving`, and `continue --wait` follows a run until it needs something from outside the worker or has ended.
 - **Precedent.** In Temporal, a pending activity stays pending, and its heartbeat details say what it is doing.
 - **Related backlog.** #234 (a running step can be marked), #272 (a wait node can put a question), #273 (notify when a run parks). All three plug into this module rather than adding a second rule.
 
 ### The JSON may change shape, and its format version moves to `runspore.cli/0.3`
 - **Decision.** Tidy the status and list JSON while rebuilding it from the typed run view. Every object carries `"format": "runspore.cli/0.3"`.
-- **Decision.** The plugin (`ml-workflow`, in the `max-skills` repository) is updated to the new shape. It refuses a format it does not know and tells the person to update.
-- **Rejected: keep today's JSON byte for byte.** That would keep the shape's quirks, and the person chose to tidy now.
-- **Rejected: print the old fields beside the new ones for one release.** It doubles the output and the tests for a reader that is released by the same person.
+- **Decision.** The plugin (`ml-workflow`, in the `max-skills` repository) is updated to the new shape. It refuses a format it does not know and says to update.
+- **Rejected: keep today's JSON byte for byte.** That would keep the shape's quirks, and the maintainer chose to tidy now.
+- **Rejected: print the old fields beside the new ones for one release.** It doubles the output and the tests for a reader released by the same maintainer.
 - **Precedent.** A Kubernetes API version change. spore is before 1.0, and the `format` field exists for this moment.
 
 ## Routine choices
@@ -62,7 +64,7 @@ The bug fixes cluster in this rule:
   - The need becomes an enum whose serialized names are the spec's.
   - Status checks use the existing `RunStatus` enum, not strings.
   - Snapshot decoding happens once, in the host, with `canonical::decode`. The CLI no longer decodes snapshot bytes with `serde_json`.
-- **What stays in the CLI.** The command strings a person types next (`spore signal …`, `spore resolve …`) follow the CLI grammar (C18), so they stay in the CLI.
+- **What stays in the CLI.** The commands printed to type next (`spore signal …`, `spore resolve …`) follow the CLI grammar (C18), so they stay in the CLI.
 - **The host hands over decoded facts.** Its read side returns facts the CLI needs, so the CLI no longer reads package JSON by pointer or parses event bodies:
   - the last result per node;
   - the start input (for `key_reused`);
@@ -114,14 +116,13 @@ None. The JSON-shape and pull-request questions were deferred once and answered 
   - `status` gains `needs`.
   - A `list` row's `since` becomes `updatedAtMs`, like every other time field.
   - A cancel's `at` becomes `atMs` (in `status`, `cancel` and `events`).
-  - A held step's `"waiting": "person"` and `message` become one `waits`, the holder's message or null.
+  - A held step's `"waiting": "person"` and `message` become one `waits`, the holder's text or null.
   - The format moves to `runspore.cli/0.3`.
 
   The plugin reads `since` from list rows, so it must follow; it reads none of the other renamed fields.
-- **"Person" wording in runspore's own spec and glossary.** Under the held decision, runspore has no notion of a person, yet:
-  - CONTEXT.md says a `stuck` step "waits for a person's decision", and that an `unsafe` effect class "waits for a person";
-  - host.md §3 has a holder's watch print `{"needs": "person"}`;
-  - backlog issues #234, #272 and #273 use "person" too.
-
-  It is not decided whether to reword these as actors or signals in this change or in a follow-up.
-- **The plugin change.** It needs its own ticket in `max-skills`, including how the plugin's oldest supported spore relates to the new format.
+- **The rest of the "person" wording (follow-up).** This change removes the person from what runspore does and prints: the watch line, the status and `continue` text, and the spec passages for them. The prose elsewhere still names a person and moves to a follow-up issue:
+  - CONTEXT.md (`stuck` "waits for a person's decision", `unsafe` "waits for a person");
+  - host.md §2 "Telling a person" and kernel.md §1;
+  - the build catalogue's messages;
+  - backlog issues #234, #272 and #273, which are reframed as signals, actors and holders.
+- **The plugin change.** It needs its own ticket in `max-skills`: read `updatedAtMs`, refuse an unknown `format`, print `{"waits": …}` from its watch, and say how its oldest supported spore relates to the new format.

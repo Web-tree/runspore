@@ -1358,10 +1358,10 @@ impl Engine {
         self.until(key, false).await
     }
 
-    /// Ticks as `run_until_parked`, but goes on past a held async step whose holder does
-    /// not wait for a person: returns only when the run has ended, or when each run of
+    /// Ticks as `run_until_parked`, but goes on past a held async step whose holder has
+    /// not said it waits: returns only when the run has ended, or when each run of
     /// its tree has ended, waits for a signal, needs intervention or is quarantined, or
-    /// is at an async step that needs someone (spec/host.md §2, `follow`).
+    /// is at an async step that needs something from outside (spec/host.md §2, `follow`).
     pub async fn follow(&self, key: &RunKey) -> Result<RunView, HostError> {
         self.until(key, true).await
     }

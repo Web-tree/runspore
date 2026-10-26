@@ -35,7 +35,7 @@ marked **0.2** below are new since 0.1.
 | `worker [--run <runId>] [--until-parked]` | Works on all runs until interrupted. With `--run --until-parked`, on one run until it is terminal or parked |
 | `status <runId> [--no-probe]` | Status, position and the arrow into it, result and the end node, quarantine reason, outstanding invocation. **0.2:** what a waiting, stuck or running run waits for, since when, and the commands that move it on; the run's parent and the runs below it (§Runs that start runs). It first probes a held async step; `--no-probe` reads the store only (§Steps outside the worker) |
 | `list [--unfinished]` | All runs with status. **0.2:** as a tree, parents first, each unfinished run with its node and how long it has been there (§Runs that start runs); each with its workflow and what it needs. `--unfinished`: only the unfinished runs, newest first (§What a run needs) |
-| `continue [<runId>] [--wait [--exit-status]]` | **0.2.** Does the next thing a run needs, then prints exactly what a person must type. With `--wait`, follows the run past held async steps until it needs a person or has ended; with `--json` it then exits 0, or with the run's code under `--exit-status` (§What a run needs) |
+| `continue [<runId>] [--wait [--exit-status]]` | **0.2.** Does the next thing a run needs, then prints exactly what to type next. With `--wait`, follows the run past held async steps until it needs something from outside the worker or has ended; with `--json` it then exits 0, or with the run's code under `--exit-status` (§What a run needs) |
 | `events <runId>` | The run's events in order, with the revision that consumed each and its diagnostics. **0.2:** in text, each with its time, its node, its outcome, the arrow the run took and the first line of its error or output (§JSON output) |
 | `signal <runId> <name> [--outcome <o>] [--data <json>] [--id <messageId>]` | Delivers a signal. A missing ID is generated; repeating an ID is a no-op |
 | `resolve <runId> [<invocationId>] (--complete <outcome> [--output <json>] \| --retry \| --fail <message>) [--id <requestId>]` | Answers a stuck step, or an invocation whose outcome is unknown. Without an invocation ID it answers the run's outstanding invocation; a run with none exits 2 (`run.no-invocation`) |
@@ -473,8 +473,8 @@ commands name the run and nothing else, as in `status`; for a run waiting on a c
 they name the runs below it. `continue` takes `run`'s
 interrupts: SIGINT, SIGTERM or SIGHUP stop it as they stop `run`, with exit 130.
 
-**`continue [<runId>] --wait`.** Follows the run until it needs a person or has
-ended, so a driver can start it in the background and act when it returns. It chooses
+**`continue [<runId>] --wait`.** Follows the run until it needs something from outside
+the worker or has ended, so a driver can start it in the background and act when it returns. It chooses
 the run, and treats a quarantined or finished run, as `continue` does. At a step
 another worker runs it prints the line `continue` prints, as a progress line on stderr
 (§Progress, change `running-elsewhere`), and works the run, which waits for that
@@ -502,8 +502,8 @@ It works the runs below the run as `continue` does, each followed as the run is,
 does not return while a run it waits on can still be worked.
 It returns, printing what is needed as `continue` does, only when the run has
 completed (exit 0), failed (1), waits for a signal (3), needs intervention (4), is
-quarantined (5), or is at a ready external step, at a held step whose holder waits for
-a person, or at a `capability-missing` step (6), or was cancelled (7). `--json` prints the same object as
+quarantined (5), or is at a ready external step, at a held step whose holder says it waits
+(`step.waits`), or at a `capability-missing` step (6), or was cancelled (7). `--json` prints the same object as
 `continue --json`, and exits 0 whenever it printed the run's status: a follower reads
 `needs` (null once the run has ended) and `status`, and a run that only waits for a
 decision is not reported as a failed command. `--exit-status` keeps the codes above
@@ -1011,7 +1011,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 | 3 | The run is waiting for a signal |
 | 4 | The run needs intervention: a stuck step, or an unsafe step with an unknown outcome |
 | 5 | The run is quarantined |
-| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; for a held step, a person may abandon it; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities). For `continue --wait`, only a ready external step, a held step whose holder waits (`step.waits` is not null), or a `capability-missing` step |
+| 6 | **0.2.** The run is waiting on an async step: an actor must claim it or report it, or the work an async command started has not reported; a held step may also be abandoned; or on a step this `spore` cannot act on (`step.state` is `capability-missing`, §Capabilities). For `continue --wait`, only a ready external step, a held step whose holder waits (`step.waits` is not null), or a `capability-missing` step |
 | 7 | **0.2.** For `run`, `worker --until-parked` and `continue`: the run was cancelled, before the command or while it worked (§Cancelling a run) |
 | 10 | Store or internal error, including a database written by 0.1, by a newer `spore` or, without `migrate`, by an earlier 0.2 `spore`, and a `migrate` refused while a worker of another `spore` uses the database (§Databases from another version), and step files `step show` cannot make |
 | 130 | Interrupted by SIGINT, SIGTERM or SIGHUP after a graceful shutdown |
@@ -1205,9 +1205,9 @@ answer the held attempt holds (§Steps outside the worker, `step propose`):
 that was, or null; never its output. Text mode shows it as `candidate  <outcome> since
 … UTC, for …`.
 `waits` is null, except at a held step whose watch, run by this `spore`, has said that
-its holder waits (host.md §3, Async commands): then it is the message of the watch's
-latest `needs` line (empty when the line had none). What the holder waits for is its
-own business; `spore` only passes the message on, as Temporal passes on an activity's
+its holder waits (host.md §3, Async commands): then it is the text of the watch's
+latest `waits` line. What the holder waits for is its own business; `spore` only
+passes the text on, as Temporal passes on an activity's
 heartbeat details. Only a
 command that works the run (`run`, `worker --until-parked`, `continue`) runs watches,
 so `status` never carries them.

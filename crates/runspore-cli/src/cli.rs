@@ -165,11 +165,11 @@ pub enum Command {
         #[arg(long)]
         unfinished: bool,
     },
-    /// Do the next thing a run needs, then print what a person must type: the run's,
+    /// Do the next thing a run needs, then print what to type next: the run's,
     /// or the only unfinished one.
     Continue {
         run_id: Option<String>,
-        /// Follow the run past held async steps until it needs a person or has ended.
+        /// Follow the run past held async steps until it needs something from outside or has ended.
         #[arg(long)]
         wait: bool,
         /// With --wait --json, exit with the run's code (3, 4, 6, …) instead of 0.
@@ -1398,7 +1398,7 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
     Ok(parked(&view, &shown, db, interrupted))
 }
 
-/// Works the run until it parks, or with `follow` until it needs a person or has ended
+/// Works the run until it parks, or with `follow` until it needs something from outside or has ended
 /// (`Engine::follow`); with `true` when an interrupt stopped it first.
 async fn work(engine: &Engine, key: &RunKey, follow: bool) -> Result<(RunView, bool), Fail> {
     let mut stop = Interrupts::install()?;
@@ -1443,8 +1443,8 @@ fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output
 
 /// `spore continue [<runId>] [--wait]` (spec/cli.md, What a run needs): with nothing
 /// unfinished the workflows to start; with several, the runs and exit 2; with one, the
-/// run worked until it parks (with `wait`, until it needs a person or has ended), unless
-/// it is quarantined or finished, then what a person must type. When another worker runs
+/// run worked until it parks (with `wait`, until it needs something from outside or has
+/// ended), unless it is quarantined or finished, then what to type next. When another worker runs
 /// the run's step, it says so: without `wait` it returns that, with `wait` it prints it
 /// on stderr and waits.
 async fn continue_run(
@@ -1483,7 +1483,7 @@ async fn continue_run(
         }
     };
     let shown = Shown::read(engine, &view).await?;
-    // A holder that waits for a person: its watch stops with its process group, and the
+    // A holder that waits: its watch stops with its process group, and the
     // attempt stays held for the next driver.
     if shown.step().is_some_and(|s| s.waits.is_some()) {
         engine.shutdown().await;
