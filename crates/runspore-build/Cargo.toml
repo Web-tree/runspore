@@ -15,7 +15,7 @@ runspore-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars = "1.2.3"
-jsonschema = { version = "0.59.0", default-features = false }
+jsonschema = { version = "0.60.0", default-features = false }
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde"] }
 wasm-encoder = { version = "0.262.0", default-features = false, features = ["component-model"] }
 wasmparser = { version = "0.262.0", default-features = false, features = ["std", "component-model", "validate", "features"] }
