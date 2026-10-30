@@ -427,6 +427,32 @@ pub struct ProcessSet {
     pub process: Option<ProcessRecord>,
 }
 
+/// Sets the attempt's needs-person mark with `reason`, or clears it with `None`
+/// (spec/store.md §2 `set_needs_person`). A set needs the attempt running under a live
+/// lease; a request that changes nothing writes nothing, no receipt included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetNeedsPerson {
+    pub mutation: Mutation,
+    pub attempt: AttemptRef,
+    pub reason: Option<String>,
+}
+
+/// An attempt's needs-person mark: why its holder waits on a person, and since when
+/// by the store's clock. Kept with the attempt and cleared when it ends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeedsPerson {
+    pub reason: String,
+    #[serde(with = "u64_str")]
+    pub since_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeedsPersonSet {
+    pub needs_person: Option<NeedsPerson>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinishAttempt {
     pub mutation: Mutation,
@@ -669,6 +695,8 @@ pub struct InvocationView {
     /// The node's evaluated `params` as scheduled, canonical JSON; `None` for a node
     /// without them.
     pub params: Option<Vec<u8>>,
+    /// The latest attempt's needs-person mark.
+    pub needs_person: Option<NeedsPerson>,
 }
 
 #[async_trait]
@@ -696,6 +724,10 @@ pub trait Store: Send + Sync {
     async fn heartbeat(&self, request: Heartbeat) -> StoreResult<Receipt<LeaseExtended>>;
     async fn hold_attempt(&self, request: HoldAttempt) -> StoreResult<Receipt<AttemptHeld>>;
     async fn set_process(&self, request: SetProcess) -> StoreResult<Receipt<ProcessSet>>;
+    async fn set_needs_person(
+        &self,
+        request: SetNeedsPerson,
+    ) -> StoreResult<Receipt<NeedsPersonSet>>;
     async fn finish_attempt(&self, request: FinishAttempt) -> StoreResult<Receipt<ResultAccepted>>;
     async fn expire_attempt(&self, request: ExpireAttempt) -> StoreResult<Receipt<ResultAccepted>>;
     async fn record_late_evidence(

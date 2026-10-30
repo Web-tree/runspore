@@ -28,7 +28,7 @@ pub use component::{ComponentRunner, GRANT_KINDS};
 pub use engine::{
     cut_off, validate_artifact, validate_workflow, AsyncStep, Cancelled, CutOff, CutOffReason,
     Engine, EngineConfig, HeldSlot, Observer, RunIds, StartOutcome, StepClaim, StepDescription,
-    StepRenewed, StepReport, StepState, Stopped, TickReport, ARTIFACT_UNREADABLE,
+    StepMarked, StepRenewed, StepReport, StepState, Stopped, TickReport, ARTIFACT_UNREADABLE,
     CAPABILITY_MISSING, DISK_FULL, FILES_DIR_MISSING, FILES_UNWRITABLE,
 };
 pub use error::{HostError, Unrouted};

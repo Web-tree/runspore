@@ -4,19 +4,20 @@
 
 use runspore_store_conformance::{
     append, cancel, claim, commit, create_run, expire, finish, heartbeat, process_record, schedule,
-    set_process, ManualClock,
+    set_needs_person, set_process, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{Disposition, RunKey, Store, Turn, DEFAULT_TENANT};
 
 /// The operations in the order a scenario performs them.
-const STEPS: [&str; 9] = [
+const STEPS: [&str; 10] = [
     "create-run",
     "append-event",
     "commit-turn",
     "claim-attempt",
     "heartbeat",
     "set-process",
+    "set-needs-person",
     "finish-attempt",
     "expire-attempt",
     "cancel-run",
@@ -33,6 +34,7 @@ async fn main() {
         ![
             "heartbeat",
             "set-process",
+            "set-needs-person",
             "finish-attempt",
             "expire-attempt",
             "cancel-run",
@@ -119,6 +121,13 @@ async fn main() {
                             ))
                             .await
                             .expect("set_process")
+                            .disposition
+                    }
+                    "set-needs-person" => {
+                        store
+                            .set_needs_person(set_needs_person(&attempt, "mark", Some("prompt")))
+                            .await
+                            .expect("set_needs_person")
                             .disposition
                     }
                     "finish-attempt" => {

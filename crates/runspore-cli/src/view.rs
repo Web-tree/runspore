@@ -9,8 +9,8 @@ use runspore_host::Cancelled;
 use runspore_host::{Arrival, Arrow, AsyncStep, CutOff, CutOffReason, HeldSlot, StepState};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{
-    Disposition, EventRecord, InvocationStatus, InvocationView, RunCancel, RunKey, RunView,
-    STATUS_CANCELLED,
+    Disposition, EventRecord, InvocationStatus, InvocationView, NeedsPerson, RunCancel, RunKey,
+    RunView, STATUS_CANCELLED,
 };
 use serde_json::{json, Value};
 
@@ -34,15 +34,22 @@ pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
 }
 
 /// The `step` object of `status`: the async step the run is at, or the step this spore
-/// lacks a capability for, or null. Never its input or token.
-fn step_json(step: Option<&AsyncStep>) -> Value {
+/// lacks a capability for, or null. Never its input or token. A needs-person mark says
+/// that the holder waits for a person as a watch's `needs` line does, with its reason.
+fn step_json(step: Option<&AsyncStep>, now_ms: u64) -> Value {
     step.map_or(Value::Null, |s| {
         let mut json = json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
                "deadlineMs": s.deadline_ms.map(|d| d.to_string()),
                "leaseUntilMs": s.lease_until_ms.map(|l| l.to_string()),
-               "missing": s.missing});
-        if let Some(message) = &s.waits {
+               "missing": s.missing,
+               "needsPerson": needs_person_json(s.needs_person.as_ref(), now_ms)});
+        let message = s
+            .needs_person
+            .as_ref()
+            .map(|m| &m.reason)
+            .or(s.waits.as_ref());
+        if let Some(message) = message {
             json["waiting"] = json!("person");
             json["message"] = json!(message);
         }
@@ -50,7 +57,28 @@ fn step_json(step: Option<&AsyncStep>) -> Value {
     })
 }
 
-fn step_text(step: Option<&AsyncStep>) -> String {
+/// A needs-person mark as `status`, `list` and `step needs-person` print it, or null.
+pub fn needs_person_json(mark: Option<&NeedsPerson>, now_ms: u64) -> Value {
+    mark.map_or(Value::Null, |mark| {
+        let (since, lasted) = since_json(Some(mark.since_ms), now_ms);
+        json!({"reason": mark.reason, "sinceMs": since, "forMs": lasted})
+    })
+}
+
+/// `needs a person for 58s: <reason>`, the end of a `list` line, or nothing.
+fn needs_person_row_text(mark: Option<&NeedsPerson>, now_ms: u64) -> String {
+    mark.map_or_else(String::new, |mark| {
+        let lasted = duration_text(now_ms.saturating_sub(mark.since_ms));
+        format!("  needs a person for {lasted}: {}", mark.reason)
+    })
+}
+
+/// `since <time> UTC: <reason>`: when and why a step was marked as needing a person.
+pub fn needs_person_since_text(mark: &NeedsPerson) -> String {
+    format!("since {}: {}", utc_text(mark.since_ms), mark.reason)
+}
+
+fn step_text(step: Option<&AsyncStep>, now_ms: u64) -> String {
     let Some(s) = step else {
         return String::new();
     };
@@ -71,8 +99,17 @@ fn step_text(step: Option<&AsyncStep>) -> String {
     if let Some(missing) = &s.missing {
         text += &format!("missing    {missing}\n");
     }
-    if let Some(message) = &s.waits {
-        text += &format!("waiting    for a person{}\n", told(message));
+    match (&s.needs_person, &s.waits) {
+        (Some(mark), _) => {
+            let lasted = duration_text(now_ms.saturating_sub(mark.since_ms));
+            text += &format!(
+                "waiting    for a person since {}, for {lasted}: {}\n",
+                utc_text(mark.since_ms),
+                mark.reason
+            );
+        }
+        (None, Some(message)) => text += &format!("waiting    for a person{}\n", told(message)),
+        (None, None) => {}
     }
     text
 }
@@ -150,8 +187,8 @@ impl Shown {
     /// The `status` object of spec/cli.md.
     pub fn json(&self, view: &RunView) -> Value {
         let mut json = status_json(view, self);
-        json["step"] = step_json(self.step.as_ref());
-        json["children"] = self.children.json();
+        json["step"] = step_json(self.step.as_ref(), self.now_ms);
+        json["children"] = self.children.json(self.now_ms);
         json["paused"] = paused_json(self.paused_for(view));
         json
     }
@@ -159,7 +196,7 @@ impl Shown {
     pub fn text(&self, view: &RunView) -> String {
         let mut text = paused_text(self.paused_for(view))
             + &status_text(view, self)
-            + &step_text(self.step.as_ref());
+            + &step_text(self.step.as_ref(), self.now_ms);
         if !self.children.rows.is_empty() {
             text += "children\n";
             text += &self.children.text(1, self.now_ms);
@@ -331,8 +368,17 @@ impl Shown {
                     if let Some(deadline) = step.deadline_ms {
                         head += &format!(", deadline {}", utc_text(deadline));
                     }
-                    if let Some(message) = &step.waits {
-                        head += &format!("; it waits for a person{}", told(message));
+                    match (&step.needs_person, &step.waits) {
+                        (Some(mark), _) => {
+                            head += &format!(
+                                "; it waits for a person {}",
+                                needs_person_since_text(mark)
+                            );
+                        }
+                        (None, Some(message)) => {
+                            head += &format!("; it waits for a person{}", told(message));
+                        }
+                        (None, None) => {}
                     }
                 }
                 (head, vec![format!("spore step abandon {run}")])
@@ -435,6 +481,8 @@ pub struct Row {
     pub workflow: Option<String>,
     pub needs: Option<&'static str>,
     pub actor: Option<String>,
+    /// The needs-person mark of the async step the run is at.
+    pub needs_person: Option<NeedsPerson>,
 }
 
 impl Tree {
@@ -442,8 +490,9 @@ impl Tree {
         self.rows.iter().map(|row| (&self.runs[row.index], row))
     }
 
-    pub fn json(&self) -> Value {
-        Value::Array(self.each().map(|(v, r)| tree_json(v, r)).collect())
+    /// The rows, with the time `now_ms` that the marks' `forMs` count up to.
+    pub fn json(&self, now_ms: u64) -> Value {
+        Value::Array(self.each().map(|(v, r)| tree_json(v, r, now_ms)).collect())
     }
 
     /// One line per run, `indent` levels in, with times up to `now_ms`.
@@ -484,12 +533,13 @@ impl Tree {
                     .as_deref()
                     .map_or_else(String::new, |a| format!("  actor {a}"));
                 format!(
-                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}{}",
+                    "{:<runs$}  {:<workflows$}  {:<nodes$}  {:<14} {since:>7}  {}{actor}{}{}",
                     v.key.run,
                     r.workflow.as_deref().unwrap_or("-"),
                     r.node_id.as_deref().unwrap_or("-"),
                     r.needs.unwrap_or("-"),
                     v.start_key,
+                    needs_person_row_text(r.needs_person.as_ref(), now_ms),
                     quarantine_row_text(v)
                 )
             })
@@ -1316,7 +1366,7 @@ pub fn tree<'a>(runs: &'a [RunView], root: Option<&str>) -> Vec<(&'a RunView, us
     out
 }
 
-fn tree_json(v: &RunView, run: &Row) -> Value {
+fn tree_json(v: &RunView, run: &Row, now_ms: u64) -> Value {
     json!({
         "runId": v.key.run, "startKey": v.start_key, "status": v.status,
         "revision": v.revision.to_string(), "quarantined": v.quarantine.is_some(),
@@ -1324,6 +1374,7 @@ fn tree_json(v: &RunView, run: &Row) -> Value {
         "sinceMs": run.since_ms.map(|s| s.to_string()),
         "workflow": run.workflow, "needs": run.needs,
         "since": v.updated_at_ms.to_string(), "actor": run.actor,
+        "needsPerson": needs_person_json(run.needs_person.as_ref(), now_ms),
     })
 }
 
@@ -1342,9 +1393,10 @@ fn tree_text(v: &RunView, run: &Row, indent: usize, width: usize, now_ms: u64) -
     };
     let head = format!("{:1$}{2}", "", 2 * (run.depth + indent), v.key.run);
     format!(
-        "{head:<width$}  {:<18}  {node:<12} {since:>7}  {}{from}{}",
+        "{head:<width$}  {:<18}  {node:<12} {since:>7}  {}{from}{}{}",
         status_shown(v),
         v.start_key,
+        needs_person_row_text(run.needs_person.as_ref(), now_ms),
         quarantine_row_text(v)
     )
 }

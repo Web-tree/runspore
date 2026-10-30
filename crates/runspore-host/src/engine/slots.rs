@@ -205,6 +205,7 @@ mod tests {
             claimed_at_ms: Some(0),
             input: b"{}".to_vec(),
             params: None,
+            needs_person: None,
         }
     }
 

@@ -34,8 +34,8 @@ that wrote a database (§3), an attempt's holder handle and deadline, a renewal 
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
 attempt, an invocation's node `params` in every claim, the run's parent, the run's
 `updatedAtMs`, `hold_attempt`, the result channel picked for each async action,
-`cancel_run` and the run's cancel record, and scenarios S15 to S34; everything else is
-as in 0.1.
+`cancel_run` and the run's cancel record, an attempt's needs-person mark with
+`set_needs_person`, and scenarios S15 to S36; everything else is as in 0.1.
 
 ## 2. Operations
 
@@ -225,6 +225,29 @@ replayed receipt returns the historical record and writes nothing.
 The record is the store's to keep and the host's to read. An attempt that ends keeps
 whatever record it had.
 
+### set_needs_person (0.2)
+
+`set_needs_person(attempt, reason)` sets the attempt's **needs-person mark**, `{reason,
+sinceMs}`, or clears it with a null reason (cli.md, `step needs-person`). The store
+keeps it and never reads it.
+
+Predicates: the attempt exists and its ID, owner and fence match (`stale` /
+`lease.lost`). To set, it is also `running` and now < `leaseUntilMs` (`stale` /
+`lease.lost`).
+
+Writes: with a reason, the mark: that reason, and `sinceMs` now when the attempt had
+no mark, else the `sinceMs` it had. With null, no mark. Nothing else: not the lease,
+the attempt's status, the run's revision or its `updatedAtMs`. A request that would
+change nothing, the reason the mark already has or a clear of an attempt with no mark
+(an ended one included), writes nothing, no receipt included, and returns the mark as
+it is with disposition `duplicate`, as §1 rule 6 does for a natural key. Returns
+`{needsPerson}`: the mark afterwards, or null. A replayed receipt returns the
+historical value and writes nothing.
+
+The mark ends with the attempt: `finish_attempt`, `expire_attempt` with any reason,
+and the expiries of `cancel_run` clear it in the same transaction. A new attempt of the
+invocation starts with none.
+
 ### finish_attempt
 
 Predicates: `result.body` decodes as `ActivityResult` whose `invocationId`,
@@ -340,11 +363,13 @@ quarantine. Read views show status `cancelled` and the cancel record.
   attempt's `claimedAtMs`, or null before its first claim. **0.2:** a run shows
   `updatedAtMs`, the store time of its latest change: its creation, an appended event
   (a signal, a resolution, a result or an expiry), a commit, a claim, a quarantine and
-  a release each set it to now; a renewal, `set_process` and `hold_attempt` leave it.
+  a release each set it to now; a renewal, `set_process`, `hold_attempt` and
+  `set_needs_person` leave it.
   **0.2:** an invocation shows its input and its `params` as scheduled, the values
   every claim returns, so a host can probe or watch an attempt it did not claim (host
   §3, Async commands). **0.2:** a run shows its `resultChannels`, `{}` when it has
-  none. **0.2:** a cancelled run shows status `cancelled` and its cancel record
+  none. **0.2:** an invocation shows its latest attempt's needs-person mark, `{reason,
+  sinceMs}`, or null. **0.2:** a cancelled run shows status `cancelled` and its cancel record
   `{reason, atMs, requestId}`; any other run shows null. A cancel sets `updatedAtMs`.
 - **0.2:** `scan_ready` and both kinds of `scan_due` item leave cancelled runs out.
 
@@ -411,7 +436,9 @@ quarantine. Read views show status `cancelled` and the cancel record.
   run's parent, null for runs created before; version 8 to 9 adds when an attempt was
   claimed, null for attempts claimed before; version 9 to 10 adds the run's result
   channels, `{}` for runs created before; version 10 to 11 adds the run's cancel
-  record, null for runs created before; version 11 to 12 adds the `workers` table.
+  record, null for runs created before; version 11 to 12 adds the `workers` table;
+  version 12 to 13 adds an attempt's needs-person mark, null for attempts claimed
+  before.
   The refusals happen before any other read or write, so a refused file is left
   exactly as it was.
 
@@ -435,7 +462,8 @@ quarantine. Read views show status `cancelled` and the cancel record.
 Around the transaction commit of each mutating operation:
 `store.<op>.before-commit` and `store.<op>.after-commit`, with `<op>` one of
 `create-run`, `append-event`, `commit-turn`, `claim-attempt`, `heartbeat`,
-`set-process` (0.2), `finish-attempt`, `expire-attempt`, `cancel-run` (0.2). **0.2:** `store.upgrade.after-step`
+`set-process` (0.2), `set-needs-person` (0.2), `finish-attempt`, `expire-attempt`,
+`cancel-run` (0.2). **0.2:** `store.upgrade.after-step`
 after each upgrade step of a migrate, before the transaction commits. Use
 `runspore_types::failpoint::hit`.
 
@@ -480,6 +508,8 @@ Written once, generic over a store factory and a manual clock, in
 | S32 | `cancel_run` while an attempt is held with a holder handle and a deadline (0.2) | The value lists the attempt's reference and its holder; the holder's `heartbeat`, `hold_attempt` and `finish_attempt` are `lease.lost`; the attempt is no `Lease` item of `scan_due` once its deadline passes |
 | S33 | Two `cancel_run` calls with two request IDs, from two instances at once (0.2) | Both succeed; exactly one is `applied` and writes a receipt; the run has one cancel record and every running attempt one `expired` result |
 | S34 | `cancel_run` on a completed run, a failed run, and a run that does not exist (0.2) | The ended runs are `duplicate`, keep their status and get no cancel record and no receipt; the missing run is `run.not-found` |
+| S35 | `set_needs_person` on a running attempt; again with the same reason; with another reason, at a later time; its first request ID again, and with another reason; a clear, and a clear again; a set with another owner or fence, and after the lease (0.2) | `list_invocations` shows the mark with the first set's `sinceMs`, then the new reason with that `sinceMs`; the same reason is `duplicate` and writes no receipt; the replay is `duplicate` with the historical value; the other reason under that ID is `request.digest-mismatch`; the clear is applied and the second clear `duplicate`, with no receipt; the others are `lease.lost` and change nothing; the lease, the revision and `updatedAtMs` never change |
+| S36 | A marked attempt finished; one expired with each reason; one of a run cancelled; then a set and a clear of each, and the next attempt's claim (0.2) | Each mark is gone from `list_invocations` once its attempt ends; each clear is `duplicate`, each set `lease.lost`; the next attempt shows no mark |
 
 SQLite-specific, in the adapter crate:
 
@@ -504,3 +534,4 @@ SQLite-specific, in the adapter crate:
 | Q17 | Migrate a version 11 file, then migrate it again (0.2) | Upgraded to the current version with the `workers` table; the migration reports version 11 and its writer; its runs are kept; the second migrate changes nothing |
 | Q18 | Open a version 11 file without migrating (0.2) | `schema.needs-migrate`; the message names the version, the writer, this `spore` and `spore migrate`; the file is unchanged |
 | Q19 | Migrate a version 11 file while one attempt is held under a live lease by `worker-old` and one by an actor; again once the lease has passed (0.2) | `migrate.workers-live` naming `worker-old`, its step and run, not the actor; the file is unchanged; then migrated |
+| Q20 | Migrate a version 12 file (0.2) | Upgraded to the current version; its attempts are kept with no needs-person mark; a running one can then be marked |

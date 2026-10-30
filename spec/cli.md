@@ -46,6 +46,7 @@ marked **0.2** below are new since 0.1.
 | `step complete <token> --outcome <o> [--output <json>]` | **0.2.** Reports the step done with an outcome |
 | `step fail <token> --error <message> [--code <c>] [--retryable]` | **0.2.** Reports the step failed |
 | `step abandon <runId>` | **0.2.** Frees the run's held async step at once |
+| `step needs-person <token> (--reason <text> \| --clear) [--id <requestId>]` | **0.2.** Marks the claimed or held step as waiting on a person, with a reason, or clears the mark; a repeated ID is a no-op (§Steps outside the worker) |
 | `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
 | `capabilities` | **0.2.** Prints what this `spore` runs: its version, the version of each contract, and its capability set (§Capabilities) |
 | `migrate` | **0.2.** Upgrades a database an earlier 0.2 `spore` wrote to this `spore`'s schema; refused while a worker of another `spore` uses it (§Databases from another version) |
@@ -240,6 +241,39 @@ its lease, and fences its holder out: a later report from it is `lease.lost`. Th
 action's effect then decides, as for any expiry. A run with no held async step
 exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
 
+**`step needs-person <token> (--reason <text> | --clear) [--id <requestId>]`.** Marks
+the step whose attempt the token names as waiting on a person, or clears the mark: for
+a holder whose work is alive but waits on someone, such as an agent in a terminal pane
+at a permission prompt or idle with a question. Like a Kubernetes pod condition a
+controller sets, the **needs-person mark** is a fact about the step, not an answer: it
+changes no attempt, lease, outcome or revision, appends no event, and leaves the run's
+`since` (§What a run needs) as it is. The bearer of the token sets it: an actor, or the
+work an async command or a step runner started (`RUNSPORE_TOKEN`). A hook may call it
+many times a minute, so it calls no kernel and writes nothing when nothing changes.
+
+- `--reason` sets the mark; the reason is text of 1 to 1024 bytes (exit 2,
+  `step.reason-invalid`, otherwise). The mark's `sinceMs` is when it went from unset to
+  set: setting it again keeps that time and takes the new reason, and setting it with
+  the reason it already has writes nothing. A set on an attempt that has ended, or
+  whose lease has run out, exits 2 with `lease.lost`.
+- `--clear` clears it. Clearing a step that carries no mark, an ended attempt
+  included, writes nothing and succeeds, disposition `duplicate`, so a hook may clear
+  on every call.
+- `--id` names the request on the token's attempt; a missing one is generated. A
+  repeat with the same ID is a `duplicate` and changes nothing, even after the mark
+  has changed; the same ID for another request on that attempt (a set for a clear, or
+  another reason) exits 2 with `step.id-reused` (§Keys used again). The next attempt
+  of the step may use the same IDs again.
+
+The mark is kept with the attempt, so it survives the restart of its holder and of
+any worker, and it ends with the attempt: reported, failed, expired, abandoned or
+cancelled. The next attempt of the step starts unmarked. A token that names no attempt
+of an async step exits 2 with `step.token-invalid`, as for `complete`. It prints
+`{runId, nodeId, invocationId, attempt, requestId, disposition, needsPerson}`,
+`needsPerson` being the mark afterwards as `status` shows it (§JSON output), or null.
+Text: `step implement attempt 1 needs a person since <time> UTC: <reason>`, or `step
+implement attempt 1 needs no person`.
+
 The `step` commands but `step show` are writing commands (§Project folder).
 
 ## Capabilities (0.2)
@@ -331,7 +365,9 @@ In JSON, each entry of `runs` is `{"runId", "startKey", "status", "revision",
 "quarantined", "parent", "depth", "nodeId", "sinceMs"}`, in the tree's order. `parent`
 is `{"runId", "nodeId"}` or null; `depth` is 0 at the top and one more per level;
 `nodeId` and `sinceMs` are null at no node. Each entry also carries `workflow`,
-`needs`, `since` and `actor` (§What a run needs). `status` carries the run's `parent` and,
+`needs`, `since`, `actor` and `needsPerson` (§What a run needs). A run whose step
+carries a needs-person mark ends its line with `needs a person for <duration>:
+<reason>`. `status` carries the run's `parent` and,
 as `children`, the runs below it in the same form and order, its direct children at
 depth 0; its text lists them under `children`.
 
@@ -368,11 +404,13 @@ unreachable node as `Unknown` rather than `Running` for the same reason.
 **`list --unfinished`.** Lists only the unfinished runs, newest first (by the time each
 was created), one line each and not as a tree: the run, its workflow, its node, what
 it needs, how long ago it last changed, its start key, the actor of an external
-step, and a quarantine's code, details and release as in `list`:
+step, its step's needs-person mark, and a quarantine's code, details and release as in
+`list`:
 
 ```text
 run_9a…  coding-loop  review     signal              2m10s  ticket-148
 run_4f…  build        tickets    held                  12s  build  actor reviewer
+run_2b…  coding-loop  implement  held                1m02s  ticket-151  needs a person for 58s: Claude needs your permission to use Bash
 run_1a…  coding-loop  implement  driver             28s  ticket-150
 run_7c…  coding-loop  fix        quarantined         1h09m  ticket-73  host.files-unwritable: No space left on device  spore release run_7c…
 ```
@@ -382,7 +420,10 @@ that start runs: `workflow`, the name of the run's workflow (its graph id, kerne
 §2); `needs`, as above, null for a finished run; `since`, when the run last changed,
 the run's `updatedAtMs` (store.md §2), so a claim or an expiry counts as a change; and
 `actor`, the label of the external step it is at (`external-ready` or `held`), else
-null. With `--unfinished`, `depth` is 0.
+null; and `needsPerson`, the needs-person mark of the async step it is at (§Steps
+outside the worker), as `status` gives it in `step.needsPerson`, else null. A mark
+does not change `needs`: the run still needs `held`, and the mark says why its holder
+is not moving. With `--unfinished`, `depth` is 0.
 
 **`continue [<runId>]`.** Drives one unfinished run: it does the next thing the run
 needs, or says exactly what a person must do. Without `<runId>`:
@@ -432,7 +473,7 @@ With `<runId>`, or the one unfinished run, it:
    | stuck, or an unknown outcome | the step and its kept error, and the three `spore resolve` forms, as `status` gives them | 4 |
    | quarantined while it worked | as in 1 | 5 |
    | at a ready external step | the step and its actor label, and `spore step claim <runId>`, with `--actor <label>` when it has one | 6 |
-   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, the message when its watch said that the holder waits for a person, and `spore step abandon <runId>` | 6 |
+   | at a held async step | the step, the actor label (for an async command, the work it started), the holder handle, the deadline, the message when its watch said that the holder waits for a person, the reason and since when when its holder marked it as needing a person (§Steps outside the worker), and `spore step abandon <runId>` | 6 |
    | at a `capability-missing` step | the step and what this `spore` lacks and what to restore, as `status` gives it in `step.missing`; no command | 6 |
 A run that is finished already is shown as above, and nothing is worked. The JSON is
 the `status` object `run` prints, with `needs` (null when finished) and `commands`, the
@@ -459,6 +500,12 @@ where `continue` would stop with exit 6 (host.md §2, `follow`):
   process group, leaves the attempt held, and returns exit 6 with `needs` `held` and
   the step's `waiting` `person` and `message` (§JSON output). The next `continue
   --wait` starts the watch again.
+- **The holder marks the step as needing a person** (`step needs-person`). It returns
+  exit 6 the same way, with `needs` `held`, `waiting` `person` and the mark in
+  `needsPerson`, when the step carries a mark it did not carry when `continue --wait`
+  began: one set since, or set again after a clear. A mark already set when it began
+  does not stop it, so a follower that tells the person and follows again at once
+  waits on, until the run moves or the mark is set anew.
 - **The step has no watch, or no watch runs.** It waits. It reloads the run every
   `--poll-ms` (200 ms by default), so a report from elsewhere, such as `spore step
   complete`, is applied within one poll. Its sweep expires the attempt at its lease
@@ -963,7 +1010,8 @@ In JSON mode the error's `details` are `{runId, startKey, differs, input, comman
 `signal --id` with an ID the run already took for a signal with another name, outcome
 or data is `signal.id-reused`; `resolve --id` with an ID it took for another
 resolution is `resolve.id-reused`; **0.2:** `cancel --id` with an ID it took for a
-cancel with another reason is `cancel.id-reused`. The message names the run and the ID and says to
+cancel with another reason is `cancel.id-reused`, and `step needs-person --id` with an
+ID it took for another set or clear of a mark is `step.id-reused`. The message names the run and the ID and says to
 send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
 ## Exit codes
@@ -1149,7 +1197,7 @@ record cleared; an attempt whose worker died keeps its record.
 **0.2:** `step` describes the async step the run is at (§Steps outside the
 worker), or a step this `spore` cannot act on (§Capabilities), or is null anywhere
 else: `{"kind", "actor", "state", "attempt", "holder", "deadlineMs", "leaseUntilMs",
-"missing"}`. `kind` is the action's kind: `external`, or `command` for an async
+"missing", "needsPerson"}`. `kind` is the action's kind: `external`, or `command` for an async
 command. `actor` is the action's label or null. `state` is `ready` while nobody holds
 an external step and `held` while a claimed attempt runs, or an async command's
 attempt is held; `holder` is the handle given with `--holder` or printed by the start
@@ -1161,7 +1209,14 @@ A held step whose watch, run by this `spore`, has said that its holder waits for
 person (host.md §3, Async commands) also carries `"waiting": "person"` and `message`,
 the message of the watch's latest `needs` line (empty when the line had none). Only a
 command that works the run (`run`, `worker --until-parked`, `continue`) runs watches,
-so `status` never carries them.
+so `status` carries them only from a mark, below.
+`needsPerson` is the step's needs-person mark (§Steps outside the worker),
+`{"reason", "sinceMs", "forMs"}`: the reason its holder gave, when the mark was set
+and how long ago that was; null when the step carries none. A marked step also
+carries `"waiting": "person"` and `message`, the mark's reason, as a watch's `needs`
+line sets them; when both say so, `message` is the mark's. Text mode shows the mark
+under the step as `waiting    for a person since <time> UTC, for <duration>:
+<reason>`.
 It never shows the step's input or the token.
 
 **0.2:** `packageDigest` is the run's identity, the digest of the package it runs.
