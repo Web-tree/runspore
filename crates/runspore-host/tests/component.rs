@@ -566,7 +566,7 @@ async fn h45_a_write_outside_the_write_grants_fails_the_step_and_writes_nothing(
         ("other", "other/a.txt"),
         ("link", "out/away/a.txt"),
         ("up", "out/../other/a.txt"),
-        ("missing", "out/missing/a.txt"),
+        ("missing", "other/missing/a.txt"),
         ("read-only", "read-only/a.txt"),
     ] {
         let grants = json!({"writeFolders": ["out"], "folders": ["read-only", "other"]});
@@ -696,4 +696,40 @@ async fn h45_a_runner_built_for_0_1_0_loads_and_runs_unchanged() {
     let cancelled = engine.cancel(&key, "stop", None).await.unwrap();
     assert_eq!(cancelled.stops[0].exit, Some(0));
     assert!(gone_within(pid, Duration::from_secs(5)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_a_missing_path_inside_a_grant_is_the_calls_error_not_a_trap() {
+    let path = temp_db("h45-missing");
+    let dir = path.parent().unwrap().to_path_buf();
+    fs::create_dir_all(dir.join("data")).unwrap();
+    let grants = json!({"folders": ["data"], "writeFolders": ["data"]});
+    let artifact = artifact(&dir, &settings(grants, "idempotent"));
+    let engine = worker(&path);
+    for (name, input) in [
+        ("read", json!({"read": "data/x.json"})),
+        ("list", json!({"list": "data/none"})),
+        (
+            "write",
+            json!({"write": {"path": "data/none/x.json", "text": "x"}}),
+        ),
+    ] {
+        let key = engine
+            .start_artifact(&artifact, input, name)
+            .await
+            .unwrap()
+            .key;
+        engine.run_until_parked(&key).await.unwrap();
+        let results = results(&engine, &key).await;
+        let error = &results[0]["error"];
+        // The test runner fails its start with what the host call returned.
+        assert_eq!(error["code"], "runner.host-failed", "{name}: {error}");
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("No such file or directory"),
+            "{name}: {error}"
+        );
+    }
 }

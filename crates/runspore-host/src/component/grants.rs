@@ -115,14 +115,14 @@ impl Grants {
     }
 
     /// The path `path` names, with its symbolic links resolved, if it lies inside one of
-    /// `folders`, resolved the same way. A path that does not exist is refused as
-    /// outside: nothing can be read there.
+    /// `folders`, resolved the same way. A path that does not exist is judged by its
+    /// nearest folder that does: inside a grant, the read then fails as any missing file.
     pub fn folder(&self, path: &str, places: &Places) -> Result<PathBuf, Denied> {
         let denied = || Denied {
             grant: "folders",
             value: path.to_string(),
         };
-        let wanted = std::fs::canonicalize(places.resolve(path)).map_err(|_| denied())?;
+        let wanted = real(&places.resolve(path)).ok_or_else(denied)?;
         if inside(&wanted, &self.folders, places) {
             Ok(wanted)
         } else {
@@ -133,7 +133,8 @@ impl Grants {
     /// The file `path` names, in its folder with symbolic links resolved, if that
     /// folder lies inside one of `writeFolders`, resolved the same way. The file itself
     /// is not followed: a write replaces whatever is there, a link included. A folder
-    /// that does not exist, or a path that names no file in one, is refused as outside.
+    /// that does not exist is judged as [`Grants::folder`] judges a path; a path that
+    /// names no file is refused as outside.
     pub fn write_file(&self, path: &str, places: &Places) -> Result<PathBuf, Denied> {
         let denied = || Denied {
             grant: "writeFolders",
@@ -145,11 +146,29 @@ impl Grants {
             _ => return Err(denied()),
         };
         let folder = resolved.parent().ok_or_else(denied)?;
-        let folder = std::fs::canonicalize(folder).map_err(|_| denied())?;
+        let folder = real(folder).ok_or_else(denied)?;
         if inside(&folder, &self.write_folders, places) {
             Ok(folder.join(name))
         } else {
             Err(denied())
+        }
+    }
+}
+
+/// `path` with its symbolic links resolved; for a path that does not exist, its nearest
+/// folder that does, resolved, joined with the rest. `.` and `..` are already folded,
+/// and what does not exist holds no link to follow.
+fn real(path: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut at = path;
+    loop {
+        match std::fs::canonicalize(at) {
+            Ok(found) => return Some(rest.iter().rev().fold(found, |p, part| p.join(part))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                rest.push(at.file_name()?.to_owned());
+                at = at.parent()?;
+            }
+            Err(_) => return None,
         }
     }
 }
@@ -291,7 +310,14 @@ mod tests {
         assert!(grants.folder("other/b.txt", &p).is_err());
         assert!(grants.folder("granted/out/b.txt", &p).is_err());
         assert!(grants.folder("granted/../other/b.txt", &p).is_err());
-        assert!(grants.folder("granted/missing", &p).is_err());
+        // A missing path inside the grant is the read's own error, not the grant's.
+        assert!(grants.folder("granted/missing", &p).is_ok());
+        assert!(grants.folder("granted/missing/deeper", &p).is_ok());
+        assert!(
+            grants.folder("granted/out/missing", &p).is_err(),
+            "a link out"
+        );
+        assert!(grants.folder("other/missing", &p).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -322,14 +348,19 @@ mod tests {
             .contains("not granted write folder `other/c`: add it to `grants.writeFolders`"));
         for outside in [
             "out/away/c",
+            "out/away/missing/c",
             "out/../other/c",
-            "out/missing/c",
+            "other/missing/c",
             "out",
             "out/",
             "out/inner/..",
         ] {
             assert!(grants.write_file(outside, &p).is_err(), "{outside}");
         }
+        assert!(
+            grants.write_file("out/missing/c", &p).is_ok(),
+            "a missing folder inside the grant fails the write itself"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
