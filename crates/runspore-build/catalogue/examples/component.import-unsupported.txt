@@ -4,7 +4,7 @@
   6 │       "module": "runner.wasm",
     │                 ^^^^^^^^^^^^^
 
-To fix: import only "runspore:runner/host@0.1.0": it starts programs, reaches sockets and reads folders the action grants.
+To fix: import only "runspore:runner/host@0.1.1": it starts programs, reaches sockets, and reads and writes folders the action grants.
 Why: a runner gets only the host's own imports, so it can do no more than its grants allow.
 
 1 problem in review. Nothing was run.

@@ -1,6 +1,6 @@
 //! The `component` kind (spec/host.md §3, `component`): an action whose start, probe
 //! and stop are a step runner, a WebAssembly component of world
-//! `runspore:runner/runner@0.1.0` sealed into the workflow artifact. The host runs it
+//! `runspore:runner/runner@0.1.1` sealed into the workflow artifact. The host runs it
 //! through Wasmtime in the kernel's sandbox, a fresh instance per call, and offers it
 //! only the imports of `contracts/wit/runner/runner.wit`, each checked against the
 //! action's grants.
@@ -57,6 +57,8 @@ pub(crate) struct Spec {
     pub module: String,
     grants: Grants,
     timeout: Duration,
+    /// Whether the programs `start` starts get the attempt's token.
+    pass_token: bool,
 }
 
 /// The entry path a `module` names: relative, `/` its separator, no `..`; `.` steps
@@ -99,10 +101,16 @@ pub(crate) fn read(action: &Value) -> Result<Spec, (&'static str, String)> {
     let timeout = crate::external::millis(action, "timeoutMs", "timeoutMs")
         .map_err(invalid)?
         .map_or(START_TIMEOUT, Duration::from_millis);
+    let pass_token = match action.get("passToken") {
+        None => true,
+        Some(Value::Bool(pass)) => *pass,
+        Some(_) => return Err(invalid("`passToken` must be true or false".into())),
+    };
     Ok(Spec {
         module,
         grants,
         timeout,
+        pass_token,
     })
 }
 
@@ -290,6 +298,7 @@ async fn call<T: Send + 'static>(
         let places = Places {
             base: ctx.base_dir.clone(),
             home: std::env::var_os("HOME").map(PathBuf::from),
+            work: ctx.work_dir.clone(),
         };
         let state = State {
             ctx,
@@ -297,6 +306,7 @@ async fn call<T: Send + 'static>(
             places,
             deadline: Instant::now() + timeout,
             start,
+            pass_token: spec.pass_token,
             halt: None,
             max_memory_bytes: MAX_MEMORY_BYTES,
             refused: false,
@@ -503,5 +513,20 @@ mod tests {
         let refused =
             parse("review", &json!({"kind": "component", "module": "/r.wasm"})).unwrap_err();
         assert_eq!(refused.code(), "action.invalid");
+    }
+
+    #[test]
+    fn the_token_is_passed_on_unless_the_action_says_not() {
+        let action =
+            |pass: Value| json!({"kind": "component", "module": "r.wasm", "passToken": pass});
+        assert!(
+            parse("review", &json!({"kind": "component", "module": "r.wasm"}))
+                .unwrap()
+                .pass_token
+        );
+        assert!(!parse("review", &action(json!(false))).unwrap().pass_token);
+        let refused = parse("review", &action(json!("no"))).unwrap_err();
+        assert_eq!(refused.code(), "action.invalid");
+        assert!(refused.to_string().contains("passToken"), "{refused}");
     }
 }

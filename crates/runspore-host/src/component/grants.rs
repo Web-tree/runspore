@@ -1,13 +1,16 @@
 //! A step runner's `grants` (spec/host.md §3, `component`): the programs it may start,
-//! the sockets it may reach and the folders it may read. The host enforces exactly
-//! these and never asks.
+//! the sockets it may reach, the folders it may read and those it may write into. The
+//! host enforces exactly these and never asks.
 
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{json, Value};
 
 /// The kinds of grant this host offers, sorted.
-pub const KINDS: [&str; 3] = ["folders", "programs", "sockets"];
+pub const KINDS: [&str; 4] = ["folders", "programs", "sockets", "writeFolders"];
+
+/// The grant entry that names the invocation's work folder, alone or before `/<p>`.
+const WORK_DIR: &str = "$RUNSPORE_WORK_DIR";
 
 /// A grant the action does not have: its kind and the value asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +21,10 @@ pub(crate) struct Denied {
 
 impl Denied {
     pub fn message(&self, action_id: &str) -> String {
-        let what = self.grant.trim_end_matches('s');
+        let what = match self.grant {
+            "writeFolders" => "write folder",
+            grant => grant.trim_end_matches('s'),
+        };
         format!(
             "action `{action_id}` is not granted {what} `{}`: add it to `grants.{}`",
             self.value, self.grant
@@ -44,6 +50,7 @@ pub(crate) struct Grants {
     pub programs: Vec<String>,
     pub sockets: Vec<String>,
     pub folders: Vec<String>,
+    pub write_folders: Vec<String>,
 }
 
 impl Grants {
@@ -61,6 +68,7 @@ impl Grants {
                 "programs" => &mut parsed.programs,
                 "sockets" => &mut parsed.sockets,
                 "folders" => &mut parsed.folders,
+                "writeFolders" => &mut parsed.write_folders,
                 _ => return Err(Refused::Unsupported(kind.clone())),
             };
             let items = list
@@ -107,34 +115,102 @@ impl Grants {
     }
 
     /// The path `path` names, with its symbolic links resolved, if it lies inside one of
-    /// `folders`, resolved the same way. A path that does not exist is refused as
-    /// outside: nothing can be read there.
+    /// `folders`, resolved the same way. A path that does not exist is judged by its
+    /// nearest folder that does: inside a grant, the read then fails as any missing file.
     pub fn folder(&self, path: &str, places: &Places) -> Result<PathBuf, Denied> {
         let denied = || Denied {
             grant: "folders",
             value: path.to_string(),
         };
-        let wanted = std::fs::canonicalize(places.resolve(path)).map_err(|_| denied())?;
-        let inside = self.folders.iter().any(|folder| {
-            std::fs::canonicalize(places.resolve(folder)).is_ok_and(|f| wanted.starts_with(f))
-        });
-        if inside {
+        let wanted = real(&places.resolve(path)).ok_or_else(denied)?;
+        if inside(&wanted, &self.folders, places) {
             Ok(wanted)
+        } else {
+            Err(denied())
+        }
+    }
+
+    /// The file `path` names, in its folder with symbolic links resolved, if that
+    /// folder lies inside one of `writeFolders`, resolved the same way. The file itself
+    /// is not followed: a write replaces whatever is there, a link included. A folder
+    /// that does not exist is judged as [`Grants::folder`] judges a path; a path that
+    /// names no file is refused as outside.
+    pub fn write_file(&self, path: &str, places: &Places) -> Result<PathBuf, Denied> {
+        let denied = || Denied {
+            grant: "writeFolders",
+            value: path.to_string(),
+        };
+        let resolved = places.resolve(path);
+        let name = match resolved.components().next_back() {
+            Some(Component::Normal(name)) if !path.ends_with('/') => name.to_owned(),
+            _ => return Err(denied()),
+        };
+        let folder = resolved.parent().ok_or_else(denied)?;
+        let folder = real(folder).ok_or_else(denied)?;
+        if inside(&folder, &self.write_folders, places) {
+            Ok(folder.join(name))
         } else {
             Err(denied())
         }
     }
 }
 
+/// `path` with its symbolic links resolved; for a path that does not exist, its nearest
+/// folder that does, resolved, joined with the rest. `.` and `..` are already folded,
+/// and what does not exist holds no link to follow.
+fn real(path: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut at = path;
+    loop {
+        match std::fs::canonicalize(at) {
+            Ok(found) => return Some(rest.iter().rev().fold(found, |p, part| p.join(part))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                rest.push(at.file_name()?.to_owned());
+                at = at.parent()?;
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Whether `wanted`, its links resolved, lies inside one of `granted`, each resolved
+/// the same way.
+fn inside(wanted: &Path, granted: &[String], places: &Places) -> bool {
+    granted.iter().any(|folder| {
+        places
+            .grant(folder)
+            .and_then(|f| std::fs::canonicalize(f).ok())
+            .is_some_and(|f| wanted.starts_with(f))
+    })
+}
+
 /// Where relative and `~/` paths of one call point: the run's base folder and the
-/// worker's home folder.
+/// worker's home folder; and the invocation's work folder, which a folder grant names
+/// as `$RUNSPORE_WORK_DIR`.
 #[derive(Debug, Clone)]
 pub(crate) struct Places {
     pub base: PathBuf,
     pub home: Option<PathBuf>,
+    pub work: Option<PathBuf>,
 }
 
 impl Places {
+    /// The folder a grant entry names: `$RUNSPORE_WORK_DIR[/<p>]` under the work
+    /// folder, none without one; anything else as [`Places::resolve`] reads a path.
+    pub fn grant(&self, entry: &str) -> Option<PathBuf> {
+        let Some(rest) = entry.strip_prefix(WORK_DIR) else {
+            return Some(self.resolve(entry));
+        };
+        let rest = match rest.strip_prefix('/') {
+            Some(rest) => rest,
+            None if rest.is_empty() => "",
+            // `$RUNSPORE_WORK_DIRX` is a relative path like any other.
+            None => return Some(self.resolve(entry)),
+        };
+        let work = self.work.as_ref()?;
+        Some(self.resolve(&work.join(rest).to_string_lossy()))
+    }
+
     /// `~/<p>` under the home folder, an absolute path as it is, anything else under
     /// the base folder; `.` and `..` folded without reading the disk.
     pub fn resolve(&self, path: &str) -> PathBuf {
@@ -165,6 +241,7 @@ mod tests {
         Places {
             base: base.to_path_buf(),
             home: Some(PathBuf::from("/home/someone")),
+            work: None,
         }
     }
 
@@ -199,7 +276,7 @@ mod tests {
         let grants = Grants {
             programs: vec!["herdr".into(), "./bin/job".into()],
             sockets: vec!["~/.herdr/api.sock".into(), "run.sock".into()],
-            folders: Vec::new(),
+            ..Grants::default()
         };
         assert!(grants.program("herdr").is_ok());
         assert!(grants.program("./bin/job").is_ok());
@@ -233,7 +310,86 @@ mod tests {
         assert!(grants.folder("other/b.txt", &p).is_err());
         assert!(grants.folder("granted/out/b.txt", &p).is_err());
         assert!(grants.folder("granted/../other/b.txt", &p).is_err());
-        assert!(grants.folder("granted/missing", &p).is_err());
+        // A missing path inside the grant is the read's own error, not the grant's.
+        assert!(grants.folder("granted/missing", &p).is_ok());
+        assert!(grants.folder("granted/missing/deeper", &p).is_ok());
+        assert!(
+            grants.folder("granted/out/missing", &p).is_err(),
+            "a link out"
+        );
+        assert!(grants.folder("other/missing", &p).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_write_grant_covers_files_of_folders_below_it_and_no_link_out() {
+        let root =
+            std::env::temp_dir().join(format!("runspore-write-grants-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("out/inner")).unwrap();
+        std::fs::create_dir_all(root.join("other")).unwrap();
+        std::os::unix::fs::symlink(root.join("other"), root.join("out/away")).unwrap();
+        let grants = Grants {
+            write_folders: vec!["out".into()],
+            folders: vec!["other".into()],
+            ..Grants::default()
+        };
+        let p = places(&root);
+        let real = std::fs::canonicalize(&root).unwrap();
+        assert_eq!(
+            grants.write_file("out/a.txt", &p).unwrap(),
+            real.join("out/a.txt")
+        );
+        assert!(grants.write_file("out/inner/b", &p).is_ok());
+        let denied = grants.write_file("other/c", &p).unwrap_err();
+        assert_eq!(denied.grant, "writeFolders");
+        assert!(denied
+            .message("review")
+            .contains("not granted write folder `other/c`: add it to `grants.writeFolders`"));
+        for outside in [
+            "out/away/c",
+            "out/away/missing/c",
+            "out/../other/c",
+            "other/missing/c",
+            "out",
+            "out/",
+            "out/inner/..",
+        ] {
+            assert!(grants.write_file(outside, &p).is_err(), "{outside}");
+        }
+        assert!(
+            grants.write_file("out/missing/c", &p).is_ok(),
+            "a missing folder inside the grant fails the write itself"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_work_folder_grant_names_the_invocations_work_folder() {
+        let root = std::env::temp_dir().join(format!("runspore-work-grant-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("work/sub")).unwrap();
+        std::fs::create_dir_all(root.join("base")).unwrap();
+        let grants = Grants {
+            write_folders: vec!["$RUNSPORE_WORK_DIR".into()],
+            folders: vec!["$RUNSPORE_WORK_DIR/sub".into()],
+            ..Grants::default()
+        };
+        let mut p = places(&root.join("base"));
+        let token = root.join("work/token");
+        assert!(grants.write_file(&token.to_string_lossy(), &p).is_err());
+        p.work = Some(root.join("work"));
+        assert!(grants.write_file(&token.to_string_lossy(), &p).is_ok());
+        assert!(grants
+            .folder(&root.join("work/sub").to_string_lossy(), &p)
+            .is_ok());
+        assert!(grants
+            .folder(&root.join("work").to_string_lossy(), &p)
+            .is_err());
+        assert_eq!(
+            p.grant("$RUNSPORE_WORK_DIRX"),
+            Some(root.join("base/$RUNSPORE_WORK_DIRX"))
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

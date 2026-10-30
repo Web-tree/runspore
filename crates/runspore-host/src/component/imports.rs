@@ -3,10 +3,12 @@
 //! the call's deadline, or after the attempt was told to stop traps the runner; the
 //! store data keeps why, so the call ends with it whatever the runner does next.
 
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -25,7 +27,7 @@ use crate::process::{self, Seen};
 
 /// What `request` reads at most.
 const MAX_REPLY: usize = 1024 * 1024;
-/// What `read-file` reads at most.
+/// What `read-file` reads and `write-file` writes at most.
 const MAX_FILE: u64 = 16 * 1024 * 1024;
 /// How often a `sleep` looks whether the attempt was told to stop.
 const SLEEP_SLICE: Duration = Duration::from_millis(50);
@@ -48,6 +50,8 @@ pub(crate) struct State {
     pub deadline: Instant,
     /// Whether this is `start`: its programs get the attempt's token.
     pub start: bool,
+    /// Whether the action passes the token on to the programs `start` starts.
+    pub pass_token: bool,
     pub halt: Option<Halt>,
     pub max_memory_bytes: usize,
     /// Whether memory growth was ever refused.
@@ -143,9 +147,12 @@ impl Host for State {
         }
         match (&self.ctx.token, self.start) {
             (Some(token), true) => {
-                child
-                    .env("RUNSPORE_TOKEN", token)
-                    .env("RUNSPORE_RESULT_CHANNEL", &self.ctx.result_channel);
+                child.env("RUNSPORE_RESULT_CHANNEL", &self.ctx.result_channel);
+                if self.pass_token {
+                    child.env("RUNSPORE_TOKEN", token);
+                } else {
+                    child.env_remove("RUNSPORE_TOKEN");
+                }
             }
             _ => {
                 child
@@ -305,6 +312,56 @@ impl Host for State {
         };
         Ok(list())
     }
+
+    fn write_file(&mut self, path: String, bytes: Vec<u8>) -> wasmtime::Result<Result<(), String>> {
+        self.live()?;
+        let granted = self.grants.write_file(&path, &self.places);
+        let file = self.granted(granted)?;
+        if bytes.len() as u64 > MAX_FILE {
+            return Ok(Err(format!("`{path}` would be over 16 MiB")));
+        }
+        Ok(replace(&file, &bytes).map_err(|e| format!("writing `{path}`: {e}")))
+    }
+}
+
+/// Writes `bytes` to a new file of mode `0600` beside `file`, then renames it over
+/// `file`, so a reader sees the old file or the new one and never part of one.
+fn replace(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let folder = file.parent().unwrap_or(Path::new("."));
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut tries = 0u32;
+    let (temp, mut out) = loop {
+        let mut salt = [0u8; 8];
+        getrandom::fill(&mut salt).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let salt: String = salt.iter().map(|b| format!("{b:02x}")).collect();
+        let temp = folder.join(format!(".{name}.{salt}.tmp"));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp)
+        {
+            Ok(out) => break (temp, out),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && tries < 8 => tries += 1,
+            Err(e) => return Err(e),
+        }
+    };
+    let written = out
+        .write_all(bytes)
+        .and_then(|()| out.sync_all())
+        .and_then(|()| std::fs::rename(&temp, file));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written?;
+    // The rename is durable once the folder is.
+    if let Ok(dir) = std::fs::File::open(folder) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 impl ResourceLimiter for State {

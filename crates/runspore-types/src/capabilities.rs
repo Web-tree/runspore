@@ -14,7 +14,7 @@ pub const COMMAND: &str = "command";
 /// component sealed into the workflow (spec/host.md §3, `component`). Always async.
 pub const COMPONENT_KIND: &str = "component";
 /// The WIT world a step runner is a component of, with its version.
-pub const RUNNER_WORLD: &str = "runspore:runner/runner@0.1.0";
+pub const RUNNER_WORLD: &str = "runspore:runner/runner@0.1.1";
 /// The result channel that writes through the store: `step complete` and `step fail`.
 pub const STORE_CHANNEL: &str = "store";
 /// The async programs an action may declare, in the order they are checked.

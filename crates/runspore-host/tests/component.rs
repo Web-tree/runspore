@@ -1,4 +1,4 @@
-//! `component` actions (spec/host.md §3, `component`; H41–H43): a step runner sealed
+//! `component` actions (spec/host.md §3, `component`; H41–H43, H45): a step runner sealed
 //! into the workflow artifact starts its work detached and hands over a handle; any
 //! worker probes and stops it through the runner; every host import is held to the
 //! action's grants; `start` refuses a runner it could not run. The real kernel, the
@@ -44,13 +44,22 @@ fn settings(grants: Value, effect: &str) -> Value {
     })
 }
 
+/// The test runner as `main` built it for `runspore:runner@0.1.0` (commit 36d550f),
+/// before `write-file` was added: a module of the earlier version, kept unchanged.
+const TEST_RUNNER_0_1_0: &[u8] = include_bytes!("fixtures/test-runner-0.1.0.wasm");
+
 /// Builds and loads the artifact of a folder under `root` holding the test runner.
 fn artifact(root: &Path, settings: &Value) -> Artifact {
+    artifact_of(root, settings, runspore_wasmtime::TEST_RUNNER)
+}
+
+/// [`artifact`] with `runner` as the runner.
+fn artifact_of(root: &Path, settings: &Value, runner: &[u8]) -> Artifact {
     let folder = root.join("workflow");
     fs::create_dir_all(&folder).unwrap();
     fs::write(folder.join("workflow.dot"), DOT).unwrap();
     fs::write(folder.join("settings.json"), settings.to_string()).unwrap();
-    fs::write(folder.join("runner.wasm"), runspore_wasmtime::TEST_RUNNER).unwrap();
+    fs::write(folder.join("runner.wasm"), runner).unwrap();
     let sealed = runspore_build::build(&folder).unwrap().seal().unwrap();
     runspore_wasmtime::load_artifact(&sealed.bytes).unwrap()
 }
@@ -423,7 +432,7 @@ async fn h43_start_refuses_a_runner_it_could_not_run() {
         .expect_err("the kernel is no step runner");
     assert_eq!(refused.code(), "component.invalid");
     assert!(
-        refused.to_string().contains("runspore:runner/runner@0.1.0"),
+        refused.to_string().contains("runspore:runner/runner@0.1.1"),
         "{refused}"
     );
     let mut grants: Value =
@@ -441,4 +450,286 @@ async fn h43_start_refuses_a_runner_it_could_not_run() {
         engine.list_runs(None, 10).await.unwrap().items.is_empty(),
         "no run"
     );
+}
+
+fn mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+/// Waits up to 5 s for `path` to exist.
+fn appears(path: &Path) -> bool {
+    let until = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < until {
+        if path.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+/// The holder of the async step `key` is held at.
+async fn holder(engine: &Engine, key: &RunKey) -> Option<Value> {
+    let view = engine.get_run(key).await.unwrap().unwrap();
+    engine.async_step(&view).await.unwrap()?.holder
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_a_runner_writes_a_file_whole_and_its_owners_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let path = temp_db("h45-write");
+    let dir = path.parent().unwrap().to_path_buf();
+    fs::create_dir_all(dir.join("out")).unwrap();
+    let file = dir.join("out/answer.txt");
+    let big = |c: char| c.to_string().repeat(1 << 16);
+    fs::write(&file, big('a')).unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    let grants = json!({"writeFolders": ["out"]});
+    let artifact = artifact(&dir, &settings(grants, "idempotent"));
+    let engine = worker(&path);
+    // A reader polls the file while it is replaced, and must only ever see one whole
+    // version of it.
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = {
+        let (file, done) = (file.clone(), done.clone());
+        std::thread::spawn(move || {
+            let mut reads = 0u32;
+            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                let text = fs::read_to_string(&file).unwrap();
+                assert_eq!(text.len(), 1 << 16, "a reader saw part of a file");
+                let first = text.as_bytes()[0];
+                assert!(
+                    text.bytes().all(|b| b == first),
+                    "a reader saw two versions"
+                );
+                reads += 1;
+            }
+            reads
+        })
+    };
+    for (i, c) in ['b', 'c', 'd', 'e'].into_iter().enumerate() {
+        let input = json!({"write": {"path": "out/answer.txt", "text": big(c)}});
+        let key = engine
+            .start_artifact(&artifact, input, &format!("write-{i}"))
+            .await
+            .unwrap()
+            .key;
+        engine.run_until_parked(&key).await.unwrap();
+        assert_eq!(
+            holder(&engine, &key).await,
+            Some(json!({"wrote": "out/answer.txt"}))
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), big(c));
+        assert_eq!(mode(&file), 0o600, "the file is its owner's only");
+    }
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(reader.join().unwrap() > 0, "the reader read");
+    let left: Vec<_> = fs::read_dir(dir.join("out"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["answer.txt"], "no temporary file is left behind");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_a_runner_writes_into_its_work_folder_from_start_and_from_probe() {
+    let grants = json!({"writeFolders": ["$RUNSPORE_WORK_DIR"]});
+    let input = json!({"write": {"path": "token", "text": "secret", "inWork": true}});
+    let run = run("h45-work", grants, "idempotent", input).await;
+    let held = run.held().await.expect("held");
+    let token = PathBuf::from(held["wrote"].as_str().unwrap());
+    assert!(
+        token.starts_with(run.dir.join("store.db.files/work")),
+        "{}",
+        token.display()
+    );
+    assert_eq!(fs::read_to_string(&token).unwrap(), "secret");
+    assert_eq!(mode(&token), 0o600);
+    // A probe writes too: it can keep what it saw for the next one.
+    assert_eq!(
+        run.engine.probe_step(&run.key).await.unwrap(),
+        Some(Answer::Alive)
+    );
+    assert_eq!(fs::read_to_string(&token).unwrap(), "probed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_a_write_outside_the_write_grants_fails_the_step_and_writes_nothing() {
+    let root = temp_db("h45-denied").parent().unwrap().to_path_buf();
+    let base = root.join("h45-write-denied");
+    for folder in ["out", "other", "read-only"] {
+        fs::create_dir_all(base.join(folder)).unwrap();
+    }
+    std::os::unix::fs::symlink(base.join("other"), base.join("out/away")).unwrap();
+    for (name, target) in [
+        ("other", "other/a.txt"),
+        ("link", "out/away/a.txt"),
+        ("up", "out/../other/a.txt"),
+        ("missing", "other/missing/a.txt"),
+        ("read-only", "read-only/a.txt"),
+    ] {
+        let grants = json!({"writeFolders": ["out"], "folders": ["read-only", "other"]});
+        let path = base.join(format!("{name}.db"));
+        let artifact = artifact(&base, &settings(grants, "idempotent"));
+        let engine = Engine::new(
+            Arc::new(SqliteStore::open(&path).unwrap()),
+            Arc::new(NativeReducer),
+            ActivityRegistry::with_builtins(NativeRunner::new()),
+            EngineConfig {
+                poll_ms: 5,
+                base_dir: base.clone(),
+                files_dir: Some(base.join(format!("{name}.db.files"))),
+                guard: env!("CARGO_BIN_EXE_runspore-guard").into(),
+                ..EngineConfig::default()
+            },
+        );
+        let input = json!({"write": {"path": target, "text": "x"}});
+        let key = engine
+            .start_artifact(&artifact, input, name)
+            .await
+            .unwrap()
+            .key;
+        engine.run_until_parked(&key).await.unwrap();
+        let results = results(&engine, &key).await;
+        let error = &results[0]["error"];
+        assert_eq!(error["code"], "component.not-granted", "{name}: {error}");
+        assert_eq!(
+            error["details"],
+            json!({"grant": "writeFolders", "value": target}),
+            "{name}"
+        );
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("add it to `grants.writeFolders`"),
+            "{error}"
+        );
+    }
+    for folder in ["other", "read-only"] {
+        assert_eq!(
+            fs::read_dir(base.join(folder)).unwrap().count(),
+            0,
+            "nothing was written into {folder}"
+        );
+    }
+}
+
+/// The settings of [`settings`] with the action's `passToken`, if any.
+fn settings_passing(grants: Value, pass: Option<bool>) -> Value {
+    let mut settings = settings(grants, "idempotent");
+    if let Some(pass) = pass {
+        settings["actions"]["work"]["passToken"] = json!(pass);
+    }
+    settings
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_an_action_that_does_not_pass_the_token_starts_programs_without_it() {
+    let path = temp_db("h45-token");
+    let dir = path.parent().unwrap().to_path_buf();
+    let engine = worker(&path);
+    for (name, pass) in [
+        ("default", None),
+        ("passed", Some(true)),
+        ("kept", Some(false)),
+    ] {
+        let folder = dir.join(name);
+        fs::create_dir_all(&folder).unwrap();
+        let artifact = artifact_of(
+            &folder,
+            &settings_passing(json!({"programs": ["sh"]}), pass),
+            runspore_wasmtime::TEST_RUNNER,
+        );
+        let out = folder.join("env.txt");
+        // The spawn plants a token of its own: it must not reach the program either.
+        let input = json!({"spawn": ["sh", "-c", format!("env > {}.part && mv {0}.part {0}", out.display())],
+                           "env": {"RUNSPORE_TOKEN": "planted"}});
+        let key = engine
+            .start_artifact(&artifact, input, name)
+            .await
+            .unwrap()
+            .key;
+        engine.run_until_parked(&key).await.unwrap();
+        assert!(appears(&out), "{name}: the program ran");
+        let env = fs::read_to_string(&out).unwrap();
+        let token = env
+            .lines()
+            .find_map(|l| l.strip_prefix("RUNSPORE_TOKEN="))
+            .map(String::from);
+        if pass == Some(false) {
+            assert_eq!(token, None, "{name}: {env}");
+        } else {
+            let token = token.expect("the token is passed on");
+            assert_ne!(token, "planted", "{name}");
+        }
+        assert!(
+            env.contains("RUNSPORE_RESULT_CHANNEL=store"),
+            "{name}: {env}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_a_runner_built_for_0_1_0_loads_and_runs_unchanged() {
+    assert!(
+        String::from_utf8_lossy(TEST_RUNNER_0_1_0).contains("runspore:runner/host@0.1.0")
+            && !String::from_utf8_lossy(TEST_RUNNER_0_1_0).contains("write-file"),
+        "the fixture is a 0.1.0 runner"
+    );
+    let path = temp_db("h45-old");
+    let dir = path.parent().unwrap().to_path_buf();
+    let settings = settings(json!({"programs": ["sleep"]}), "idempotent");
+    let artifact = artifact_of(&dir, &settings, TEST_RUNNER_0_1_0);
+    let engine = worker(&path);
+    let key = engine
+        .start_artifact(&artifact, json!({"spawn": ["sleep", "300"]}), "old")
+        .await
+        .unwrap()
+        .key;
+    engine.run_until_parked(&key).await.unwrap();
+    let held = holder(&engine, &key).await.expect("held");
+    let pid = i32::try_from(held["process"]["pgid"].as_i64().unwrap()).unwrap();
+    assert!(alive(pid));
+    assert_eq!(engine.probe_step(&key).await.unwrap(), Some(Answer::Alive));
+    let cancelled = engine.cancel(&key, "stop", None).await.unwrap();
+    assert_eq!(cancelled.stops[0].exit, Some(0));
+    assert!(gone_within(pid, Duration::from_secs(5)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h45_a_missing_path_inside_a_grant_is_the_calls_error_not_a_trap() {
+    let path = temp_db("h45-missing");
+    let dir = path.parent().unwrap().to_path_buf();
+    fs::create_dir_all(dir.join("data")).unwrap();
+    let grants = json!({"folders": ["data"], "writeFolders": ["data"]});
+    let artifact = artifact(&dir, &settings(grants, "idempotent"));
+    let engine = worker(&path);
+    for (name, input) in [
+        ("read", json!({"read": "data/x.json"})),
+        ("list", json!({"list": "data/none"})),
+        (
+            "write",
+            json!({"write": {"path": "data/none/x.json", "text": "x"}}),
+        ),
+    ] {
+        let key = engine
+            .start_artifact(&artifact, input, name)
+            .await
+            .unwrap()
+            .key;
+        engine.run_until_parked(&key).await.unwrap();
+        let results = results(&engine, &key).await;
+        let error = &results[0]["error"];
+        // The test runner fails its start with what the host call returned.
+        assert_eq!(error["code"], "runner.host-failed", "{name}: {error}");
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("No such file or directory"),
+            "{name}: {error}"
+        );
+    }
 }

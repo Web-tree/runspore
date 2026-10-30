@@ -253,7 +253,7 @@ before it starts anything. It reads no database and needs no project folder:
                "kernel": "0.2", "schema": "0.2", "store": "0.2"},
  "actionKinds": ["command", "component", "external", "native"],
  "asyncKinds": ["command", "component", "external"], "resultChannels": ["store"],
- "componentWorlds": ["runspore:runner/runner@0.1.0"]}
+ "componentWorlds": ["runspore:runner/runner@0.1.1"]}
 ```
 
 - `version`: the version of the `spore` binary, the one `spore --version` prints.
