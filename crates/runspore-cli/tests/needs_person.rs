@@ -273,7 +273,7 @@ fn bad_requests_are_refused_and_record_nothing() {
 fn the_mark_ends_with_its_attempt_and_the_next_attempt_starts_unmarked() {
     let dir = external("np-ends");
     let (run, token) = claimed(&dir);
-    mark(&dir, &token, &["--reason", PROMPT]);
+    mark(&dir, &token, &["--reason", PROMPT, "--id", "hook"]);
     let fail = [
         "step",
         "fail",
@@ -304,6 +304,14 @@ fn the_mark_ends_with_its_attempt_and_the_next_attempt_starts_unmarked() {
     let second = claim["token"].as_str().unwrap().to_string();
     let (_, status) = json(&dir, &["status", &run]);
     assert_eq!(status["step"]["needsPerson"], Value::Null, "{status}");
+    // An ID names a request of one attempt: the next attempt may use it again.
+    let (code, again) = mark(&dir, &second, &["--reason", PROMPT, "--id", "hook"]);
+    assert_eq!(
+        (code, &again["disposition"]),
+        (Some(0), &json!("applied")),
+        "{again}"
+    );
+    mark(&dir, &second, &["--clear"]);
 
     // An abandon ends it too; the run then needs a person to resolve the step.
     mark(&dir, &second, &["--reason", PROMPT]);

@@ -488,8 +488,8 @@ way.
   never automatic: the old holder may still be at work.
 - `needs_person(token, reason, request_id)` (0.2): sets the attempt's needs-person
   mark with `reason`, or clears it with none, through `set_needs_person` (store §2)
-  under the request ID `needs-person/<request_id>`; the caller generates a
-  `request_id` when none is given. A reason that is empty or over 1024 bytes is
+  under the request ID `needs-person/<attemptId>/<request_id>`, so an ID names one
+  request of one attempt; the caller generates a `request_id` when none is given. A reason that is empty or over 1024 bytes is
   `invalid-input` / `step.reason-invalid`, with nothing recorded. It returns the
   node, the attempt, the disposition and the mark afterwards. It calls no kernel and
   changes nothing the kernel reads, so it never moves the run: what it says is for the

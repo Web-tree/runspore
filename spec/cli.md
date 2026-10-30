@@ -259,10 +259,11 @@ many times a minute, so it calls no kernel and writes nothing when nothing chang
 - `--clear` clears it. Clearing a step that carries no mark, an ended attempt
   included, writes nothing and succeeds, disposition `duplicate`, so a hook may clear
   on every call.
-- `--id` names the request; a missing one is generated. A repeat with the same ID is a
-  `duplicate` and changes nothing, even after the mark has changed; the same ID for
-  another request (a set for a clear, or another reason) exits 2 with
-  `step.id-reused` (§Keys used again).
+- `--id` names the request on the token's attempt; a missing one is generated. A
+  repeat with the same ID is a `duplicate` and changes nothing, even after the mark
+  has changed; the same ID for another request on that attempt (a set for a clear, or
+  another reason) exits 2 with `step.id-reused` (§Keys used again). The next attempt
+  of the step may use the same IDs again.
 
 The mark is kept with the attempt, so it survives the restart of its holder and of
 any worker, and it ends with the attempt: reported, failed, expired, abandoned or

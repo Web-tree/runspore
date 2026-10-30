@@ -813,7 +813,7 @@ impl Engine {
         let request = SetNeedsPerson {
             mutation: mutation(
                 "set_needs_person",
-                format!("needs-person/{request_id}"),
+                format!("needs-person/{}/{request_id}", held.attempt.attempt_id),
                 json!([held.attempt, reason]),
             )?,
             attempt: held.attempt.clone(),
