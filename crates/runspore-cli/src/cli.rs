@@ -10,8 +10,8 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
 use runspore_host::{
     validate_artifact, ActivityRegistry, Engine, EngineConfig, HeldSlot, HostError, NativeRunner,
-    Observer, StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
-    FILES_UNWRITABLE,
+    Observer, StartOutcome, StepClaim, StepReport, StepToken, ARTIFACT_UNREADABLE,
+    FILES_DIR_MISSING, FILES_UNWRITABLE,
 };
 use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::{Migration, SqliteStore, COMMIT_DATE, VERSION, VERSION_TEXT};
@@ -265,6 +265,21 @@ pub enum StepCommand {
     },
     /// Free the run's held async step at once.
     Abandon { run_id: String },
+    /// Mark the claimed or held step as waiting on a person, with a reason, or clear the
+    /// mark. It changes no attempt, lease or outcome; a repeated ID is a no-op.
+    #[command(group(ArgGroup::new("mark").required(true).args(["reason", "clear"])))]
+    NeedsPerson {
+        token: String,
+        /// Why the step waits on a person, such as a permission prompt.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Clear the mark; clearing a step that carries none does nothing.
+        #[arg(long)]
+        clear: bool,
+        /// The request ID; repeating it is a no-op.
+        #[arg(long)]
+        id: Option<String>,
+    },
     /// Describe the step a run is at, the only unfinished one by default, without
     /// claiming or changing anything.
     Show { run_id: Option<String> },
@@ -687,7 +702,11 @@ fn progress(json: bool) -> Observer {
 }
 
 fn reducer(cli: &Cli) -> Result<Arc<dyn Reducer>, Fail> {
-    if cli.native_kernel {
+    // `step needs-person` calls no kernel, and a hook runs it many times a minute: it
+    // does not pay for compiling the kernel component (spec/cli.md, Steps outside the
+    // worker).
+    let calls_kernel = !matches!(cli.command, Command::Step(StepCommand::NeedsPerson { .. }));
+    if cli.native_kernel || !calls_kernel {
         return Ok(Arc::new(NativeReducer));
     }
     let reducer =
@@ -1334,7 +1353,8 @@ impl StartRequest {
     }
 }
 
-/// A `--id` of `signal`, `resolve` or `cancel` used on this run before, for another request:
+/// A `--id` of `signal`, `resolve`, `cancel` or `step needs-person` used on this run before,
+/// for another request:
 /// `<command>.id-reused` (spec/cli.md, Keys used again). Any other failure as it is.
 fn id_reused(e: HostError, command: &str, run: &str, id: &str) -> Fail {
     let reused = matches!(&e, HostError::Store(f)
@@ -1345,6 +1365,7 @@ fn id_reused(e: HostError, command: &str, run: &str, id: &str) -> Fail {
     let other = match command {
         "signal" => "a signal with another name, outcome or data",
         "cancel" => "a cancel with another reason",
+        "step" => "another set or clear of a needs-person mark",
         _ => "another resolution",
     };
     let mut fail = Fail::usage(
@@ -1564,11 +1585,12 @@ async fn only_unfinished(
         n => {
             let message = format!("{n} runs are unfinished; name one: spore {command} <runId>");
             let mut fail = Fail::usage("run.several", message.clone());
+            let now = now_ms();
             fail.report = Some(format!(
                 "{}\nspore: run.several: {message}\n",
-                tree.text(0, now_ms())
+                tree.text(0, now)
             ));
-            fail.details = Some(json!({"db": db, "runs": tree.json()}));
+            fail.details = Some(json!({"db": db, "runs": tree.json(now)}));
             Err(fail)
         }
     }
@@ -1665,6 +1687,7 @@ async fn read_tree(
             let cut_off = view::cut_off_of(run, &invocations, now);
             needs = view::needs_driver(needs, cut_off.as_ref());
         }
+        let needs_person = step.as_ref().and_then(|s| s.needs_person.clone());
         let actor = step
             .filter(|_| matches!(needs, Some("external-ready" | "held")))
             .and_then(|s| s.actor);
@@ -1682,6 +1705,7 @@ async fn read_tree(
             workflow: names[&run.package_digest].clone(),
             needs,
             actor,
+            needs_person,
         });
     }
     Ok(Tree {
@@ -1888,6 +1912,40 @@ async fn step(engine: &Engine, command: &StepCommand) -> Result<Output, Fail> {
             let key = existing(engine, run_id).await?.key;
             reported(engine.abandon_step(&key).await?)
         }
+        StepCommand::NeedsPerson {
+            token,
+            reason,
+            clear: _,
+            id,
+        } => {
+            let request_id = id.clone().unwrap_or_else(|| generated("needs-person"));
+            let marked = engine
+                .needs_person(token, reason.as_deref(), &request_id)
+                .await
+                .map_err(|e| {
+                    let run = token
+                        .parse::<StepToken>()
+                        .map(|t| t.run)
+                        .unwrap_or_default();
+                    id_reused(e, "step", &run, &request_id)
+                })?;
+            let step = format!("step {} attempt {}", marked.node_id, marked.attempt);
+            let text = match &marked.needs_person {
+                Some(mark) => format!(
+                    "{step} needs a person {}",
+                    view::needs_person_since_text(mark)
+                ),
+                None => format!("{step} needs no person"),
+            };
+            let mark = view::needs_person_json(marked.needs_person.as_ref(), now_ms());
+            done(
+                json!({"runId": marked.key.run, "nodeId": marked.node_id,
+                       "invocationId": marked.invocation_id, "attempt": marked.attempt,
+                       "requestId": marked.request_id,
+                       "disposition": disposition(&marked.disposition), "needsPerson": mark}),
+                text,
+            )
+        }
         StepCommand::Show { .. } => unreachable!("handled by step_show"),
     }
 }
@@ -1984,9 +2042,10 @@ async fn list(engine: &Engine, db: &Path, unfinished_only: bool) -> Result<Outpu
         read_tree(engine, all_runs(engine).await?, None).await?
     };
     let paused = engine.disk_full();
+    let now = now_ms();
     done(
-        json!({"db": db, "paused": view::paused_json(paused.as_ref()), "runs": tree.json()}),
-        view::paused_text(paused.as_ref()) + &tree.text(0, now_ms()),
+        json!({"db": db, "paused": view::paused_json(paused.as_ref()), "runs": tree.json(now)}),
+        view::paused_text(paused.as_ref()) + &tree.text(0, now),
     )
 }
 

@@ -47,7 +47,9 @@ mod steps;
 pub use cancel::{Cancelled, Stopped};
 pub use pressure::DISK_FULL;
 pub use slots::{cut_off, CutOff, CutOffReason, HeldSlot};
-pub use steps::{AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState};
+pub use steps::{
+    AsyncStep, StepClaim, StepDescription, StepMarked, StepRenewed, StepReport, StepState,
+};
 
 /// Quarantine code of a run whose stored artifact cannot be read.
 pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
@@ -1316,6 +1318,15 @@ impl Engine {
     async fn until(&self, key: &RunKey, follow: bool) -> Result<RunView, HostError> {
         let inner = &self.inner;
         let mut tree = self.tree(key).await?;
+        // The needs-person marks already set: following stops only at one set since.
+        let mut seen = HashMap::new();
+        if follow {
+            for view in &tree {
+                if let Some(mark) = self.mark(view).await? {
+                    seen.insert(view.key.clone(), mark);
+                }
+            }
+        }
         loop {
             // Once the run has ended, nothing below it is taken up anew, but the runs
             // below still take turns, so a step of theirs that finishes is applied.
@@ -1334,7 +1345,7 @@ impl Engine {
                 stops = stops
                     && match tree[0].ended() {
                         true => applied(view),
-                        false => self.stops(view, follow).await?,
+                        false => self.stops(view, follow, seen.get(&view.key)).await?,
                     };
             }
             if !busy && stops {
@@ -1348,11 +1359,17 @@ impl Engine {
     }
 
     /// Whether `until` stops at this run: it is parked, or with `follow` needs someone,
-    /// else waits outside this engine.
-    async fn stops(&self, view: &RunView, follow: bool) -> Result<bool, HostError> {
+    /// else waits outside this engine. `seen` is the needs-person mark the run carried
+    /// when `follow` began.
+    async fn stops(
+        &self,
+        view: &RunView,
+        follow: bool,
+        seen: Option<&steps::Mark>,
+    ) -> Result<bool, HostError> {
         Ok(parked(view)
             || match follow {
-                true => self.needs_someone(view).await?,
+                true => self.needs_someone(view, seen).await?,
                 false => self.waits_outside(view).await?,
             })
     }

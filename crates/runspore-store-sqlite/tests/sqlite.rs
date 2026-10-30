@@ -1,4 +1,4 @@
-//! SQLite-specific scenarios Q01 and Q03 to Q19 of `spec/store.md` section 4.
+//! SQLite-specific scenarios Q01 and Q03 to Q20 of `spec/store.md` section 4.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runspore_store_conformance::{
-    cancel, claim, claim_held, create_run, expire, expire_for, schedule, schedule_with, ManualClock,
+    cancel, claim, claim_held, create_run, expire, expire_for, schedule, schedule_with,
+    set_needs_person, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{
@@ -15,13 +16,14 @@ use runspore_types::store::{
 };
 use serde_json::{json, Value};
 
-const OPS: [(&str, &str); 9] = [
+const OPS: [(&str, &str); 10] = [
     ("create-run", "create"),
     ("append-event", "append"),
     ("commit-turn", "commit"),
     ("claim-attempt", "claim"),
     ("heartbeat", "hb"),
     ("set-process", "process"),
+    ("set-needs-person", "mark"),
     ("finish-attempt", "finish"),
     ("expire-attempt", "expire"),
     ("cancel-run", "cancel"),
@@ -84,6 +86,7 @@ async fn effect(store: &SqliteStore, op: &str) -> bool {
         "claim-attempt" => status == Some(InvocationStatus::Running),
         "heartbeat" => invocations[0].lease_until_ms == Some(1_200),
         "set-process" => invocations[0].process.is_some(),
+        "set-needs-person" => invocations[0].needs_person.is_some(),
         "cancel-run" => run.status == "cancelled" && status == Some(InvocationStatus::Settled),
         _ => {
             status == Some(InvocationStatus::Settled)
@@ -105,7 +108,14 @@ async fn q01_records_survive_reopen() {
     let key = RunKey::new(DEFAULT_TENANT, "crash");
     assert_eq!(store.list_events(&key, 0, 10).await.unwrap().items.len(), 3);
     for (_, request) in OPS.iter().filter(|(op, _)| {
-        !["heartbeat", "set-process", "expire-attempt", "cancel-run"].contains(op)
+        ![
+            "heartbeat",
+            "set-process",
+            "set-needs-person",
+            "expire-attempt",
+            "cancel-run",
+        ]
+        .contains(op)
     }) {
         assert!(
             store.get_receipt(&key, request).await.unwrap().is_some(),
@@ -299,7 +309,9 @@ async fn q06_a_version_1_file_is_refused_as_0_1() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -360,7 +372,9 @@ async fn q07_a_version_2_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -406,7 +420,9 @@ async fn q08_a_version_3_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -466,7 +482,9 @@ async fn q09_a_version_4_file_is_upgraded_and_records_its_writer() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -504,7 +522,9 @@ async fn q10_a_version_5_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -576,7 +596,9 @@ async fn q12_a_version_6_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -632,7 +654,9 @@ async fn q13_a_version_7_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -672,7 +696,9 @@ async fn q14_a_version_8_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -728,7 +754,9 @@ async fn q15_a_version_9_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -762,7 +790,9 @@ async fn q16_a_version_10_file_is_upgraded() {
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -804,7 +834,9 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
     assert!(child(&path, "create-run", None).status.success());
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          ALTER TABLE runs DROP COLUMN cancel_reason;
          ALTER TABLE runs DROP COLUMN cancel_at_ms;
          ALTER TABLE runs DROP COLUMN cancel_request_id;
@@ -846,7 +878,9 @@ async fn q11_an_upgrade_stopped_part_way_leaves_the_old_version() {
 fn as_version_11(path: &Path) {
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute_batch(
-        "DROP TABLE workers;
+        "ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         DROP TABLE workers;
          UPDATE meta SET value = '0.3.0' WHERE key = 'writer';
          PRAGMA user_version = 11;",
     )
@@ -1004,4 +1038,44 @@ async fn q19_migrate_waits_for_the_older_workers() {
     for key in &keys {
         assert!(store.get_run(key).await.unwrap().is_some());
     }
+}
+
+/// Q20: a version 12 file gains an attempt's needs-person mark; the attempts it holds
+/// have none, and a running one can then be marked.
+#[tokio::test]
+async fn q20_a_version_12_file_is_upgraded() {
+    let path = fresh_path();
+    let (store, attempt) = expired_lease(&path, "old").await;
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "UPDATE attempts SET lease_until_ms = 100000;
+         ALTER TABLE attempts DROP COLUMN needs_person_reason;
+         ALTER TABLE attempts DROP COLUMN needs_person_since_ms;
+         PRAGMA user_version = 12;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SqliteStore::migrate_with_clock(&path, ManualClock::new(1_200))
+        .unwrap()
+        .0;
+    assert_eq!(user_version(&path), runspore_store_sqlite::SCHEMA_VERSION);
+    let shown = store
+        .list_invocations(&attempt.key)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        (shown.attempt.as_ref(), &shown.needs_person),
+        (Some(&attempt), &None)
+    );
+    let marked = store
+        .set_needs_person(set_needs_person(&attempt, "mark", Some("prompt")))
+        .await
+        .unwrap();
+    assert_eq!(
+        marked.value.needs_person.map(|m| (m.reason, m.since_ms)),
+        Some(("prompt".to_string(), 1_200))
+    );
 }

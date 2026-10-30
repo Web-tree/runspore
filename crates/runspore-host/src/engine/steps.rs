@@ -28,6 +28,8 @@ use crate::holder::Answer;
 const MAX_RESULT_BYTES: usize = 64 * 1024;
 /// The code of a reported failure that names none.
 const STEP_FAILED: &str = "step.failed";
+/// The longest reason a needs-person mark may give, in bytes.
+const MAX_REASON_BYTES: usize = 1024;
 
 /// Whether an async step waits for an actor or is held, or whether this host lacks
 /// what the step's action needs.
@@ -71,6 +73,8 @@ pub struct AsyncStep {
     /// While held: the message of the latest `needs` line a watch this engine runs
     /// printed, when the holder waits for a person (empty when the line had none).
     pub waits: Option<String>,
+    /// While held: the needs-person mark its holder set on the attempt.
+    pub needs_person: Option<NeedsPerson>,
 }
 
 /// What an actor gets from a claim: everything needed to do the step.
@@ -106,6 +110,18 @@ pub struct StepReport {
     pub invocation_id: String,
     pub attempt: u32,
     pub disposition: Disposition,
+}
+
+/// A set or clear of a needs-person mark that the store took, with the mark afterwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepMarked {
+    pub key: RunKey,
+    pub node_id: String,
+    pub invocation_id: String,
+    pub attempt: u32,
+    pub request_id: String,
+    pub disposition: Disposition,
+    pub needs_person: Option<NeedsPerson>,
 }
 
 /// A renewal: the new lease end and the deadline it never passes.
@@ -243,6 +259,7 @@ impl Engine {
             lease_until_ms: None,
             missing: None,
             waits: None,
+            needs_person: None,
         };
         // An async command is held only once its start has handed over: a pending one
         // waits for a worker, and a running one without a deadline is still starting
@@ -265,6 +282,7 @@ impl Engine {
                 };
                 step.missing = missing;
                 step.waits = self.holder_waits(&view.key);
+                step.needs_person = invocation.needs_person;
                 step.holder = invocation
                     .holder
                     .as_deref()
@@ -363,16 +381,31 @@ impl Engine {
 
     /// Whether the run, `running` with no pending event, is at an async step that needs
     /// someone: a ready external step, a step this host falls short of, or a held step
-    /// whose watch says that the holder waits for a person.
-    pub(super) async fn needs_someone(&self, view: &RunView) -> Result<bool, HostError> {
+    /// whose watch says that the holder waits for a person, or whose needs-person mark
+    /// is not `seen`, the one it carried when the caller began to follow it.
+    pub(super) async fn needs_someone(
+        &self,
+        view: &RunView,
+        seen: Option<&Mark>,
+    ) -> Result<bool, HostError> {
         let pending = view.applied_sequence + 1 < view.next_sequence;
         if pending || view.quarantine.is_some() || view.status != "running" {
             return Ok(false);
         }
         Ok(match self.async_step(view).await? {
             None => false,
-            Some(step) => step.state != StepState::Held || step.waits.is_some(),
+            Some(step) => {
+                let mark = Mark::of(&step);
+                step.state != StepState::Held
+                    || step.waits.is_some()
+                    || (mark.is_some() && mark.as_ref() != seen)
+            }
         })
+    }
+
+    /// The needs-person mark of the async step the run is at, if any.
+    pub(super) async fn mark(&self, view: &RunView) -> Result<Option<Mark>, HostError> {
+        Ok(self.async_step(view).await?.as_ref().and_then(Mark::of))
     }
 
     /// Claims a ready external step whose action's label is `actor` (both absent counts
@@ -755,6 +788,49 @@ impl Engine {
         )))
     }
 
+    /// Sets the needs-person mark of the attempt the token names with `reason`, or
+    /// clears it with `None` (spec/host.md §2, Client operations). It calls no kernel: the
+    /// mark never moves the run. A clear of an attempt with no mark, an ended one
+    /// included, changes nothing and is a `duplicate`.
+    pub async fn needs_person(
+        &self,
+        token: &str,
+        reason: Option<&str>,
+        request_id: &str,
+    ) -> Result<StepMarked, HostError> {
+        if let Some(reason) = reason {
+            if reason.is_empty() || reason.len() > MAX_REASON_BYTES {
+                return Err(HostError::invalid(
+                    "step.reason-invalid",
+                    format!(
+                        "the reason is {} bytes; it must be 1 to {MAX_REASON_BYTES}",
+                        reason.len()
+                    ),
+                ));
+            }
+        }
+        let held = self.held(token).await?;
+        let request = SetNeedsPerson {
+            mutation: mutation(
+                "set_needs_person",
+                format!("needs-person/{request_id}"),
+                json!([held.attempt, reason]),
+            )?,
+            attempt: held.attempt.clone(),
+            reason: reason.map(String::from),
+        };
+        let receipt = retry(true, || self.inner.store.set_needs_person(request.clone())).await?;
+        Ok(StepMarked {
+            key: held.attempt.key,
+            node_id: held.node_id,
+            invocation_id: held.attempt.invocation_id,
+            attempt: held.number,
+            request_id: request_id.to_string(),
+            disposition: receipt.disposition,
+            needs_person: receipt.value.needs_person,
+        })
+    }
+
     /// Expires the run's held async attempt at once with reason `abandoned`; the
     /// action's effect then decides.
     pub async fn abandon_step(&self, key: &RunKey) -> Result<StepReport, HostError> {
@@ -804,5 +880,24 @@ impl Engine {
             Err(f) if f.kind == StoreFailureKind::Stale => Err(not_held()),
             Err(f) => Err(f.into()),
         }
+    }
+}
+
+/// A needs-person mark as `follow` tells one from another: the attempt it is on and
+/// when it was set. A new reason on the same mark is the same wait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Mark {
+    invocation_id: String,
+    attempt: u32,
+    since_ms: u64,
+}
+
+impl Mark {
+    fn of(step: &AsyncStep) -> Option<Self> {
+        step.needs_person.as_ref().map(|mark| Self {
+            invocation_id: step.invocation_id.clone(),
+            attempt: step.attempt,
+            since_ms: mark.since_ms,
+        })
     }
 }
