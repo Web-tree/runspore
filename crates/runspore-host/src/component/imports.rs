@@ -364,6 +364,96 @@ fn replace(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The `host` of the 0.1 track: the same calls, its own copies of the same types.
+mod v0_1 {
+    use super::super::runspore::runner::host as new;
+    use super::super::v0_1::runspore::runner::host as old;
+    use super::State;
+
+    fn process(p: old::Process) -> new::Process {
+        new::Process {
+            program: p.program,
+            host: p.host,
+            boot: p.boot,
+            pgid: p.pgid,
+            started: p.started,
+        }
+    }
+
+    impl old::Host for State {
+        fn start_process(
+            &mut self,
+            spawn: old::Spawn,
+        ) -> wasmtime::Result<Result<old::Process, String>> {
+            let spawn = new::Spawn {
+                argv: spawn.argv,
+                cwd: spawn.cwd,
+                env: spawn.env,
+            };
+            Ok(
+                new::Host::start_process(self, spawn)?.map(|p| old::Process {
+                    program: p.program,
+                    host: p.host,
+                    boot: p.boot,
+                    pgid: p.pgid,
+                    started: p.started,
+                }),
+            )
+        }
+
+        fn process_alive(&mut self, p: old::Process) -> wasmtime::Result<old::Liveness> {
+            Ok(match new::Host::process_alive(self, process(p))? {
+                new::Liveness::Alive => old::Liveness::Alive,
+                new::Liveness::Dead => old::Liveness::Dead,
+                new::Liveness::Unknown => old::Liveness::Unknown,
+            })
+        }
+
+        fn signal_process(
+            &mut self,
+            p: old::Process,
+            signal: old::Signal,
+        ) -> wasmtime::Result<Result<bool, String>> {
+            let signal = match signal {
+                old::Signal::Term => new::Signal::Term,
+                old::Signal::Kill => new::Signal::Kill,
+                old::Signal::Interrupt => new::Signal::Interrupt,
+                old::Signal::Hangup => new::Signal::Hangup,
+            };
+            new::Host::signal_process(self, process(p), signal)
+        }
+
+        fn request(
+            &mut self,
+            socket: String,
+            body: Vec<u8>,
+            timeout_ms: u32,
+        ) -> wasmtime::Result<Result<Vec<u8>, String>> {
+            new::Host::request(self, socket, body, timeout_ms)
+        }
+
+        fn sleep(&mut self, ms: u32) -> wasmtime::Result<()> {
+            new::Host::sleep(self, ms)
+        }
+
+        fn read_file(&mut self, path: String) -> wasmtime::Result<Result<Vec<u8>, String>> {
+            new::Host::read_file(self, path)
+        }
+
+        fn list_folder(&mut self, path: String) -> wasmtime::Result<Result<Vec<String>, String>> {
+            new::Host::list_folder(self, path)
+        }
+
+        fn write_file(
+            &mut self,
+            path: String,
+            bytes: Vec<u8>,
+        ) -> wasmtime::Result<Result<(), String>> {
+            new::Host::write_file(self, path, bytes)
+        }
+    }
+}
+
 impl ResourceLimiter for State {
     fn memory_growing(
         &mut self,

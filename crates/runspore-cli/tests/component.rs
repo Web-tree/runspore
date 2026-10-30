@@ -208,3 +208,116 @@ fn h44_a_crash_at_each_component_failpoint_runs_no_completed_step_again() {
         assert_eq!(status["status"], "completed", "{failpoint}: {status}");
     }
 }
+
+/// H46 through the binary: the work proposes a candidate answer with `spore step
+/// propose`, `status` and `step show` show it, `withdraw` discards it, and once the
+/// runner's probe says the work has stopped the step completes with it, exactly once
+/// across a crash between the probe's answer and the commit.
+#[test]
+fn h46_a_candidate_answer_commits_once_when_the_work_stops_across_a_crash() {
+    let dir = Dir::new("component-h46");
+    let answer = dir.file("answer");
+    let token = dir.file("token");
+    std::fs::write(&answer, "alive").unwrap();
+    let input = json!({
+        "tokenTo": token.to_string_lossy(),
+        "handle": json!({"answer": answer.to_string_lossy()}).to_string(),
+    });
+    folder(
+        &dir,
+        &flow(json!({"folders": ["."], "writeFolders": ["."]}), input),
+    );
+    let (code, out) = spore(&dir, None, &["run", "flow", "--key", "h46"]);
+    assert_eq!(code, Some(6), "held: {out}");
+    let run = serde_json::from_str::<Value>(out.trim()).unwrap()["runId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let token = std::fs::read_to_string(&token).expect("the runner wrote its token");
+
+    let (code, out) = spore(
+        &dir,
+        None,
+        &["step", "propose", &token, "--outcome", "maybe"],
+    );
+    assert_eq!(code, Some(2), "{out}");
+    assert!(out.contains("step.undeclared-outcome"), "{out}");
+    let proposed = json(
+        &dir,
+        &[
+            "step",
+            "propose",
+            &token,
+            "--outcome",
+            "ok",
+            "--output",
+            r#"{"n": 1}"#,
+        ],
+    );
+    assert_eq!(proposed["candidate"]["outcome"], "ok", "{proposed}");
+    assert_eq!(proposed["attempt"], 1);
+    let status = json(&dir, &["status", &run, "--no-probe"]);
+    let candidate = &status["step"]["candidate"];
+    assert_eq!(candidate["outcome"], "ok", "{status}");
+    assert_eq!(candidate["sinceMs"], proposed["candidate"]["sinceMs"]);
+    assert!(candidate["forMs"].is_string(), "{candidate}");
+    let shown = json(&dir, &["step", "show", &run]);
+    assert_eq!(shown["candidate"]["outcome"], "ok", "{shown}");
+
+    let withdrawn = json(&dir, &["step", "withdraw", &token]);
+    assert_eq!(withdrawn["withdrawn"], true, "{withdrawn}");
+    let status = json(&dir, &["status", &run, "--no-probe"]);
+    assert_eq!(status["step"]["candidate"], Value::Null, "{status}");
+    json(
+        &dir,
+        &[
+            "step",
+            "propose",
+            &token,
+            "--outcome",
+            "ok",
+            "--output",
+            r#"{"n": 2}"#,
+        ],
+    );
+
+    // The probe says the work has stopped; the process dies before the commit.
+    std::fs::write(&answer, "stopped").unwrap();
+    let (code, out) = spore(
+        &dir,
+        Some("host.candidate.before-commit"),
+        &["status", &run],
+    );
+    assert_eq!(code, None, "the probe did not reach the failpoint: {out}");
+    let status = json(&dir, &["status", &run, "--no-probe"]);
+    assert_eq!(
+        status["step"]["state"], "held",
+        "nothing was recorded: {status}"
+    );
+    assert_eq!(status["step"]["candidate"]["outcome"], "ok");
+
+    let (code, out) = spore(&dir, None, &["continue", &run]);
+    assert_eq!(code, Some(0), "{out}");
+    let events = json(&dir, &["events", &run]);
+    let results: Vec<&Value> = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "activity.result")
+        .collect();
+    let outputs: Vec<&Value> = results
+        .into_iter()
+        .filter(|e| {
+            e["payload"]["status"] == "success" && e["payload"]["output"] == json!({"n": 2})
+        })
+        .collect();
+    assert_eq!(outputs.len(), 1, "committed once: {events}");
+    assert_eq!(
+        json(&dir, &["status", &run])["status"],
+        "completed",
+        "{events}"
+    );
+    let (code, out) = spore(&dir, None, &["step", "withdraw", &token]);
+    assert_eq!(code, Some(2), "{out}");
+    assert!(out.contains("lease.lost"), "{out}");
+}

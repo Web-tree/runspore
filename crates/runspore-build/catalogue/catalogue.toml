@@ -1006,7 +1006,7 @@ code = "component.invalid"
 severity = "problem"
 title = '''Not a step runner'''
 message = '''{module}, the runner of action {action}, is not a step runner: {reason}.'''
-fix = '''build the runner as a WebAssembly component of world "runspore:runner/runner@0.1.1", which exports "runspore:runner/step@0.1.1".'''
+fix = '''build the runner as a WebAssembly component of world "runspore:runner/runner@0.2.0", which exports "runspore:runner/step@0.2.0".'''
 why = '''spore loads the runner the way the host will, so a file that cannot run is found before the run starts.'''
 args = { module = "input", reason = "computed" }
 example = "component.invalid"
@@ -1016,7 +1016,7 @@ code = "component.import-unsupported"
 severity = "problem"
 title = '''Runner imports what spore does not offer'''
 message = '''{module}, the runner of action {action}, imports {import}, which spore does not offer a step runner.'''
-fix = '''import only "runspore:runner/host@0.1.1": it starts programs, reaches sockets, and reads and writes folders the action grants.'''
+fix = '''import only "runspore:runner/host@0.2.0": it starts programs, reaches sockets, and reads and writes folders the action grants.'''
 why = '''a runner gets only the host's own imports, so it can do no more than its grants allow.'''
 args = { module = "input", import = "computed" }
 example = "component.import-unsupported"

@@ -233,6 +233,15 @@ impl<H: Hook> Store for Hooked<H> {
     async fn expire_attempt(&self, r: ExpireAttempt) -> StoreResult<Receipt<ResultAccepted>> {
         self.inner.expire_attempt(r).await
     }
+    async fn set_candidate(&self, r: SetCandidate) -> StoreResult<Receipt<CandidateSet>> {
+        self.inner.set_candidate(r).await
+    }
+    async fn commit_candidate(
+        &self,
+        r: CommitCandidate,
+    ) -> StoreResult<Receipt<CandidateCommitted>> {
+        self.inner.commit_candidate(r).await
+    }
     async fn record_late_evidence(
         &self,
         r: RecordLateEvidence,

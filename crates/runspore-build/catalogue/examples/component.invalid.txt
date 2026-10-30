@@ -4,7 +4,7 @@
   6 │       "module": "runner.wasm",
     │                 ^^^^^^^^^^^^^
 
-To fix: build the runner as a WebAssembly component of world "runspore:runner/runner@0.1.1", which exports "runspore:runner/step@0.1.1".
+To fix: build the runner as a WebAssembly component of world "runspore:runner/runner@0.2.0", which exports "runspore:runner/step@0.2.0".
 Why: spore loads the runner the way the host will, so a file that cannot run is found before the run starts.
 
 1 problem in review. Nothing was run.

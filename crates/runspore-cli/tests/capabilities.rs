@@ -102,7 +102,7 @@ fn a_database_records_and_its_messages_name_the_version_spore_version_prints() {
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute_batch(
-            "DROP TABLE workers; PRAGMA user_version = 11;
+            "ALTER TABLE attempts DROP COLUMN candidate; ALTER TABLE attempts DROP COLUMN candidate_at_ms; DROP TABLE workers; PRAGMA user_version = 11;
              UPDATE meta SET value = '0.3.0' WHERE key = 'writer';",
         )
         .unwrap();
@@ -166,7 +166,10 @@ fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database()
     assert_eq!(out["resultChannels"], json!(["store"]));
     assert_eq!(
         out["componentWorlds"],
-        json!(["runspore:runner/runner@0.1.1"])
+        json!([
+            "runspore:runner/runner@0.1.1",
+            "runspore:runner/runner@0.2.0"
+        ])
     );
     assert!(!dir.file("runspore.db").exists());
 
@@ -177,7 +180,9 @@ fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database()
     );
     assert!(text.contains("result channels  store\n"), "{text}");
     assert!(
-        text.contains("component worlds runspore:runner/runner@0.1.1\n"),
+        text.contains(
+            "component worlds runspore:runner/runner@0.1.1, runspore:runner/runner@0.2.0\n"
+        ),
         "{text}"
     );
 }

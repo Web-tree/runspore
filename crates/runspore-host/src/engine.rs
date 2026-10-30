@@ -47,7 +47,10 @@ mod steps;
 pub use cancel::{Cancelled, Stopped};
 pub use pressure::DISK_FULL;
 pub use slots::{cut_off, CutOff, CutOffReason, HeldSlot};
-pub use steps::{AsyncStep, StepClaim, StepDescription, StepRenewed, StepReport, StepState};
+pub use steps::{
+    AsyncStep, Candidate, StepClaim, StepDescription, StepProposed, StepRenewed, StepReport,
+    StepState, StepWithdrawn,
+};
 
 /// Quarantine code of a run whose stored artifact cannot be read.
 pub const ARTIFACT_UNREADABLE: &str = "artifact.unreadable";
