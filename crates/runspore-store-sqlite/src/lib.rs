@@ -20,7 +20,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 12;
+pub const SCHEMA_VERSION: i64 = 13;
 /// The first schema version with the `workers` table.
 const SCHEMA_VERSION_WORKERS: i64 = 12;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
@@ -65,6 +65,9 @@ const UPGRADE_10: &str = "ALTER TABLE runs ADD COLUMN cancel_reason TEXT;
 const UPGRADE_11: &str = "CREATE TABLE workers (worker_id TEXT PRIMARY KEY,
     version TEXT NOT NULL, host TEXT NOT NULL, pid INTEGER NOT NULL,
     beat_at_ms INTEGER NOT NULL, until_ms INTEGER NOT NULL);";
+/// Upgrades a version 12 database to version 13: an attempt's needs-person mark.
+const UPGRADE_12: &str = "ALTER TABLE attempts ADD COLUMN person_reason TEXT;
+    ALTER TABLE attempts ADD COLUMN person_since_ms INTEGER;";
 /// The prefix of the IDs the host gives its workers (host.md §3); other owners of an
 /// attempt, such as an actor's claim, are not workers.
 const WORKER_PREFIX: &str = "worker-";
@@ -401,12 +404,14 @@ struct AttemptRow {
     lease_until_ms: u64,
     attempt_number: u32,
     deadline_ms: Option<u64>,
+    /// When its needs-person mark was set; `None` while it has none.
+    person_since_ms: Option<u64>,
 }
 
 /// The attempt named by `a` if its invocation, owner and fence all match.
 fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
     c.query_row(
-        "SELECT status, lease_until_ms, attempt_number, deadline_ms FROM attempts
+        "SELECT status, lease_until_ms, attempt_number, deadline_ms, person_since_ms FROM attempts
          WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3
            AND invocation_id = ?4 AND owner = ?5 AND fence = ?6",
         params![
@@ -423,6 +428,7 @@ fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
                 lease_until_ms: r.get::<_, i64>(1)? as u64,
                 attempt_number: r.get(2)?,
                 deadline_ms: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                person_since_ms: r.get::<_, Option<i64>>(4)?.map(|v| v as u64),
             })
         },
     )
@@ -439,7 +445,8 @@ fn settle(
     now: u64,
 ) -> R<ResultAccepted> {
     c.execute(
-        "UPDATE attempts SET status = ?4, result = ?5 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+        "UPDATE attempts SET status = ?4, result = ?5, person_reason = NULL, person_since_ms = NULL
+         WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
         params![a.key.tenant, a.key.run, a.attempt_id, status, body],
     )
     .map_err(db)?;
@@ -656,6 +663,7 @@ impl SqliteStore {
                 (9, UPGRADE_9),
                 (10, UPGRADE_10),
                 (11, UPGRADE_11),
+                (12, UPGRADE_12),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -1427,6 +1435,48 @@ impl Store for SqliteStore {
         })
     }
 
+    async fn set_needs_person(&self, q: SetNeedsPerson) -> R<Receipt<NeedsPersonSet>> {
+        self.mutate(
+            "set_needs_person",
+            Some("set-needs-person"),
+            &q.attempt.key,
+            &q.mutation,
+            |c, now| {
+                let since_ms = match attempt_row(c, &q.attempt)? {
+                    Some(a) if a.status == "running" && now < a.lease_until_ms => a.person_since_ms,
+                    _ => return Err(stale("lease.lost")),
+                };
+                if q.reason
+                    .as_ref()
+                    .is_some_and(|r| r.len() > MAX_PERSON_REASON_BYTES)
+                {
+                    return Err(fail(
+                        StoreFailureKind::Quota,
+                        "person.reason-too-large",
+                        "person.reason-too-large",
+                    ));
+                }
+                let mark = q.reason.as_ref().map(|reason| PersonMark {
+                    reason: reason.clone(),
+                    since_ms: since_ms.unwrap_or(now),
+                });
+                c.execute(
+                    "UPDATE attempts SET person_reason = ?4, person_since_ms = ?5
+                 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+                    params![
+                        q.attempt.key.tenant,
+                        q.attempt.key.run,
+                        q.attempt.attempt_id,
+                        mark.as_ref().map(|m| &m.reason),
+                        mark.as_ref().map(|m| i(m.since_ms))
+                    ],
+                )
+                .map_err(db)?;
+                Ok(Outcome::Applied(NeedsPersonSet { mark }))
+            },
+        )
+    }
+
     async fn finish_attempt(&self, q: FinishAttempt) -> R<Receipt<ResultAccepted>> {
         self.mutate(
             "finish_attempt",
@@ -1723,7 +1773,7 @@ impl Store for SqliteStore {
                 .prepare(
                     "SELECT i.invocation_id, i.node_id, i.action_id, i.status, i.attempt_number, i.not_before_ms,
                             a.lease_until_ms, a.owner, a.process, a.attempt_id, a.fence, a.holder, a.deadline_ms,
-                            a.claimed_at_ms, i.input, i.params
+                            a.claimed_at_ms, i.input, i.params, a.person_reason, a.person_since_ms
                      FROM invocations i LEFT JOIN attempts a ON a.tenant = i.tenant AND a.run_id = i.run_id
                        AND a.invocation_id = i.invocation_id AND a.attempt_number = i.attempt_number
                      WHERE i.tenant = ?1 AND i.run_id = ?2 ORDER BY i.invocation_id",
@@ -1764,6 +1814,13 @@ impl Store for SqliteStore {
                         claimed_at_ms: r.get::<_, Option<i64>>(13)?.map(|v| v as u64),
                         input: r.get(14)?,
                         params: r.get(15)?,
+                        needs_person: match (r.get::<_, Option<String>>(16)?, r.get::<_, Option<i64>>(17)?) {
+                            (Some(reason), Some(since_ms)) => Some(PersonMark {
+                                reason,
+                                since_ms: since_ms as u64,
+                            }),
+                            _ => None,
+                        },
                     })
                 })
                 .and_then(Iterator::collect)
