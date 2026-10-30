@@ -1,10 +1,10 @@
-package runspore:runner@0.1.1;
+package runspore:runner@0.2.0;
 
 /// What the host offers a step runner. Every call is checked against the action's
 /// `grants` (spec/host.md §3, `component`): a call outside them traps, and the host
 /// fails the step with `component.not-granted`, naming the grant. Paths are absolute,
-/// or relative to the run's base folder; `~/` is the worker's home folder. A runner
-/// built for 0.1.0 imports the same interface without `write-file`, and runs as it is.
+/// or relative to the run's base folder; `~/` is the worker's home folder. The same as
+/// 0.1.1's (`contracts/wit/runner-0.1`), which a runner of the 0.1 track imports.
 interface host {
   /// A process the host started detached: the leader of its own process group on one
   /// boot of one machine, checked by its start time and never by its ID alone.
@@ -82,7 +82,7 @@ interface host {
   /// new file in that folder, readable and writable by its owner only (mode 0600),
   /// which then replaces `path` in one rename: a reader sees the old file or the new
   /// one, never part of one. At most 16 MiB. The error is a sentence: the file could
-  /// not be written. Added in 0.1.1.
+  /// not be written.
   write-file: func(path: string, bytes: list<u8>) -> result<_, string>;
 }
 
@@ -125,11 +125,16 @@ interface step {
     retryable: bool,
   }
 
-  /// What a probe says of a holder. Only `dead` frees the step.
+  /// What a probe says of a holder. `dead` and `stopped` end the attempt: with the
+  /// candidate answer it holds, if any (spec/host.md §2, Candidate answers).
   enum holder {
     alive,
     dead,
     unknown,
+    /// The holder still runs, but its work has stopped, such as an agent idle at its
+    /// prompt. The host completes the attempt with its candidate answer, or, when it
+    /// holds none, fails it, retryable, with `step.no-answer`. Added in 0.2.0.
+    stopped,
   }
 
   /// Starts the work and returns its holder handle: canonical-domain JSON of at most
