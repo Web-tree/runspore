@@ -57,7 +57,7 @@ fn the_capability_set_lists_the_runners_external_and_the_store() {
     );
     assert_eq!(set.async_kinds, ["command", "component", "external"]);
     assert_eq!(set.result_channels, ["store"]);
-    assert_eq!(set.component_worlds, ["runspore:runner/runner@0.1.0"]);
+    assert_eq!(set.component_worlds, ["runspore:runner/runner@0.1.1"]);
 }
 
 #[tokio::test]

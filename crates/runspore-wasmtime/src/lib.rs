@@ -29,7 +29,7 @@ wasmtime::component::bindgen!({
 pub const COMPONENT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/kernel.wasm"));
 
 /// The test-only step runner of `crates/runspore-test-runner`, a component of world
-/// `runspore:runner/runner@0.1.0`. For tests; never part of a workflow `spore` ships.
+/// `runspore:runner/runner@0.1.1`. For tests; never part of a workflow `spore` ships.
 #[doc(hidden)]
 pub const TEST_RUNNER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/test-runner.wasm"));
 

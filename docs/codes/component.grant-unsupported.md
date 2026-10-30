@@ -15,7 +15,7 @@ Action "review" grants its runner "network", a kind of grant spore does not offe
   8 │       "grants": { "programs": ["herdr"], "network": ["api.example.com"] }
     │                                          ^^^^^^^^^
 
-To fix: remove it; the kinds of grant spore offers are "folders" | "programs" | "sockets".
+To fix: remove it; the kinds of grant spore offers are "folders" | "programs" | "sockets" | "writeFolders".
 Why: spore enforces every grant itself, so it refuses one it cannot enforce rather than ignore it.
 ```
 

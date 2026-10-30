@@ -115,7 +115,7 @@
         },
         "module": {
           "$ref": "#/$defs/FileRef",
-          "description": "`component`: the step runner, a WebAssembly component of world\n`runspore:runner/runner@0.1.0` in the folder, sealed into the workflow artifact."
+          "description": "`component`: the step runner, a WebAssembly component of world\n`runspore:runner/runner@0.1.1` in the folder, sealed into the workflow artifact."
         },
         "outcomes": {
           "description": "The outcomes a run of the action ends with. Default `[\"ok\"]`.",
@@ -127,6 +127,10 @@
         "output": {
           "$ref": "#/$defs/Output",
           "description": "`command`: how its output becomes the step's result. Default `text`."
+        },
+        "passToken": {
+          "description": "`component`: whether the programs the step runner starts get the attempt's\ntoken as `RUNSPORE_TOKEN`. Default true; with false the runner hands it on\nitself, such as in a file it writes.",
+          "type": "boolean"
         },
         "priority": {
           "description": "Which ready step a worker or an actor takes first: a higher priority before a\nlower one, and among equals the one ready longest. Default 0.",
@@ -289,7 +293,7 @@
       "description": "What a step runner may do, by kind. Each list is optional, default empty.",
       "properties": {
         "folders": {
-          "description": "The folders it may read, with everything below them, written as sockets are.",
+          "description": "The folders it may read, with everything below them, written as sockets are;\n`$RUNSPORE_WORK_DIR` is the step's work folder.",
           "items": {
             "$ref": "#/$defs/Grant"
           },
@@ -304,6 +308,13 @@
         },
         "sockets": {
           "description": "The Unix sockets it may send a request to: absolute, `~/<path>`, or relative to\nthe run's base folder.",
+          "items": {
+            "$ref": "#/$defs/Grant"
+          },
+          "type": "array"
+        },
+        "writeFolders": {
+          "description": "The folders it may write files into, with everything below them, written as\n`folders` are. Writing grants no reading.",
           "items": {
             "$ref": "#/$defs/Grant"
           },

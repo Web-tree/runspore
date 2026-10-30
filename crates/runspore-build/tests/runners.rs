@@ -19,9 +19,9 @@ interface wall-clock { now: func() -> u64; }";
 
 const WITH_CLOCK: &str = "package example:runners;
 world with-clock {
-  import runspore:runner/host@0.1.0;
+  import runspore:runner/host@0.1.1;
   import wasi:clocks/wall-clock@0.2.0;
-  export runspore:runner/step@0.1.0;
+  export runspore:runner/step@0.1.1;
 }";
 
 /// A component of `world` whose functions do nothing: its imports and exports are the
@@ -81,6 +81,12 @@ fn made() -> Vec<(PathBuf, Vec<u8>)> {
 #[test]
 fn a_runner_of_the_world_passes() {
     assert_eq!(runner::check(&dummy("runner")), Ok(()));
+}
+
+#[test]
+fn a_runner_built_for_0_1_0_passes() {
+    let old = include_bytes!("../../runspore-host/tests/fixtures/test-runner-0.1.0.wasm");
+    assert_eq!(runner::check(old), Ok(()));
 }
 
 #[test]

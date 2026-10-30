@@ -166,7 +166,7 @@ fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database()
     assert_eq!(out["resultChannels"], json!(["store"]));
     assert_eq!(
         out["componentWorlds"],
-        json!(["runspore:runner/runner@0.1.0"])
+        json!(["runspore:runner/runner@0.1.1"])
     );
     assert!(!dir.file("runspore.db").exists());
 
@@ -177,7 +177,7 @@ fn capabilities_lists_the_version_the_contracts_and_the_set_without_a_database()
     );
     assert!(text.contains("result channels  store\n"), "{text}");
     assert!(
-        text.contains("component worlds runspore:runner/runner@0.1.0\n"),
+        text.contains("component worlds runspore:runner/runner@0.1.1\n"),
         "{text}"
     );
 }
