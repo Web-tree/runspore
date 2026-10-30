@@ -240,6 +240,10 @@ _Avoid_: healthcheck, ping
 An action's own wait on a holder handle that ends when the job behind it ends, and may deliver its result.
 _Avoid_: await, poll, "watching" a run (that is following it)
 
+**Needs-person mark**:
+What the holder of an async step records, with a reason, while its work is alive but waits on a person, such as an agent at a permission prompt: `spore step needs-person`. It is kept with the try and ends with it, and it never moves the run: the run still needs `held`, and the mark says why.
+_Avoid_: signal (that goes to the run), blocked, paused (a worker's state)
+
 **Result mode**:
 The command output mode `"output": "result"`, in which the program names the outcome itself: its stdout is `{"outcome", "output"}`.
 _Avoid_: outcome-from-stdout, JSON mode (that is `"output": "json"`)

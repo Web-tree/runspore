@@ -275,7 +275,10 @@ step whose holder does not wait for a person: it returns only when the run is
 terminal, `waiting`, `needs-intervention` or quarantined, or at an async step that
 needs someone: a ready external step, a step this host falls short of (The
 handshake, below), or a held step whose watch has said that its holder waits for a
-person. It works the runs below the run as `run_until_parked` does, each of them
+person, or (0.2) whose attempt carries a needs-person mark it did not carry when
+`follow` began, by its attempt and `sinceMs`. A mark `follow` found when it began does
+not stop it, so a caller that follows again right after telling the person waits for
+the next change instead of returning at once. It works the runs below the run as `run_until_parked` does, each of them
 stopping as the run does. While the step is held it keeps ticking, sleeping `poll_ms` after a tick that
 did nothing, so a report from elsewhere is applied within one poll; its sweep expires
 the attempt at its lease or deadline, and probes and watches it at most every 30 s
@@ -424,7 +427,8 @@ an actor or the work reports or the attempt expires, unless it watches the attem
 `Engine::async_step(view)` describes it: the action's kind (`external`, `command` or
 `component`)
 and actor, `ready` or `held`, the attempt number, and while held the holder handle,
-`deadlineMs` and `leaseUntilMs`. It never shows the input, the owner or the fence.
+`deadlineMs`, `leaseUntilMs` and (0.2) the attempt's needs-person mark, `{reason,
+sinceMs}` or none. It never shows the input, the owner or the fence.
 **0.2:** it also describes a step that is `capability-missing` (The handshake).
 
 **Describing a step (0.2).** `Engine::describe_step(view)` describes the step an
@@ -482,6 +486,14 @@ way.
   `abandoned` (store §2), whatever its lease; the effect class then decides. A run with
   no held async step is `invalid-input` / `step.not-held`. It is a person's act,
   never automatic: the old holder may still be at work.
+- `needs_person(token, reason, request_id)` (0.2): sets the attempt's needs-person
+  mark with `reason`, or clears it with none, through `set_needs_person` (store §2)
+  under the request ID `needs-person/<request_id>`; the caller generates a
+  `request_id` when none is given. A reason that is empty or over 1024 bytes is
+  `invalid-input` / `step.reason-invalid`, with nothing recorded. It returns the
+  node, the attempt, the disposition and the mark afterwards. It calls no kernel and
+  changes nothing the kernel reads, so it never moves the run: what it says is for the
+  people and programs that read the step (cli.md, `step needs-person`).
 
 A token that does not name an attempt of an external step or an async command of its
 run is `invalid-input` / `step.token-invalid`. A report whose attempt has already ended
@@ -1340,3 +1352,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H42 | **0.2.** Runners that start a program, reach a socket and read a file outside their grants; one granted each | Each ungranted call fails the step with `component.not-granted` naming the grant and the value, not retryable, with nothing started; a granted one works; an ungranted probe answers `unknown` |
 | H43 | **0.2.** `validate_workflow`, `start` and `start_artifact` with a `component` action whose grants name another kind, without an artifact, whose module the artifact lacks, that is not a component, and that imports an interface outside `runner` | Each is refused with its code and no run |
 | H44 | **0.2.** Crash at `host.component.after-spawn` and `host.component.after-start` during a run whose `component` step follows a command step, then restart | The run completes; the command step ran once; the runner's start ran at most once per try, and the step completed once |
+| H45 | **0.2.** A held external step marked as needing a person, twice with one request ID, with another reason, cleared twice; an async command's held attempt marked through its `RUNSPORE_TOKEN`, then completed; a claimed step marked, then abandoned, then claimed again; `follow` begun before a mark and begun after one | The mark shows in `async_step` with the first `sinceMs`; the repeat and the second clear are `duplicate`; the run's revision, the lease and the run's events are unchanged; the completion and the abandon clear it and the next attempt is unmarked; the first `follow` returns at the mark, the second waits on until the mark is set anew |
