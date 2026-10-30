@@ -115,7 +115,7 @@ against the same schema whether or not it does. An action takes only the fields 
 schema lists (`kind`, `effect`, `outcomes`, `retry`, `assets`, `priority`, and per kind: for
 `command`, `argv`, `cwd`, `env`, `timeoutMs`, `output`, `exitOutcomes` and `async`; for
 `native`, `function`; for `external` (0.2), `actor` and `async`; for `component`
-(0.2), `module`, `grants`, `timeoutMs` and `async`), so a misspelt field
+(0.2), `module`, `grants`, `passToken`, `timeoutMs` and `async`), so a misspelt field
 is a problem rather than ignored. An action whose `effect` is `pure`, `read-only` or
 `idempotent` and that sets no `retry.maxAttempts` gets `"maxAttempts": 3` in the
 package, so a try lost to a crash runs again on its own, as Temporal's default retry
@@ -130,12 +130,16 @@ must be smaller than its `timeoutMs` (default `"3600000"`), else
 or `{"component": {…}}`, and `channels` is a non-empty list of result channels
 (host.md §3, Async commands).
 **0.2:** a `component` action names its step runner with `module`, a file reference
-like an asset's, and what the runner may do with `grants`: `programs`, `sockets` and
-`folders`, each a list of strings (host.md §3, `component`). A `./<p>` program is a
-file of the folder, bundled as the action's asset. The build checks the runner as the
-host loads it: a file that is not a component of world `runspore:runner/runner@0.1.0`,
-or lacks its `step` export, is `component.invalid`; one that imports anything but the
-world's `host` interface is `component.import-unsupported`, naming the import; a grant
+like an asset's, and what the runner may do with `grants`: `programs`, `sockets`,
+`folders` and `writeFolders`, each a list of strings (host.md §3, `component`). A
+`./<p>` program is a file of the folder, bundled as the action's asset; a folder
+`$RUNSPORE_WORK_DIR` is the step's work folder. `passToken`, a boolean, default
+`true`, says whether the programs the runner starts get the attempt's token in their
+environment. The build checks the runner as the
+host loads it: a file that is not a component of world `runspore:runner/runner@0.1.1`
+(or of an earlier `0.1` version), or lacks its `step` export, is `component.invalid`;
+one that imports anything but the world's `host` interface is
+`component.import-unsupported`, naming the import; a grant
 of a kind this `spore` does not offer is `component.grant-unsupported`; a `component`
 action without `module` is `component.no-module`.
 **0.2:** `priority` is an integer from -1000 to 1000, default 0: which due step a

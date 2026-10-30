@@ -1,9 +1,10 @@
-package runspore:runner@0.1.0;
+package runspore:runner@0.1.1;
 
 /// What the host offers a step runner. Every call is checked against the action's
 /// `grants` (spec/host.md §3, `component`): a call outside them traps, and the host
 /// fails the step with `component.not-granted`, naming the grant. Paths are absolute,
-/// or relative to the run's base folder; `~/` is the worker's home folder.
+/// or relative to the run's base folder; `~/` is the worker's home folder. A runner
+/// built for 0.1.0 imports the same interface without `write-file`, and runs as it is.
 interface host {
   /// A process the host started detached: the leader of its own process group on one
   /// boot of one machine, checked by its start time and never by its ID alone.
@@ -26,7 +27,9 @@ interface host {
     argv: list<string>,
     /// The folder to run in; the run's base folder when none.
     cwd: option<string>,
-    /// Added to the worker's environment, before the host's `RUNSPORE_*` variables.
+    /// Added to the worker's environment, before the host's `RUNSPORE_*` variables;
+    /// `RUNSPORE_TOKEN` among them only for `start`, and only when the action does not
+    /// set `passToken` to false.
     env: list<tuple<string, string>>,
   }
 
@@ -73,6 +76,14 @@ interface host {
 
   /// The names in a folder inside a folder the action is granted, sorted.
   list-folder: func(path: string) -> result<list<string>, string>;
+
+  /// Writes `bytes` as the file at `path`, whose folder must already exist inside a
+  /// folder the action grants for writing (`grants.writeFolders`). The bytes go to a
+  /// new file in that folder, readable and writable by its owner only (mode 0600),
+  /// which then replaces `path` in one rename: a reader sees the old file or the new
+  /// one, never part of one. At most 16 MiB. The error is a sentence: the file could
+  /// not be written. Added in 0.1.1.
+  write-file: func(path: string, bytes: list<u8>) -> result<_, string>;
 }
 
 /// What a step runner does: the start, probe and stop of an async action.

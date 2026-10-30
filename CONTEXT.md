@@ -39,11 +39,11 @@ The one WebAssembly component that holds the kernel. `spore` embeds it, and ever
 _Avoid_: kernel artifact, certified artifact, kernel bundle, "the wasm"
 
 **Step runner**:
-A WebAssembly component of world `runspore:runner/runner@0.1.0` that a `component` action names as its `module`: its exports start, probe and stop the step's work, and it reaches the machine only through the host imports the action's grants allow. The build seals it into the workflow artifact, so a run keeps the runner it started with.
+A WebAssembly component of world `runspore:runner/runner@0.1.1` (or an earlier `0.1` version) that a `component` action names as its `module`: its exports start, probe and stop the step's work, and it reaches the machine only through the host imports the action's grants allow. The build seals it into the workflow artifact, so a run keeps the runner it started with.
 _Avoid_: plugin, extension, wasm helper, "the module" alone (an artifact is a component too)
 
 **Grant**:
-One thing a step runner may do, listed under the action's `grants` by kind: a program it may start, a socket it may reach, a folder it may read. The host enforces the list and never asks; a call outside it fails the step.
+One thing a step runner may do, listed under the action's `grants` by kind: a program it may start, a socket it may reach, a folder it may read, a folder it may write into. The host enforces the list and never asks; a call outside it fails the step.
 _Avoid_: permission, capability (that is what a host offers), allowlist
 
 **Run**:

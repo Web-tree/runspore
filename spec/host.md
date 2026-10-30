@@ -504,7 +504,7 @@ sorted:
 | `actionKinds` | The kinds it runs: the kind of every runner in its registry, and `external` |
 | `asyncKinds` | The kinds it runs async: `external`, `command` when its registry runs commands (§3, Async commands), and `component` when it runs step runners (§3, `component`) |
 | `resultChannels` | The result channels it offers: `store`, where `complete_step` and `fail_step` write the result through the store's `finish_attempt` |
-| `componentWorlds` | **0.2.** The WIT worlds of the step runners it runs, `runspore:runner/runner@0.1.0` when it runs kind `component`; empty when it runs none |
+| `componentWorlds` | **0.2.** The WIT worlds of the step runners it runs, the newest version of each semver track it runs, `runspore:runner/runner@0.1.1` when it runs kind `component`; empty when it runs none. A runner of an older version on a listed track runs too |
 
 It offers no `probe`, `watch` or `stop` in their `component` form. A kind, a channel
 or a form offered later is a new value of these lists, not a new field.
@@ -1019,7 +1019,8 @@ host functions and the capability grants of Spin and wasmCloud do the same.
 {"kind": "component", "module": "runner.wasm", "effect": "idempotent",
  "outcomes": ["ok", "changes"],
  "grants": {"programs": ["herdr", "./bin/job"], "sockets": ["~/.herdr/api.sock"],
-            "folders": ["."]},
+            "folders": [".", "$RUNSPORE_WORK_DIR"], "writeFolders": ["$RUNSPORE_WORK_DIR"]},
+ "passToken": false,
  "async": {"timeoutMs": "3600000", "leaseMs": "120000"}}
 ```
 
@@ -1035,11 +1036,26 @@ host functions and the capability grants of Spin and wasmCloud do the same.
   - `sockets`: the Unix sockets `request` may reach.
   - `folders`: the folders `read-file` and `list-folder` may read, each with what is
     below it.
+  - `writeFolders`: the folders `write-file` may write into, each with what is below
+    it. Writing grants no reading: a runner that reads back what it wrote is granted
+    the folder in `folders` too, as Deno's `--allow-write` grants no `--allow-read`.
 
   A socket or folder is an absolute path, `~/<p>` under the worker's home folder, or
   a path relative to the run's base folder. A folder is compared once symbolic links
-  are resolved, so a link never leads out of it. A grant of any other kind is
+  are resolved, so a link never leads out of it. In `folders` and `writeFolders`, an
+  entry that is `$RUNSPORE_WORK_DIR` or starts with `$RUNSPORE_WORK_DIR/` names the
+  invocation's work folder, or a path below it (Step files and work folders, below):
+  the folder `context.work-dir` and the variable of that name give, whose absolute
+  path depends on where the database is, which a workflow cannot know. A step with no
+  work folder matches no such entry. A grant of any other kind is
   `component.grant-unsupported`.
+- `passToken`: whether the programs `start-process` starts get the attempt's token as
+  `RUNSPORE_TOKEN`, a boolean, default `true`. With `false` they get none, even when
+  the worker's own environment has one, and the token reaches the work only as the
+  runner hands it on, such as in a file it writes with `write-file`, as Kubernetes
+  mounts a service account's token as a file of mode `0600` and
+  `automountServiceAccountToken: false` leaves it out. `start` still gets it in its
+  `context`.
 - `async`: as an external action's (§2), and optional: a `component` action is always
   async. `probe`, `watch` and `stop` may each be given in the `command` form; one that
   is given is run instead of the runner's own export. The `component` form of those
@@ -1048,7 +1064,11 @@ host functions and the capability grants of Spin and wasmCloud do the same.
   `"60000"`. A probe and a stop get 10 s.
 
 **The world.** A runner is a component of world `runner` of
-`contracts/wit/runner/runner.wit`, `runspore:runner@0.1.0`. It exports `step`:
+`contracts/wit/runner/runner.wit`, `runspore:runner@0.1.1`. A runner built for
+`0.1.0` is one too and runs unchanged: a component names its imports and exports
+with their version, which Wasmtime matches on a semver track (`0.1.0` and `0.1.1` are
+both `0.1`), and it may import fewer functions of `host` than the host offers. `0.1.1`
+added `write-file`. It exports `step`:
 `start`, `probe` and `stop`, each given the try it looks after as a `context` (run,
 node, action, invocation, attempt, visit, effect key, input and params as canonical
 JSON, the base folder, the work folder, the step files, the result channel, and to
@@ -1062,11 +1082,14 @@ JSON, the base folder, the work folder, the step files, the result channel, and 
 | `request` | One request and response over a granted Unix socket: writes the body, reads to the first newline or the end, at most 1 MiB |
 | `sleep` | Waits, at most until the call's deadline |
 | `read-file`, `list-folder` | Read-only access to the granted folders: a file of at most 16 MiB, the sorted names in a folder |
+| `write-file` | **0.1.1.** Writes a file of at most 16 MiB into a folder granted in `writeFolders`, which must exist: the bytes go to a new file in that folder, mode `0600`, which then replaces the file in one rename, so a reader never sees it half written, and the file is its owner's only whatever mode it had before |
 
 A started program inherits the worker's environment, then the spawn's `env`, then the
 variables of an async command's start command (§3: `RUNSPORE_TOKEN`,
 `RUNSPORE_RESULT_CHANNEL`, `RUNSPORE_DB`, the step files and the rest), so it reports
-the step with `complete_step` or `fail_step` as an async command's work does. It does
+the step with `complete_step` or `fail_step` as an async command's work does.
+`RUNSPORE_TOKEN` is left out when the action sets `passToken` to `false`, and for a
+program a probe or a stop starts, which has no token to give. It does
 not run under the guard: like that work, it must outlive the worker. A runner that
 leaves no handle to its process, or loses it, leaves it running.
 
@@ -1082,7 +1105,7 @@ the runner does next:
 
 | Call | Ends with |
 | --- | --- |
-| `start` | `Failure`, `component.not-granted`, not retryable, details `{"grant": "programs" \| "sockets" \| "folders", "value"}`; the message names the grant and the value, such as "action `review` is not granted program `curl`: add it to `grants.programs`" |
+| `start` | `Failure`, `component.not-granted`, not retryable, details `{"grant": "programs" \| "sockets" \| "folders" \| "writeFolders", "value"}`; the message names the grant and the value, such as "action `review` is not granted program `curl`: add it to `grants.programs`" or "action `review` is not granted write folder `out/a.txt`: add it to `grants.writeFolders`". A `read-file`, `list-folder` or `write-file` whose path, or for `write-file` whose folder, does not exist is outside every grant |
 | `probe` | `unknown`, so a probe never frees a step by breaking its grants |
 | `stop` | Late evidence `{"stop": {"exit": null, "stdout": "<the message>"}}` |
 
@@ -1106,12 +1129,13 @@ Signing handles is left to a later version.
 The start of a repeatable action must be repeatable by its effect key, as an async
 start command must (§3): a worker that dies after the runner started its process and
 before `hold_attempt` leaves no handle, and the next try runs `start` again. The work
-folder, which is the same for every try, is where it can keep what it started; grant
-it as a folder to read it back.
+folder, which is the same for every try, is where it can keep what it started: grant
+`$RUNSPORE_WORK_DIR` in `writeFolders` to write there and in `folders` to read it back.
 
 **Checks.** `validate_workflow` and `start` refuse, with `action.invalid`, a `module`
-that is not a relative path and `grants` that are not lists of strings by the kinds
-above (`component.grant-unsupported` for another kind). `start` of a package without
+that is not a relative path, `grants` that are not lists of strings by the kinds
+above (`component.grant-unsupported` for another kind), and a `passToken` that is not a
+boolean. `start` of a package without
 an artifact refuses a `component` action with `component.no-artifact`; `start_artifact`
 loads each runner from the artifact and refuses one it does not hold
 (`component.module-missing`) or that is not a component of world `runner`, imports
@@ -1340,3 +1364,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H42 | **0.2.** Runners that start a program, reach a socket and read a file outside their grants; one granted each | Each ungranted call fails the step with `component.not-granted` naming the grant and the value, not retryable, with nothing started; a granted one works; an ungranted probe answers `unknown` |
 | H43 | **0.2.** `validate_workflow`, `start` and `start_artifact` with a `component` action whose grants name another kind, without an artifact, whose module the artifact lacks, that is not a component, and that imports an interface outside `runner` | Each is refused with its code and no run |
 | H44 | **0.2.** Crash at `host.component.after-spawn` and `host.component.after-start` during a run whose `component` step follows a command step, then restart | The run completes; the command step ran once; the runner's start ran at most once per try, and the step completed once |
+| H45 | **0.2.** A runner's `write-file` into a granted folder, over an existing file of another mode, into `$RUNSPORE_WORK_DIR`, outside the grant, through a link out of it, into a folder that does not exist and into a granted folder it may only read; `passToken: false` and the default, with the worker's environment holding a `RUNSPORE_TOKEN`; and a runner built for `runspore:runner@0.1.0` | The file holds the bytes, has mode `0600`, and a reader polling it meanwhile only ever sees the old bytes or the new; each write outside the grant fails the step with `component.not-granted`, grant `writeFolders`, nothing written; with `passToken: false` the started program has no `RUNSPORE_TOKEN` and still `RUNSPORE_DB`, without it the attempt's token; the `0.1.0` runner loads, starts, probes and stops as before |
