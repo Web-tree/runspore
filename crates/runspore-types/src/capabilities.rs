@@ -13,8 +13,13 @@ pub const COMMAND: &str = "command";
 /// The kind of an action whose start, probe and stop are a step runner, a WebAssembly
 /// component sealed into the workflow (spec/host.md §3, `component`). Always async.
 pub const COMPONENT_KIND: &str = "component";
-/// The WIT world a step runner is a component of, with its version.
-pub const RUNNER_WORLD: &str = "runspore:runner/runner@0.1.1";
+/// The WIT world a step runner is a component of, with its newest version.
+pub const RUNNER_WORLD: &str = "runspore:runner/runner@0.2.0";
+/// The newest version of the world's 0.1 track, whose runners the host still runs.
+pub const RUNNER_WORLD_0_1: &str = "runspore:runner/runner@0.1.1";
+/// The worlds of the step runners a component host runs, the newest of each track,
+/// oldest track first.
+pub const RUNNER_WORLDS: [&str; 2] = [RUNNER_WORLD_0_1, RUNNER_WORLD];
 /// The result channel that writes through the store: `step complete` and `step fail`.
 pub const STORE_CHANNEL: &str = "store";
 /// The async programs an action may declare, in the order they are checked.
@@ -162,7 +167,7 @@ impl HostCapabilities {
         let component_worlds = action_kinds
             .iter()
             .filter(|k| *k == COMPONENT_KIND)
-            .map(|_| RUNNER_WORLD.to_string())
+            .flat_map(|_| RUNNER_WORLDS.map(String::from))
             .collect();
         Self {
             action_kinds,
@@ -255,7 +260,13 @@ mod tests {
         assert!(set.component_worlds.is_empty());
         let runners = HostCapabilities::of(["command", "component"]);
         assert_eq!(runners.async_kinds, ["command", "component", "external"]);
-        assert_eq!(runners.component_worlds, [RUNNER_WORLD]);
+        assert_eq!(
+            runners.component_worlds,
+            [
+                "runspore:runner/runner@0.1.1",
+                "runspore:runner/runner@0.2.0"
+            ]
+        );
         assert!(runners
             .shortfalls(&json!({"kind": "component", "module": "r.wasm"}))
             .is_empty());

@@ -47,6 +47,9 @@ fn settings(grants: Value, effect: &str) -> Value {
 /// The test runner as `main` built it for `runspore:runner@0.1.0` (commit 36d550f),
 /// before `write-file` was added: a module of the earlier version, kept unchanged.
 const TEST_RUNNER_0_1_0: &[u8] = include_bytes!("fixtures/test-runner-0.1.0.wasm");
+/// The test runner as the 0.1 track's last version, `runspore:runner@0.1.1`, built it:
+/// with `write-file`, and a probe that cannot answer `stopped`.
+const TEST_RUNNER_0_1_1: &[u8] = include_bytes!("fixtures/test-runner-0.1.1.wasm");
 
 /// Builds and loads the artifact of a folder under `root` holding the test runner.
 fn artifact(root: &Path, settings: &Value) -> Artifact {
@@ -696,6 +699,32 @@ async fn h45_a_runner_built_for_0_1_0_loads_and_runs_unchanged() {
     let cancelled = engine.cancel(&key, "stop", None).await.unwrap();
     assert_eq!(cancelled.stops[0].exit, Some(0));
     assert!(gone_within(pid, Duration::from_secs(5)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_runner_of_the_0_1_track_writes_files_on_a_host_of_both() {
+    let path = temp_db("old-write");
+    let dir = path.parent().unwrap().to_path_buf();
+    fs::create_dir_all(dir.join("out")).unwrap();
+    let settings = settings(json!({"writeFolders": ["out"]}), "idempotent");
+    let artifact = artifact_of(&dir, &settings, TEST_RUNNER_0_1_1);
+    let engine = worker(&path);
+    let input = json!({"write": {"path": "out/a.txt", "text": "from 0.1.1"}});
+    let key = engine
+        .start_artifact(&artifact, input, "old-write")
+        .await
+        .unwrap()
+        .key;
+    engine.run_until_parked(&key).await.unwrap();
+    assert_eq!(
+        holder(&engine, &key).await,
+        Some(json!({"wrote": "out/a.txt"}))
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("out/a.txt")).unwrap(),
+        "from 0.1.1"
+    );
+    assert_eq!(mode(&dir.join("out/a.txt")), 0o600);
 }
 
 #[tokio::test(flavor = "multi_thread")]

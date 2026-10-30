@@ -424,7 +424,9 @@ an actor or the work reports or the attempt expires, unless it watches the attem
 `Engine::async_step(view)` describes it: the action's kind (`external`, `command` or
 `component`)
 and actor, `ready` or `held`, the attempt number, and while held the holder handle,
-`deadlineMs` and `leaseUntilMs`. It never shows the input, the owner or the fence.
+`deadlineMs`, `leaseUntilMs` and (0.2) the candidate answer it holds, its outcome and
+when it was stored, or none (Candidate answers, below). It never shows the input, the
+owner, the fence or a candidate's output.
 **0.2:** it also describes a step that is `capability-missing` (The handshake).
 
 **Describing a step (0.2).** `Engine::describe_step(view)` describes the step an
@@ -443,15 +445,16 @@ way.
 
 - `probe_step(key)`: when the run is at a held async step whose action declares a
   probe, runs the probe (§3, Async commands); a `dead` answer expires the attempt with
-  reason `probe-dead`. Returns the answer, or none when nothing was probed. `status`
-  calls it unless asked not to (cli.md).
+  reason `probe-dead`, and (0.2) `dead` and `stopped` commit a candidate answer
+  (Candidate answers, below). Returns the answer, or none when nothing was probed.
+  `status` calls it unless asked not to (cli.md).
 - `claim_step(run, actor, holder)`: claims a ready external step whose action's label
   equals `actor` (both absent counts as equal). With a run, that run's step; without
   one, the oldest matching ready step of the tenant: the first in queue order (§2
   `tick`, Dispatch), highest action `priority` first, then oldest `notBeforeMs`.
   With a run whose external step is held, the host first calls `probe_step`; after a
-  `dead` answer it takes the run's next turns (§2 `tick`, Coordinate), so a step the
-  kernel makes ready again is claimed at once.
+  `dead` or `stopped` answer it takes the run's next turns (§2 `tick`, Coordinate), so
+  a step the kernel makes ready again is claimed at once.
   None is `Ok(None)`. The `holder` handle is
   canonical JSON of at most 4 KiB (`invalid-input` / `holder.invalid` otherwise). Before
   the claim, the host makes or checks the step's files and work folder as for any
@@ -482,13 +485,64 @@ way.
   `abandoned` (store §2), whatever its lease; the effect class then decides. A run with
   no held async step is `invalid-input` / `step.not-held`. It is a person's act,
   never automatic: the old holder may still be at work.
+- **0.2.** `propose_step(token, outcome, output)`: checks the answer exactly as
+  `complete_step` does, with the same refusals, and on a refusal records nothing and
+  keeps the candidate the attempt held. Then stores it as the attempt's **candidate
+  answer** with `set_candidate` (store §2), replacing the one it held, without ending
+  the attempt (Candidate answers, below). Returns the run, invocation, attempt, the
+  outcome and when it was stored.
+- **0.2.** `withdraw_step(token)`: discards the attempt's candidate answer with
+  `set_candidate` and null. Without one it changes nothing. Returns whether one was
+  held.
 
 A token that does not name an attempt of an external step or an async command of its
 run is `invalid-input` / `step.token-invalid`. A report whose attempt has already ended
 (abandoned, expired, or reported before, through `complete_step`, `fail_step` or a
 watch) is refused with `stale` / `lease.lost`, and its result is kept with
 `record_late_evidence`: a stale report never moves the run, and nothing it says is
-lost. The first result from any channel wins.
+lost. The first result from any channel wins. A `propose_step` or `withdraw_step`
+whose attempt has ended is refused the same way, and keeps nothing: a candidate was
+never a result.
+
+### Candidate answers (0.2)
+
+One check of an answer cannot always tell that the work has stopped. An agent hands in
+its answer from a hook that runs when it ends its turn, beside other hooks, any of
+which may keep it working; completing the step there could complete it while the agent
+goes on. So the work hands in an answer in two steps, as two-phase commit prepares and
+then commits: `propose_step` checks the answer and holds it on the attempt as its
+**candidate**, and the action's probe, which watches the holder, says when the work has
+really stopped. Temporal keeps an activity's heartbeat details on the activity the same
+way, and a Kubernetes readiness probe reports "ready" without ending the pod.
+
+- A held attempt holds at most one candidate: an outcome and output that fit the step,
+  and when it was stored. A new one replaces it; `withdraw_step` discards it, which the
+  work does when it goes on working. It is kept in the store, so it survives a worker
+  restart. `async_step` shows whether one is held, its outcome and since when, never
+  its output.
+- The probe's `dead` and `stopped` answers (§3, Async commands, Probe) act on it:
+
+  | Probe answer | Candidate held | The host |
+  | --- | --- | --- |
+  | `stopped` | yes | Commits it: the attempt ends with it as its `success` result, as `complete_step` would have ended it |
+  | `stopped` | no | Fails the attempt, retryable, with `step.no-answer`, "the work stopped and left no candidate answer": the kernel tries again up to `maxAttempts`, then takes the `failed` arrow or the step is stuck |
+  | `dead` | yes | Commits it: the work that proposed it has stopped |
+  | `dead` | no | Expires the attempt with reason `probe-dead`, as before |
+  | `alive`, `unknown` | either | Nothing |
+
+- **The commit** is the store's `commit_candidate` (store §2): one transaction that
+  ends the attempt with the candidate it holds at that moment, or, for `stopped`, with
+  the `step.no-answer` failure when it holds none. A candidate withdrawn or replaced
+  before the commit is never committed. Two hosts that commit at once end the attempt
+  once: the other finds `lease.lost` and records nothing. A host that dies between the
+  probe's answer and the commit (failpoint `host.candidate.before-commit`) has recorded
+  nothing, and the next probe answers again and commits. The committed result is an
+  ordinary `activity.result`: its output is checked against the node's schema as any
+  result is (§2, One attempt), which it fits, since `propose_step` checked it.
+- **The candidate goes when the attempt ends**, whichever way it ends: a commit,
+  `complete_step`, `fail_step`, a watch's result, and an expiry for its lease, its
+  deadline, `probe-dead`, `abandoned` or `cancelled`. An expiry never commits it. A new
+  attempt starts with none, so it never commits an older attempt's answer.
 
 ### The handshake (0.2)
 
@@ -504,7 +558,7 @@ sorted:
 | `actionKinds` | The kinds it runs: the kind of every runner in its registry, and `external` |
 | `asyncKinds` | The kinds it runs async: `external`, `command` when its registry runs commands (§3, Async commands), and `component` when it runs step runners (§3, `component`) |
 | `resultChannels` | The result channels it offers: `store`, where `complete_step` and `fail_step` write the result through the store's `finish_attempt` |
-| `componentWorlds` | **0.2.** The WIT worlds of the step runners it runs, the newest version of each semver track it runs, `runspore:runner/runner@0.1.1` when it runs kind `component`; empty when it runs none. A runner of an older version on a listed track runs too |
+| `componentWorlds` | **0.2.** The WIT worlds of the step runners it runs, the newest version of each semver track it runs, `runspore:runner/runner@0.1.1` and `runspore:runner/runner@0.2.0` when it runs kind `component`; empty when it runs none. A runner of an older version on a listed track runs too |
 
 It offers no `probe`, `watch` or `stop` in their `component` form. A kind, a channel
 or a form offered later is a new value of these lists, not a new field.
@@ -619,6 +673,7 @@ Functions' top-level `Catch` do the same in their engines.
 | `host.attempt.after-finish` | `finish_attempt` returned |
 | `host.component.after-spawn` | **0.2.** A step runner's `start-process` started its program (§3, `component`) |
 | `host.component.after-start` | **0.2.** A step runner's `start` returned a handle, before `hold_attempt` |
+| `host.candidate.before-commit` | **0.2.** A probe answered `dead` or `stopped` at an attempt that may hold a candidate answer, before `commit_candidate` (§2, Candidate answers) |
 
 ## 3. Activities
 
@@ -954,13 +1009,21 @@ action, whose expired attempt waits for a person.
 **Probe.** The action's own check of a holder handle. It runs under the guard, without
 a process record, with the handle on stdin and the variables of the start command but
 `RUNSPORE_TOKEN`. It answers with exit 0 and stdout exactly one of
-`{"holder": "alive"}`, `{"holder": "dead"}` and `{"holder": "unknown"}`. Anything else,
+`{"holder": "alive"}`, `{"holder": "dead"}`, `{"holder": "unknown"}` and (0.2)
+`{"holder": "stopped"}`. Anything else,
 a non-zero exit, a timeout, a program that cannot be started, other output, reads as
-`unknown`, so a crashing probe never frees a step. Only `dead` acts: the host expires
-the attempt at once with reason `probe-dead` (store §2), and the action's effect
-decides, as for any expiry. `alive` and `unknown` leave the attempt to its lease and its
-deadline: `alive` past the deadline still loses. A probe must say `dead` only when it is
-certain: a process ID is checked with its start time, not the number alone.
+`unknown`, so a crashing probe never frees a step. Only `dead` and `stopped` act. `dead`
+says the holder is gone: the host commits the attempt's candidate answer, if it holds
+one, and otherwise expires the attempt at once with reason `probe-dead` (store §2), and
+the action's effect decides, as for any expiry. `stopped` (0.2) says the holder still
+runs but its work has stopped, such as an agent idle at its prompt: the host commits
+the candidate, or fails the attempt, retryable, with `step.no-answer` when it holds
+none (§2, Candidate answers). `alive` and `unknown` leave the attempt to its lease and
+its deadline: `alive` past the deadline still loses. A probe must say `dead` only when
+it is certain: a process ID is checked with its start time, not the number alone. It
+must say `stopped` only once whatever proposes the candidate has had its say: an agent
+whose stop hooks run at once can look stopped a moment before its own hook has
+proposed.
 
 Probes run on demand, never on a timer of their own: in the sweep, at most every 30 s
 per engine (§2 `tick`); in `probe_step`, which `status` and `claim_step` call (§2); and
@@ -1064,11 +1127,17 @@ host functions and the capability grants of Spin and wasmCloud do the same.
   `"60000"`. A probe and a stop get 10 s.
 
 **The world.** A runner is a component of world `runner` of
-`contracts/wit/runner/runner.wit`, `runspore:runner@0.1.1`. A runner built for
-`0.1.0` is one too and runs unchanged: a component names its imports and exports
-with their version, which Wasmtime matches on a semver track (`0.1.0` and `0.1.1` are
-both `0.1`), and it may import fewer functions of `host` than the host offers. `0.1.1`
-added `write-file`. It exports `step`:
+`contracts/wit/runner/runner.wit`, `runspore:runner@0.2.0`, or of the 0.1 track,
+`runspore:runner@0.1.1` as `contracts/wit/runner-0.1/runner.wit` keeps it. The host
+runs both. A component names its imports and exports with their version, which
+Wasmtime matches on a semver track: `0.1.0` and `0.1.1` are both `0.1`, and a component
+may import fewer functions of `host` than the host offers, so a runner built for
+`0.1.0` runs unchanged; `0.1.1` added `write-file`. `0.2.0` adds the probe's
+`stopped` answer, which changes the type `probe` returns, and Wasmtime checks an
+enum's cases exactly, so it starts a track of its own. The host reads a runner's track
+from its `step` export and links it to the `host` of the same track; its `host`
+interface is the same on both. A runner that imports `host` of one track and exports
+`step` of another is `component.invalid`. It exports `step`:
 `start`, `probe` and `stop`, each given the try it looks after as a `context` (run,
 node, action, invocation, attempt, visit, effect key, input and params as canonical
 JSON, the base folder, the work folder, the step files, the result channel, and to
@@ -1145,7 +1214,8 @@ export). Nothing is created. `spore validate` checks the same of a folder (dot.m
 **Recovery** is an async command's. The handle is stored with `hold_attempt`; the
 worker then holds nothing. A worker that died is replaced by any other: its sweep, and
 `probe_step`, probe the held attempt with the runner's `probe`, and a `dead` answer
-expires it (§3, Probe); a cancel runs the runner's `stop` once (§3, Stop).
+expires it, or commits its candidate, as `stopped` does (§3, Probe); a cancel runs the
+runner's `stop` once (§3, Stop). A runner of the 0.1 track never answers `stopped`.
 
 **Failpoints.**
 
@@ -1365,3 +1435,4 @@ kernel either authorizes a new attempt of the same invocation or parks the run i
 | H43 | **0.2.** `validate_workflow`, `start` and `start_artifact` with a `component` action whose grants name another kind, without an artifact, whose module the artifact lacks, that is not a component, and that imports an interface outside `runner` | Each is refused with its code and no run |
 | H44 | **0.2.** Crash at `host.component.after-spawn` and `host.component.after-start` during a run whose `component` step follows a command step, then restart | The run completes; the command step ran once; the runner's start ran at most once per try, and the step completed once |
 | H45 | **0.2.** A runner's `write-file` into a granted folder, over an existing file of another mode, into `$RUNSPORE_WORK_DIR`, outside the grant, through a link out of it, into a missing folder inside the grant and outside it, and into a granted folder it may only read; a `read-file` and a `list-folder` of a missing path inside a grant; `passToken: false` and the default, with the worker's environment holding a `RUNSPORE_TOKEN`; and a runner built for `runspore:runner@0.1.0` | The file holds the bytes, has mode `0600`, and a reader polling it meanwhile only ever sees the old bytes or the new; each write outside the grant fails the step with `component.not-granted`, grant `writeFolders`, nothing written; the missing paths inside a grant are the call's `err`, which the runner gets back, and no trap; with `passToken: false` the started program has no `RUNSPORE_TOKEN` and still `RUNSPORE_DB`, without it the attempt's token; the `0.1.0` runner loads, starts, probes and stops as before |
+| H46 | **0.2.** Candidate answers: a held step's candidate proposed, replaced and withdrawn; a misfit proposal; probes that answer `stopped`, `dead`, `alive` and `unknown`, each with and without a candidate, from a `component` runner of the 0.2 track and from a `command` probe; a 0.1 runner's `dead` with a candidate; a crash at `host.candidate.before-commit`, then restart; two engines that commit at once; a proposal and a withdrawal after the attempt ended; an expiry, an abandon and a cancel with a candidate held | Only a fitting proposal is stored, replacing the last, and a misfit is refused with `complete_step`'s error and leaves the last; `async_step` shows its outcome and time; `stopped` and `dead` complete the attempt with the candidate held at the commit, never a withdrawn or replaced one; `stopped` with none fails it, retryable, `step.no-answer`; `alive` and `unknown` leave it held with its candidate; after the crash the next probe commits it once; the two engines append one result; the late calls are `lease.lost`; the expiry, the abandon and the cancel commit nothing, and the next attempt holds no candidate |

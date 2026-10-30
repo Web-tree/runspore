@@ -16,12 +16,15 @@ pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a stop may run when its program gives no `timeoutMs`.
 pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// What a probe says of a holder. Only `Dead` frees the step.
+/// What a probe says of a holder. `Dead` and `Stopped` end the attempt, with its
+/// candidate answer when it holds one (spec/host.md §2, Candidate answers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answer {
     Alive,
     Dead,
     Unknown,
+    /// The holder still runs, but its work has stopped.
+    Stopped,
 }
 
 impl Answer {
@@ -30,7 +33,13 @@ impl Answer {
             Self::Alive => "alive",
             Self::Dead => "dead",
             Self::Unknown => "unknown",
+            Self::Stopped => "stopped",
         }
+    }
+
+    /// Whether the answer ends the attempt it was given for.
+    pub fn ends(self) -> bool {
+        matches!(self, Self::Dead | Self::Stopped)
     }
 }
 
@@ -44,7 +53,7 @@ pub(crate) enum Watched {
 }
 
 /// Runs the probe on `handle`: exit 0 with exactly `{"holder": "alive" | "dead" |
-/// "unknown"}` is that answer; anything else reads as unknown.
+/// "unknown" | "stopped"}` is that answer; anything else reads as unknown.
 pub(crate) async fn probe(
     ctx: &ActivityContext,
     program: &Program,
@@ -67,6 +76,7 @@ pub(crate) async fn probe(
     match answer {
         Some("alive") => Answer::Alive,
         Some("dead") => Answer::Dead,
+        Some("stopped") => Answer::Stopped,
         _ => Answer::Unknown,
     }
 }

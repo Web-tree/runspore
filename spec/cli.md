@@ -46,6 +46,8 @@ marked **0.2** below are new since 0.1.
 | `step complete <token> --outcome <o> [--output <json>]` | **0.2.** Reports the step done with an outcome |
 | `step fail <token> --error <message> [--code <c>] [--retryable]` | **0.2.** Reports the step failed |
 | `step abandon <runId>` | **0.2.** Frees the run's held async step at once |
+| `step propose <token> --outcome <o> [--output <json>]` | **0.2.** Checks an answer as `step complete` does and holds it as the attempt's candidate, without completing the step |
+| `step withdraw <token>` | **0.2.** Discards the attempt's candidate answer |
 | `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
 | `capabilities` | **0.2.** Prints what this `spore` runs: its version, the version of each contract, and its capability set (§Capabilities) |
 | `migrate` | **0.2.** Upgrades a database an earlier 0.2 `spore` wrote to this `spore`'s schema; refused while a worker of another `spore` uses it (§Databases from another version) |
@@ -178,8 +180,11 @@ An **async step** is an external step or a held async command. Its action's prob
 (host.md §3) runs on demand: `status` probes the run's held async step before it reads
 the run, `step claim <runId>` probes a held step of that run before it claims, and a
 worker's sweep probes each held async step at most every 30 s. Only a `dead` answer
-acts: it expires the attempt at once, and the action's effect decides. `status
---no-probe` runs no probe and changes nothing, for a display that refreshes often.
+acts, and (0.2) a `stopped` one. `dead` expires the attempt at once, and the action's
+effect decides; `stopped` fails it, retryable, with `step.no-answer`; either commits
+the attempt's candidate answer instead when it holds one (`step propose`, below).
+`status --no-probe` runs no probe and changes nothing, for a display that refreshes
+often.
 
 **`step claim [<runId>] [--actor <label>] [--holder <json>]`.** With `<runId>`, claims
 that run's ready external step; a run that has none exits 2 with `step.not-ready`.
@@ -240,6 +245,31 @@ its lease, and fences its holder out: a later report from it is `lease.lost`. Th
 action's effect then decides, as for any expiry. A run with no held async step
 exits 2 with `step.not-held`. It prints `{runId, invocationId, attempt, disposition}`.
 
+**`step propose <token> --outcome <o> [--output <json>]`.** Checks the answer exactly
+as `step complete` does, with the same refusals and exits, and holds it as the
+attempt's **candidate answer** without completing the step (host.md §2, Candidate
+answers). A new candidate replaces the last; a refused one records nothing and leaves
+the last. Missing output is `null`. It prints `{runId, invocationId, attempt,
+candidate}`, `candidate` being `{"outcome", "sinceMs"}`:
+
+```json
+{"format": "runspore.cli/0.2", "runId": "run_…", "invocationId": "inv_…", "attempt": 1,
+ "candidate": {"outcome": "ok", "sinceMs": "1793330000000"}}
+```
+
+The step completes with the candidate only once its action's probe says the work has
+stopped (`stopped`) or its holder is gone (`dead`); without a candidate, `stopped`
+fails the attempt, retryable, with `step.no-answer`. Before that the attempt stays held,
+its lease and deadline running as before.
+
+**`step withdraw <token>`.** Discards the attempt's candidate answer, so it is never
+committed, as work that goes on working does. With none held it changes nothing. It
+prints `{runId, invocationId, attempt, withdrawn}`, `withdrawn` saying whether one was
+held.
+
+Both exit 2 with `step.token-invalid` and `lease.lost` as `complete` does. A late
+`propose` is not kept as late evidence: a candidate was never a result.
+
 The `step` commands but `step show` are writing commands (§Project folder).
 
 ## Capabilities (0.2)
@@ -253,7 +283,7 @@ before it starts anything. It reads no database and needs no project folder:
                "kernel": "0.2", "schema": "0.2", "store": "0.2"},
  "actionKinds": ["command", "component", "external", "native"],
  "asyncKinds": ["command", "component", "external"], "resultChannels": ["store"],
- "componentWorlds": ["runspore:runner/runner@0.1.1"]}
+ "componentWorlds": ["runspore:runner/runner@0.1.1", "runspore:runner/runner@0.2.0"]}
 ```
 
 - `version`: the version of the `spore` binary, the one `spore --version` prints.
@@ -419,7 +449,8 @@ With `<runId>`, or the one unfinished run, it:
    as a worker does: a held async step whose lease or deadline has passed is
    expired, and its action's effect decides. A held step is probed when its action has
    a probe this host runs (host.md §2); a `dead` answer expires it with reason
-   `probe-dead`, and the run goes on.
+   `probe-dead`, a `stopped` one fails it with `step.no-answer`, either commits its
+   candidate answer instead when it holds one, and the run goes on.
 4. **Prints what is needed**, and exits as `run` does:
 
    | The run | It prints | Exit |
@@ -463,7 +494,8 @@ where `continue` would stop with exit 6 (host.md §2, `follow`):
   `--poll-ms` (200 ms by default), so a report from elsewhere, such as `spore step
   complete`, is applied within one poll. Its sweep expires the attempt at its lease
   or deadline, after which the action's effect decides, and probes the attempt at
-  most every 30 s; a `dead` answer expires it at once.
+  most every 30 s; a `dead` answer expires it at once, and `dead` or `stopped`
+  commits its candidate answer.
 
 It works the runs below the run as `continue` does, each followed as the run is, and
 does not return while a run it waits on can still be worked.
@@ -492,10 +524,12 @@ exits 2 with `run.several`, as `continue` does. JSON:
  "signal": "approval", "outcomes": ["approved", "rejected"],
  "outputSchemas": {"rejected": {…}}, "files": "/…/steps/…/review",
  "instructions": "/…/steps/…/review/instructions/review.md",
- "from": {"nodeId": "test", "outcome": "ok"}}
+ "from": {"nodeId": "test", "outcome": "ok"}, "candidate": null}
 ```
 
-`nodeKind` is `activity` or `await-signal`. An activity has `actionId` and the
+`nodeKind` is `activity` or `await-signal`. **0.2:** `candidate` is the candidate
+answer of the step's held attempt, as `status` shows it in `step.candidate`, or null;
+text mode shows it as `status` does. An activity has `actionId` and the
 action's `outcomes`; an await-signal node has `signal` and the outcomes it routes but
 `exhausted`, the same ones `status` lists. `outputSchemas` is the node's, `{}` without
 them. `files` and `instructions` are the step's files folder and its instructions
@@ -1149,14 +1183,18 @@ record cleared; an attempt whose worker died keeps its record.
 **0.2:** `step` describes the async step the run is at (§Steps outside the
 worker), or a step this `spore` cannot act on (§Capabilities), or is null anywhere
 else: `{"kind", "actor", "state", "attempt", "holder", "deadlineMs", "leaseUntilMs",
-"missing"}`. `kind` is the action's kind: `external`, or `command` for an async
+"missing", "candidate"}`. `kind` is the action's kind: `external`, or `command` for an async
 command. `actor` is the action's label or null. `state` is `ready` while nobody holds
 an external step and `held` while a claimed attempt runs, or an async command's
 attempt is held; `holder` is the handle given with `--holder` or printed by the start
 command (or null), and the two times are those of the held attempt, null while ready.
 `state` is `capability-missing` when this `spore` lacks what the step's action needs
 (host.md §2, The handshake), and `missing` then says what it lacks and what to
-restore; `missing` is null in every other state.
+restore; `missing` is null in every other state. `candidate` (0.2) is the candidate
+answer the held attempt holds (§Steps outside the worker, `step propose`):
+`{"outcome", "sinceMs", "forMs"}`, its outcome, when it was stored and how long ago
+that was, or null; never its output. Text mode shows it as `candidate  <outcome> since
+… UTC, for …`.
 A held step whose watch, run by this `spore`, has said that its holder waits for a
 person (host.md §3, Async commands) also carries `"waiting": "person"` and `message`,
 the message of the watch's latest `needs` line (empty when the line had none). Only a

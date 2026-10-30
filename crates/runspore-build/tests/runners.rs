@@ -12,6 +12,7 @@ use wit_component::{ComponentEncoder, StringEncoding};
 use wit_parser::{ManglingAndAbi, Resolve};
 
 const WIT: &str = include_str!("../../../contracts/wit/runner/runner.wit");
+const WIT_0_1: &str = include_str!("../../../contracts/wit/runner-0.1/runner.wit");
 
 /// A WASI-like interface no host world offers to a runner.
 const CLOCK: &str = "package wasi:clocks@0.2.0;
@@ -19,9 +20,9 @@ interface wall-clock { now: func() -> u64; }";
 
 const WITH_CLOCK: &str = "package example:runners;
 world with-clock {
-  import runspore:runner/host@0.1.1;
+  import runspore:runner/host@0.2.0;
   import wasi:clocks/wall-clock@0.2.0;
-  export runspore:runner/step@0.1.1;
+  export runspore:runner/step@0.2.0;
 }";
 
 /// A component of `world` whose functions do nothing: its imports and exports are the
@@ -84,9 +85,48 @@ fn a_runner_of_the_world_passes() {
 }
 
 #[test]
-fn a_runner_built_for_0_1_0_passes() {
-    let old = include_bytes!("../../runspore-host/tests/fixtures/test-runner-0.1.0.wasm");
-    assert_eq!(runner::check(old), Ok(()));
+fn a_runner_of_the_0_1_track_passes() {
+    for old in [
+        &include_bytes!("../../runspore-host/tests/fixtures/test-runner-0.1.0.wasm")[..],
+        &include_bytes!("../../runspore-host/tests/fixtures/test-runner-0.1.1.wasm")[..],
+    ] {
+        assert_eq!(runner::check(old), Ok(()));
+    }
+}
+
+/// A world that imports the 0.1 track's `host` and exports the 0.2 track's `step`.
+const MIXED: &str = "package example:mixed;
+world mixed {
+  import runspore:runner/host@0.1.1;
+  export runspore:runner/step@0.2.0;
+}";
+
+#[test]
+fn a_runner_that_mixes_the_tracks_is_invalid() {
+    let mut resolve = Resolve::default();
+    resolve.push_str("runner.wit", WIT).unwrap();
+    resolve.push_str("runner-0.1.wit", WIT_0_1).unwrap();
+    let mixed = resolve.push_str("mixed.wit", MIXED).unwrap();
+    let world = resolve.select_world(&[mixed], Some("mixed")).unwrap();
+    let mut module = wit_component::dummy_module(&resolve, world, ManglingAndAbi::Standard32);
+    wit_component::embed_component_metadata(
+        &mut module,
+        &resolve,
+        world,
+        StringEncoding::UTF8,
+        false,
+    )
+    .unwrap();
+    let bytes = ComponentEncoder::default()
+        .validate(true)
+        .module(&module)
+        .and_then(|encoder| encoder.encode())
+        .unwrap();
+    let checked = runner::check(&bytes);
+    assert!(
+        matches!(&checked, Err(Problem::Invalid(why)) if why.contains("another track")),
+        "{checked:?}"
+    );
 }
 
 #[test]

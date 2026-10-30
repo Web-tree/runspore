@@ -8,6 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use runspore_types::canonical;
 use runspore_types::digest::ids;
+use runspore_types::failpoint;
+use runspore_types::model::{ActivityResult, AttemptStatus, ErrorInfo};
 use runspore_types::store::*;
 use serde_json::{json, Value};
 use tokio::sync::watch;
@@ -22,6 +24,9 @@ use crate::error::HostError;
 use crate::external::{self, Async, StepToken};
 use crate::holder::{self, Answer, Watched};
 
+/// The code of the failure a `stopped` probe ends an attempt with when it holds no
+/// candidate answer.
+const NO_ANSWER: &str = "step.no-answer";
 /// How often the sweep looks after the held async attempts of the tenant.
 const ASYNC_SWEEP_EVERY: Duration = Duration::from_secs(30);
 /// How much of a stop's stdout its late evidence keeps: the end.
@@ -216,8 +221,9 @@ impl Inner {
     }
 
     /// Runs the probe of `held`, when its action declares one or is a `component` whose
-    /// runner probes; a `dead` answer expires the attempt at once with reason
-    /// `probe-dead`.
+    /// runner probes. A `dead` or `stopped` answer commits the attempt's candidate answer
+    /// (spec/host.md §2, Candidate answers); without one, `stopped` fails the attempt
+    /// with `step.no-answer` and `dead` expires it with reason `probe-dead`.
     pub(super) async fn probe(&self, held: &HeldAttempt) -> Result<Option<Answer>, HostError> {
         if held.bounds.probe.is_none() && held.bounds.runner.is_none() {
             return Ok(None);
@@ -235,7 +241,10 @@ impl Inner {
             (None, None) => Answer::Unknown,
         };
         drop(delivery);
-        if answer == Answer::Dead {
+        if !answer.ends() || self.commit(held, answer).await? {
+            return Ok(Some(answer));
+        }
+        {
             let reason = ExpireReason::ProbeDead;
             let attempt = &held.attempt;
             let request = ExpireAttempt {
@@ -256,6 +265,47 @@ impl Inner {
             }
         }
         Ok(Some(answer))
+    }
+
+    /// Ends `held` with the candidate answer it holds, after a probe's `answer` said its
+    /// work has ended; for `stopped`, with the `step.no-answer` failure when it holds
+    /// none. Whether the attempt is ended: committed now, or already ended meanwhile.
+    async fn commit(&self, held: &HeldAttempt, answer: Answer) -> Result<bool, HostError> {
+        failpoint::hit("host.candidate.before-commit");
+        let attempt = &held.attempt;
+        let otherwise = match answer {
+            Answer::Stopped => Some(evidence(&ActivityResult {
+                invocation_id: attempt.invocation_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                attempt: held.number,
+                status: AttemptStatus::Failure,
+                outcome: None,
+                output: Value::Null,
+                error: Some(ErrorInfo {
+                    code: NO_ANSWER.to_string(),
+                    message: "the work stopped and left no candidate answer".to_string(),
+                    node_id: None,
+                    details: Value::Null,
+                }),
+                retryable: true,
+            })?),
+            _ => None,
+        };
+        let request = CommitCandidate {
+            mutation: mutation(
+                "commit_candidate",
+                self.unique(&format!("commit/{}", attempt.attempt_id)),
+                json!([attempt, otherwise.as_ref().map(|e| &e.digest)]),
+            )?,
+            attempt: attempt.clone(),
+            otherwise,
+        };
+        match retry(true, || self.store.commit_candidate(request.clone())).await {
+            Ok(receipt) => Ok(receipt.value.committed.is_some()),
+            // It ended meanwhile: reported, expired or abandoned.
+            Err(f) if f.kind == StoreFailureKind::Stale => Ok(true),
+            Err(f) => Err(f.into()),
+        }
     }
 
     /// Runs the stop of `held`, an attempt a cancel has expired, once, and keeps its exit
@@ -468,7 +518,7 @@ impl Inner {
                     let Some(held) = this.held_attempt(view, invocation).await else {
                         continue;
                     };
-                    if this.probe(&held).await? == Some(Answer::Dead) {
+                    if this.probe(&held).await?.is_some_and(Answer::ends) {
                         continue;
                     }
                     Inner::start_watch(this, held);
@@ -484,8 +534,8 @@ impl Inner {
 
 impl Engine {
     /// Probes the run's held async step, when its action declares a probe (spec/host.md
-    /// §2, Client operations); a `dead` answer expires the attempt with reason
-    /// `probe-dead`. `None` when nothing was probed.
+    /// §2, Client operations); a `dead` or `stopped` answer ends the attempt, with its
+    /// candidate answer when it holds one. `None` when nothing was probed.
     pub async fn probe_step(&self, key: &RunKey) -> Result<Option<Answer>, HostError> {
         let Some(view) = self.get_run(key).await? else {
             return Ok(None);

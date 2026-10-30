@@ -1,9 +1,9 @@
 //! The `component` kind (spec/host.md §3, `component`): an action whose start, probe
 //! and stop are a step runner, a WebAssembly component of world
-//! `runspore:runner/runner@0.1.1` sealed into the workflow artifact. The host runs it
-//! through Wasmtime in the kernel's sandbox, a fresh instance per call, and offers it
-//! only the imports of `contracts/wit/runner/runner.wit`, each checked against the
-//! action's grants.
+//! `runspore:runner/runner@0.2.0`, or of its 0.1 track, sealed into the workflow
+//! artifact. The host runs it through Wasmtime in the kernel's sandbox, a fresh instance
+//! per call, and offers it only the imports of its world's `host`, each checked against
+//! the action's grants.
 
 mod grants;
 mod imports;
@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use runspore_types::artifact::{Artifact, EntryKind, Owner};
 use runspore_types::canonical;
-use runspore_types::capabilities::RUNNER_WORLD;
+use runspore_types::capabilities::{RUNNER_WORLD, RUNNER_WORLD_0_1};
 use runspore_types::digest;
 use runspore_types::failpoint;
 use runspore_types::store::MAX_HOLDER_BYTES;
@@ -38,6 +38,20 @@ wasmtime::component::bindgen!({
     world: "runner",
     imports: { default: trappable },
 });
+
+/// The world's 0.1 track (`contracts/wit/runner-0.1`), whose runners still run: the same
+/// `host`, and a probe that never answers `stopped`.
+pub(crate) mod v0_1 {
+    wasmtime::component::bindgen!({
+        path: "../../contracts/wit/runner-0.1",
+        world: "runner",
+        imports: { default: trappable },
+    });
+}
+
+/// The `step` export of each track, as a component names it.
+const STEP_0_2: &str = "runspore:runner/step@0.2.0";
+const STEP_0_1: &str = "runspore:runner/step@0.1.1";
 
 /// The kind of an action whose start, probe and stop are a step runner.
 pub const KIND: &str = runspore_types::capabilities::COMPONENT_KIND;
@@ -125,12 +139,123 @@ fn engine() -> Result<&'static Engine, String> {
         .map_err(Clone::clone)
 }
 
-/// A runner compiled and linked, ready to instantiate.
-type Loaded = RunnerPre<State>;
+/// A runner compiled and linked, ready to instantiate, of either track.
+#[derive(Clone)]
+pub(crate) enum Loaded {
+    V0_1(v0_1::RunnerPre<State>),
+    V0_2(RunnerPre<State>),
+}
 
-/// Compiles `bytes` as a component of world `runner` and links it to the host, once per
-/// process by digest. The error is why it is not a runner: not a component, an import
-/// outside `host`, an export missing.
+impl Loaded {
+    fn engine(&self) -> &Engine {
+        match self {
+            Self::V0_1(pre) => pre.engine(),
+            Self::V0_2(pre) => pre.engine(),
+        }
+    }
+
+    fn instantiate(&self, store: &mut Store<State>) -> wasmtime::Result<Instance> {
+        Ok(match self {
+            Self::V0_1(pre) => Instance::V0_1(pre.instantiate(&mut *store)?),
+            Self::V0_2(pre) => Instance::V0_2(pre.instantiate(&mut *store)?),
+        })
+    }
+}
+
+/// A runner instantiated for one call.
+enum Instance {
+    V0_1(v0_1::Runner),
+    V0_2(Runner),
+}
+
+impl Instance {
+    fn start(
+        &self,
+        store: &mut Store<State>,
+        context: &step::Context,
+    ) -> wasmtime::Result<Result<String, step::Failure>> {
+        match self {
+            Self::V0_2(runner) => runner.runspore_runner_step().call_start(store, context),
+            Self::V0_1(runner) => Ok(runner
+                .runspore_runner_step()
+                .call_start(store, &old_context(context))?
+                .map_err(|f| step::Failure {
+                    code: f.code,
+                    message: f.message,
+                    retryable: f.retryable,
+                })),
+        }
+    }
+
+    fn probe(
+        &self,
+        store: &mut Store<State>,
+        context: &step::Context,
+        handle: &str,
+    ) -> wasmtime::Result<step::Holder> {
+        use v0_1::exports::runspore::runner::step::Holder as Old;
+        match self {
+            Self::V0_2(runner) => runner
+                .runspore_runner_step()
+                .call_probe(store, context, handle),
+            Self::V0_1(runner) => Ok(
+                match runner.runspore_runner_step().call_probe(
+                    store,
+                    &old_context(context),
+                    handle,
+                )? {
+                    Old::Alive => step::Holder::Alive,
+                    Old::Dead => step::Holder::Dead,
+                    Old::Unknown => step::Holder::Unknown,
+                },
+            ),
+        }
+    }
+
+    fn stop(
+        &self,
+        store: &mut Store<State>,
+        context: &step::Context,
+        handle: &str,
+    ) -> wasmtime::Result<Result<String, String>> {
+        match self {
+            Self::V0_2(runner) => runner
+                .runspore_runner_step()
+                .call_stop(store, context, handle),
+            Self::V0_1(runner) => {
+                runner
+                    .runspore_runner_step()
+                    .call_stop(store, &old_context(context), handle)
+            }
+        }
+    }
+}
+
+/// The `context` record of the 0.1 track: the same fields.
+fn old_context(c: &step::Context) -> v0_1::exports::runspore::runner::step::Context {
+    v0_1::exports::runspore::runner::step::Context {
+        run_id: c.run_id.clone(),
+        tenant: c.tenant.clone(),
+        node_id: c.node_id.clone(),
+        action_id: c.action_id.clone(),
+        invocation_id: c.invocation_id.clone(),
+        attempt: c.attempt,
+        visit: c.visit,
+        effect_key: c.effect_key.clone(),
+        input: c.input.clone(),
+        params: c.params.clone(),
+        base_dir: c.base_dir.clone(),
+        work_dir: c.work_dir.clone(),
+        step_files: c.step_files.clone(),
+        token: c.token.clone(),
+        result_channel: c.result_channel.clone(),
+    }
+}
+
+/// Compiles `bytes` as a component of world `runner` and links it to the host of the
+/// track its `step` export is on, once per process by digest. The error is why it is
+/// not a runner: not a component, no `step` export of either track, an import outside
+/// that track's `host`.
 pub(crate) fn load(bytes: &[u8]) -> Result<Loaded, String> {
     static LOADED: OnceLock<Mutex<HashMap<String, Loaded>>> = OnceLock::new();
     let key = digest::blob(bytes);
@@ -141,17 +266,25 @@ pub(crate) fn load(bytes: &[u8]) -> Result<Loaded, String> {
     let engine = engine()?;
     let component = Component::new(engine, bytes).map_err(|e| format!("{e:#}"))?;
     let mut linker = Linker::<State>::new(engine);
-    Runner::add_to_linker::<State, HasSelf<State>>(&mut linker, |state| state)
-        .map_err(|e| format!("{e:#}"))?;
-    let pre = linker
-        .instantiate_pre(&component)
-        .map_err(|e| format!("{e:#}"))?;
-    let pre = RunnerPre::new(pre).map_err(|e| format!("{e:#}"))?;
+    let e = |e: wasmtime::Error| format!("{e:#}");
+    // Wasmtime finds an export on its semver track, `@0.2.0` for any `@0.2.x`.
+    let loaded = if component.get_export_index(None, STEP_0_2).is_some() {
+        Runner::add_to_linker::<State, HasSelf<State>>(&mut linker, |state| state).map_err(e)?;
+        let pre = linker.instantiate_pre(&component).map_err(e)?;
+        Loaded::V0_2(RunnerPre::new(pre).map_err(e)?)
+    } else if component.get_export_index(None, STEP_0_1).is_some() {
+        v0_1::Runner::add_to_linker::<State, HasSelf<State>>(&mut linker, |state| state)
+            .map_err(e)?;
+        let pre = linker.instantiate_pre(&component).map_err(e)?;
+        Loaded::V0_1(v0_1::RunnerPre::new(pre).map_err(e)?)
+    } else {
+        return Err(format!("it exports neither `{STEP_0_2}` nor `{STEP_0_1}`"));
+    };
     cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(key, pre.clone());
-    Ok(pre)
+        .insert(key, loaded.clone());
+    Ok(loaded)
 }
 
 /// The checks `start` makes of the `component` actions of `workflow` (spec/host.md §3,
@@ -210,7 +343,8 @@ pub(crate) fn check_runners(workflow: &[u8], artifact: Option<&Artifact>) -> Res
             HostError::invalid(
                 "component.invalid",
                 format!(
-                    "action `{action_id}`: `{}` is not a step runner of world `{RUNNER_WORLD}`: {e}",
+                    "action `{action_id}`: `{}` is not a step runner of world `{RUNNER_WORLD}` \
+                     or `{RUNNER_WORLD_0_1}`: {e}",
                     spec.module
                 ),
             )
@@ -289,7 +423,7 @@ async fn call<T: Send + 'static>(
     spec: &Spec,
     start: bool,
     timeout: Duration,
-    f: impl FnOnce(&mut Store<State>, &Runner) -> wasmtime::Result<T> + Send + 'static,
+    f: impl FnOnce(&mut Store<State>, &Instance) -> wasmtime::Result<T> + Send + 'static,
 ) -> Result<T, Ended> {
     let (ctx, spec) = (ctx.clone(), spec.clone());
     let joined = tokio::task::spawn_blocking(move || {
@@ -347,7 +481,7 @@ async fn call<T: Send + 'static>(
 pub(crate) async fn start(ctx: &ActivityContext, spec: &Spec, input: &Value) -> ActivityOutput {
     let record = context(ctx, input, true);
     let called = call(ctx, spec, true, spec.timeout, move |store, runner| {
-        runner.runspore_runner_step().call_start(store, &record)
+        runner.start(store, &record)
     })
     .await;
     let failure = |code: &str, message: String, details: Value| ActivityOutput::Failure {
@@ -415,14 +549,13 @@ pub(crate) async fn probe(
     let record = context(ctx, input, false);
     let handle = String::from_utf8_lossy(handle).into_owned();
     let called = call(ctx, spec, false, LOOK_TIMEOUT, move |store, runner| {
-        runner
-            .runspore_runner_step()
-            .call_probe(store, &record, &handle)
+        runner.probe(store, &record, &handle)
     })
     .await;
     match called {
         Ok(step::Holder::Alive) => Answer::Alive,
         Ok(step::Holder::Dead) => Answer::Dead,
+        Ok(step::Holder::Stopped) => Answer::Stopped,
         Ok(step::Holder::Unknown) | Err(_) => Answer::Unknown,
     }
 }
@@ -438,9 +571,7 @@ pub(crate) async fn stop(
     let record = context(ctx, input, false);
     let handle = String::from_utf8_lossy(handle).into_owned();
     let called = call(ctx, spec, false, LOOK_TIMEOUT, move |store, runner| {
-        runner
-            .runspore_runner_step()
-            .call_stop(store, &record, &handle)
+        runner.stop(store, &record, &handle)
     })
     .await;
     match called {

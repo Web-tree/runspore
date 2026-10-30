@@ -3,7 +3,8 @@
 //! every host import and every ending. Built for `wasm32-unknown-unknown` by
 //! `runspore-wasmtime`'s build script; on any other target the crate is empty.
 //!
-//! `start` reads the input's first key it knows:
+//! `start` first writes the attempt's token to the path of an input's `tokenTo`, if it
+//! has one, then reads the input's first key it knows:
 //!
 //! | Input | `start` |
 //! | --- | --- |
@@ -17,7 +18,8 @@
 //! | `{"sleep": ms}` | sleeps, then returns `{}` |
 //! | `{"trap": true}` / `{"spin": true}` | traps / never returns |
 //!
-//! `probe` answers `{"probe": "alive" | "dead"}` handles as they say, checks a
+//! `probe` answers `{"probe": "alive" | "dead" | "stopped"}` handles as they say, and
+//! an `{"answer": "<path>"}` handle as the file at the path says, read each time, checks a
 //! `{"process": …}` handle with `process-alive`, reads the path of a `{"read": …}`
 //! handle, writes `probed` to the path of a `{"wrote": …}` handle and says `alive`
 //! when it could, and says `unknown` of anything else. `stop` ends a `{"process": …}`
@@ -155,6 +157,13 @@ mod guest {
     impl step::Guest for Runner {
         fn start(context: Context) -> Result<String, Failure> {
             let input: Value = serde_json::from_str(&context.input).unwrap_or(Value::Null);
+            if let (Some(path), Some(token)) = (
+                input.get("tokenTo").and_then(Value::as_str),
+                context.token.as_deref(),
+            ) {
+                host::write_file(path, token.as_bytes())
+                    .map_err(|e| failure("runner.host-failed", e))?;
+            }
             if let Some(handle) = input.get("handle").and_then(Value::as_str) {
                 return Ok(handle.to_string());
             }
@@ -166,7 +175,16 @@ mod guest {
             match handle.get("probe").and_then(Value::as_str) {
                 Some("alive") => return Holder::Alive,
                 Some("dead") => return Holder::Dead,
+                Some("stopped") => return Holder::Stopped,
                 _ => {}
+            }
+            if let Some(path) = handle.get("answer").and_then(Value::as_str) {
+                return match host::read_file(path).map(text).as_deref().map(str::trim) {
+                    Ok("alive") => Holder::Alive,
+                    Ok("dead") => Holder::Dead,
+                    Ok("stopped") => Holder::Stopped,
+                    _ => Holder::Unknown,
+                };
             }
             if let Some(path) = handle.get("read").and_then(Value::as_str) {
                 return match host::read_file(path) {

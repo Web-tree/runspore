@@ -136,8 +136,9 @@ like an asset's, and what the runner may do with `grants`: `programs`, `sockets`
 `$RUNSPORE_WORK_DIR` is the step's work folder. `passToken`, a boolean, default
 `true`, says whether the programs the runner starts get the attempt's token in their
 environment. The build checks the runner as the
-host loads it: a file that is not a component of world `runspore:runner/runner@0.1.1`
-(or of an earlier `0.1` version), or lacks its `step` export, is `component.invalid`;
+host loads it: a file that is not a component of world `runspore:runner/runner@0.2.0`
+or `runspore:runner/runner@0.1.1` (or of an earlier version of either track), or lacks
+its `step` export, or mixes the tracks, is `component.invalid`;
 one that imports anything but the world's `host` interface is
 `component.import-unsupported`, naming the import; a grant
 of a kind this `spore` does not offer is `component.grant-unsupported`; a `component`

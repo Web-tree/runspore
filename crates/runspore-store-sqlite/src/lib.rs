@@ -20,7 +20,7 @@ use runspore_types::reducer::Diagnostic;
 use runspore_types::store::*;
 
 /// Schema version written to `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 12;
+pub const SCHEMA_VERSION: i64 = 13;
 /// The first schema version with the `workers` table.
 const SCHEMA_VERSION_WORKERS: i64 = 12;
 /// The schema version `spore` 0.1 wrote. 0.2 replaces 0.1 outright: such a file is
@@ -65,6 +65,9 @@ const UPGRADE_10: &str = "ALTER TABLE runs ADD COLUMN cancel_reason TEXT;
 const UPGRADE_11: &str = "CREATE TABLE workers (worker_id TEXT PRIMARY KEY,
     version TEXT NOT NULL, host TEXT NOT NULL, pid INTEGER NOT NULL,
     beat_at_ms INTEGER NOT NULL, until_ms INTEGER NOT NULL);";
+/// Upgrades a version 12 database to version 13: an attempt's candidate answer.
+const UPGRADE_12: &str = "ALTER TABLE attempts ADD COLUMN candidate BLOB;
+    ALTER TABLE attempts ADD COLUMN candidate_at_ms INTEGER;";
 /// The prefix of the IDs the host gives its workers (host.md §3); other owners of an
 /// attempt, such as an actor's claim, are not workers.
 const WORKER_PREFIX: &str = "worker-";
@@ -430,7 +433,15 @@ fn attempt_row(c: &Connection, a: &AttemptRef) -> R<Option<AttemptRow>> {
     .map_err(db)
 }
 
-/// Ends a running attempt, settles its invocation, and appends its result event.
+/// Whether `result` names the attempt `a` names: its invocation, its ID and its number.
+fn result_of(result: &ActivityResult, a: &AttemptRef) -> bool {
+    result.invocation_id == a.invocation_id
+        && result.attempt_id == a.attempt_id
+        && ids::attempt(&a.invocation_id, result.attempt) == a.attempt_id
+}
+
+/// Ends a running attempt, settles its invocation, and appends its result event. The
+/// attempt's candidate answer goes with it.
 fn settle(
     c: &Connection,
     a: &AttemptRef,
@@ -439,7 +450,8 @@ fn settle(
     now: u64,
 ) -> R<ResultAccepted> {
     c.execute(
-        "UPDATE attempts SET status = ?4, result = ?5 WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+        "UPDATE attempts SET status = ?4, result = ?5, candidate = NULL, candidate_at_ms = NULL
+         WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
         params![a.key.tenant, a.key.run, a.attempt_id, status, body],
     )
     .map_err(db)?;
@@ -656,6 +668,7 @@ impl SqliteStore {
                 (9, UPGRADE_9),
                 (10, UPGRADE_10),
                 (11, UPGRADE_11),
+                (12, UPGRADE_12),
             ] {
                 if version <= from {
                     tx.execute_batch(upgrade).map_err(db)?;
@@ -1438,12 +1451,7 @@ impl Store for SqliteStore {
                 let a = &q.attempt;
                 let result: ActivityResult =
                     canonical::decode(&q.result.body).map_err(|_| conflict("result.invalid"))?;
-                let number = ids::attempt(&a.invocation_id, result.attempt) == a.attempt_id;
-                if result.invocation_id != a.invocation_id
-                    || result.attempt_id != a.attempt_id
-                    || !number
-                    || result.status == AttemptStatus::Expired
-                {
+                if !result_of(&result, a) || result.status == AttemptStatus::Expired {
                     return Err(conflict("result.invalid"));
                 }
                 match attempt_row(c, a)? {
@@ -1454,6 +1462,119 @@ impl Store for SqliteStore {
                     _ => return Err(stale("lease.lost")),
                 }
                 settle(c, a, "finished", &q.result.body, now).map(Outcome::Applied)
+            },
+        )
+    }
+
+    async fn set_candidate(&self, q: SetCandidate) -> R<Receipt<CandidateSet>> {
+        self.mutate(
+            "set_candidate",
+            Some("set-candidate"),
+            &q.attempt.key,
+            &q.mutation,
+            |c, now| {
+                let a = &q.attempt;
+                let mut number = None;
+                if let Some(candidate) = &q.candidate {
+                    verify(candidate)?;
+                    if candidate.body.len() > MAX_CANDIDATE_BYTES {
+                        return Err(fail(
+                            StoreFailureKind::Quota,
+                            "candidate.too-large",
+                            "candidate.too-large",
+                        ));
+                    }
+                    let result: ActivityResult = canonical::decode(&candidate.body)
+                        .map_err(|_| conflict("result.invalid"))?;
+                    if !result_of(&result, a) || result.status != AttemptStatus::Success {
+                        return Err(conflict("result.invalid"));
+                    }
+                    number = Some(result.attempt);
+                }
+                match attempt_row(c, a)? {
+                    Some(row)
+                        if row.status == "running"
+                            && now < row.lease_until_ms
+                            && number.is_none_or(|n| n == row.attempt_number) => {}
+                    _ => return Err(stale("lease.lost")),
+                }
+                let held: bool = c
+                    .query_row(
+                        "SELECT candidate IS NOT NULL FROM attempts
+                         WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+                        params![a.key.tenant, a.key.run, a.attempt_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(db)?;
+                let at = q.candidate.as_ref().map(|_| i(now));
+                c.execute(
+                    "UPDATE attempts SET candidate = ?4, candidate_at_ms = ?5
+                     WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+                    params![
+                        a.key.tenant,
+                        a.key.run,
+                        a.attempt_id,
+                        q.candidate.as_ref().map(|e| &e.body),
+                        at
+                    ],
+                )
+                .map_err(db)?;
+                Ok(Outcome::Applied(CandidateSet {
+                    held,
+                    candidate_at_ms: q.candidate.as_ref().map(|_| now),
+                }))
+            },
+        )
+    }
+
+    async fn commit_candidate(&self, q: CommitCandidate) -> R<Receipt<CandidateCommitted>> {
+        self.mutate(
+            "commit_candidate",
+            Some("commit-candidate"),
+            &q.attempt.key,
+            &q.mutation,
+            |c, now| {
+                let a = &q.attempt;
+                let mut number = None;
+                if let Some(otherwise) = &q.otherwise {
+                    verify(otherwise)?;
+                    let result: ActivityResult = canonical::decode(&otherwise.body)
+                        .map_err(|_| conflict("result.invalid"))?;
+                    if !result_of(&result, a) || result.status == AttemptStatus::Expired {
+                        return Err(conflict("result.invalid"));
+                    }
+                    number = Some(result.attempt);
+                }
+                match attempt_row(c, a)? {
+                    Some(row)
+                        if row.status == "running"
+                            && now < row.lease_until_ms
+                            && number.is_none_or(|n| n == row.attempt_number) => {}
+                    _ => return Err(stale("lease.lost")),
+                }
+                let candidate: Option<Vec<u8>> = c
+                    .query_row(
+                        "SELECT candidate FROM attempts
+                         WHERE tenant = ?1 AND run_id = ?2 AND attempt_id = ?3",
+                        params![a.key.tenant, a.key.run, a.attempt_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(db)?;
+                let (committed, body) = match (candidate, &q.otherwise) {
+                    (Some(candidate), _) => (Committed::Candidate, candidate),
+                    (None, Some(otherwise)) => (Committed::Otherwise, otherwise.body.clone()),
+                    (None, None) => {
+                        return Ok(Outcome::Applied(CandidateCommitted {
+                            committed: None,
+                            result_sequence: None,
+                        }))
+                    }
+                };
+                let accepted = settle(c, a, "finished", &body, now)?;
+                Ok(Outcome::Applied(CandidateCommitted {
+                    committed: Some(committed),
+                    result_sequence: Some(accepted.result_sequence),
+                }))
             },
         )
     }
@@ -1723,7 +1844,7 @@ impl Store for SqliteStore {
                 .prepare(
                     "SELECT i.invocation_id, i.node_id, i.action_id, i.status, i.attempt_number, i.not_before_ms,
                             a.lease_until_ms, a.owner, a.process, a.attempt_id, a.fence, a.holder, a.deadline_ms,
-                            a.claimed_at_ms, i.input, i.params
+                            a.claimed_at_ms, i.input, i.params, a.candidate, a.candidate_at_ms
                      FROM invocations i LEFT JOIN attempts a ON a.tenant = i.tenant AND a.run_id = i.run_id
                        AND a.invocation_id = i.invocation_id AND a.attempt_number = i.attempt_number
                      WHERE i.tenant = ?1 AND i.run_id = ?2 ORDER BY i.invocation_id",
@@ -1764,6 +1885,8 @@ impl Store for SqliteStore {
                         claimed_at_ms: r.get::<_, Option<i64>>(13)?.map(|v| v as u64),
                         input: r.get(14)?,
                         params: r.get(15)?,
+                        candidate: r.get(16)?,
+                        candidate_at_ms: r.get::<_, Option<i64>>(17)?.map(|v| v as u64),
                     })
                 })
                 .and_then(Iterator::collect)

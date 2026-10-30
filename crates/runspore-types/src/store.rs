@@ -427,6 +427,56 @@ pub struct ProcessSet {
     pub process: Option<ProcessRecord>,
 }
 
+/// Largest candidate answer a store keeps, in bytes of its canonical result body.
+pub const MAX_CANDIDATE_BYTES: usize = 64 * 1024;
+
+/// Stores or, with `None`, discards the attempt's candidate answer: the canonical body
+/// of a `success` `ActivityResult` of the attempt, not yet its result. Same predicates
+/// as `Heartbeat`; extends nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetCandidate {
+    pub mutation: Mutation,
+    pub attempt: AttemptRef,
+    pub candidate: Option<Evidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateSet {
+    /// Whether the attempt held a candidate before this call.
+    pub held: bool,
+    /// When the new candidate was stored; `None` when it was discarded.
+    #[serde(with = "u64_str::option")]
+    pub candidate_at_ms: Option<u64>,
+}
+
+/// Ends a running attempt with the candidate answer it holds or, when it holds none,
+/// with `otherwise`, a result as `FinishAttempt` takes it. With neither it writes
+/// nothing but its receipt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitCandidate {
+    pub mutation: Mutation,
+    pub attempt: AttemptRef,
+    pub otherwise: Option<Evidence>,
+}
+
+/// What `commit_candidate` ended the attempt with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Committed {
+    Candidate,
+    Otherwise,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateCommitted {
+    /// `None` when the attempt held no candidate and no `otherwise` was given.
+    pub committed: Option<Committed>,
+    #[serde(with = "u64_str::option")]
+    pub result_sequence: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinishAttempt {
     pub mutation: Mutation,
@@ -669,6 +719,11 @@ pub struct InvocationView {
     /// The node's evaluated `params` as scheduled, canonical JSON; `None` for a node
     /// without them.
     pub params: Option<Vec<u8>>,
+    /// The latest attempt's candidate answer, the canonical body of the `success`
+    /// result it may end with; `None` when it holds none, as once it has ended.
+    pub candidate: Option<Vec<u8>>,
+    /// When that candidate was stored, by the store's clock.
+    pub candidate_at_ms: Option<u64>,
 }
 
 #[async_trait]
@@ -697,6 +752,11 @@ pub trait Store: Send + Sync {
     async fn hold_attempt(&self, request: HoldAttempt) -> StoreResult<Receipt<AttemptHeld>>;
     async fn set_process(&self, request: SetProcess) -> StoreResult<Receipt<ProcessSet>>;
     async fn finish_attempt(&self, request: FinishAttempt) -> StoreResult<Receipt<ResultAccepted>>;
+    async fn set_candidate(&self, request: SetCandidate) -> StoreResult<Receipt<CandidateSet>>;
+    async fn commit_candidate(
+        &self,
+        request: CommitCandidate,
+    ) -> StoreResult<Receipt<CandidateCommitted>>;
     async fn expire_attempt(&self, request: ExpireAttempt) -> StoreResult<Receipt<ResultAccepted>>;
     async fn record_late_evidence(
         &self,

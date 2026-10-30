@@ -137,7 +137,7 @@ fn a_newer_spore_upgrades_the_database_and_finishes_the_older_runs() {
              ALTER TABLE attempts DROP COLUMN holder;
              ALTER TABLE attempts DROP COLUMN deadline_ms;
              DROP TABLE meta;
-             DROP TABLE workers;
+             ALTER TABLE attempts DROP COLUMN candidate; ALTER TABLE attempts DROP COLUMN candidate_at_ms; DROP TABLE workers;
              PRAGMA user_version = {OLDER};"
         ))
         .unwrap();
@@ -342,7 +342,7 @@ fn migrate_waits_for_the_workers_of_the_older_spore() {
     // The file as spore 0.3.0 left it, whose workers record no version: this worker
     // stands in for one of them.
     sql(&dir)
-        .execute_batch("DROP TABLE workers; PRAGMA user_version = 11;")
+        .execute_batch("ALTER TABLE attempts DROP COLUMN candidate; ALTER TABLE attempts DROP COLUMN candidate_at_ms; DROP TABLE workers; PRAGMA user_version = 11;")
         .unwrap();
     let (code, refused) = json(&dir, &["migrate"]);
     assert_eq!(

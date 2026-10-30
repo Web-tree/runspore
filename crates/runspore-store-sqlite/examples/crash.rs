@@ -3,20 +3,22 @@
 //! second run resubmits identical requests. Run it with `RUNSPORE_FAILPOINTS` set.
 
 use runspore_store_conformance::{
-    append, cancel, claim, commit, create_run, expire, finish, heartbeat, process_record, schedule,
-    set_process, ManualClock,
+    append, cancel, claim, commit, commit_candidate, create_run, expire, finish, heartbeat,
+    process_record, schedule, set_candidate, set_process, success, ManualClock,
 };
 use runspore_store_sqlite::SqliteStore;
 use runspore_types::store::{Disposition, RunKey, Store, Turn, DEFAULT_TENANT};
 
 /// The operations in the order a scenario performs them.
-const STEPS: [&str; 9] = [
+const STEPS: [&str; 11] = [
     "create-run",
     "append-event",
     "commit-turn",
     "claim-attempt",
     "heartbeat",
     "set-process",
+    "set-candidate",
+    "commit-candidate",
     "finish-attempt",
     "expire-attempt",
     "cancel-run",
@@ -33,12 +35,16 @@ async fn main() {
         ![
             "heartbeat",
             "set-process",
+            "set-candidate",
+            "commit-candidate",
             "finish-attempt",
             "expire-attempt",
             "cancel-run",
         ]
         .contains(s)
             || **s == op
+            // A commit commits the candidate it holds.
+            || (**s == "set-candidate" && op == "commit-candidate")
     }) {
         last = match *step {
             "create-run" => {
@@ -119,6 +125,24 @@ async fn main() {
                             ))
                             .await
                             .expect("set_process")
+                            .disposition
+                    }
+                    "set-candidate" => {
+                        store
+                            .set_candidate(set_candidate(
+                                &attempt,
+                                "candidate",
+                                Some(success(&attempt, 1)),
+                            ))
+                            .await
+                            .expect("set_candidate")
+                            .disposition
+                    }
+                    "commit-candidate" => {
+                        store
+                            .commit_candidate(commit_candidate(&attempt, "commit-candidate", None))
+                            .await
+                            .expect("commit_candidate")
                             .disposition
                     }
                     "finish-attempt" => {

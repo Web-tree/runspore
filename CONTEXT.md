@@ -39,7 +39,7 @@ The one WebAssembly component that holds the kernel. `spore` embeds it, and ever
 _Avoid_: kernel artifact, certified artifact, kernel bundle, "the wasm"
 
 **Step runner**:
-A WebAssembly component of world `runspore:runner/runner@0.1.1` (or an earlier `0.1` version) that a `component` action names as its `module`: its exports start, probe and stop the step's work, and it reaches the machine only through the host imports the action's grants allow. The build seals it into the workflow artifact, so a run keeps the runner it started with.
+A WebAssembly component of world `runspore:runner/runner@0.2.0`, or of the 0.1 track (`0.1.1` and before), that a `component` action names as its `module`: its exports start, probe and stop the step's work, and it reaches the machine only through the host imports the action's grants allow. The build seals it into the workflow artifact, so a run keeps the runner it started with.
 _Avoid_: plugin, extension, wasm helper, "the module" alone (an artifact is a component too)
 
 **Grant**:
@@ -233,8 +233,12 @@ The recorded identity of an async step's holder, such as a process, a session or
 _Avoid_: job ID, token, process record
 
 **Probe**:
-An action's own check of a holder handle, answering whether the holder is alive, dead, or unknown.
+An action's own check of a holder handle, answering whether the holder is alive, dead, or unknown, or (0.2) alive with its work stopped.
 _Avoid_: healthcheck, ping
+
+**Candidate answer**:
+An answer the work of a held step has handed in and Runspore has checked, kept on the attempt but not yet its result: the step completes with it only once the action's probe says the work has stopped. A new one replaces it; work that goes on working withdraws it; it goes when the attempt ends.
+_Avoid_: draft result, pending result, proposal (that is the command, `step propose`)
 
 **Watch**:
 An action's own wait on a holder handle that ends when the job behind it ends, and may deliver its result.

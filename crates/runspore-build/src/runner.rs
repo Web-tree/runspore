@@ -1,16 +1,21 @@
 //! A `component` action's step runner, checked as the host loads it (spec/host.md §3,
 //! `component`): a component that imports only the `host` interface of world
-//! `runspore:runner/runner@0.1.1` and exports its `step` interface, or those of an
-//! earlier `0.1` version, which the host matches on the same semver track. The host
-//! also checks every function's type when it loads the runner; the build checks the
-//! names.
+//! `runspore:runner/runner@0.2.0` and exports its `step` interface, or those of the
+//! 0.1 track, `0.1.1` and before, which the host matches on the same semver track.
+//! The host also checks every function's type when it loads the runner; the build
+//! checks the names.
 
 use wasmparser::{Encoding, Parser, Payload, Validator, WasmFeatures};
 
 /// The one interface a runner may import, at its newest version.
-pub const HOST_IMPORT: &str = "runspore:runner/host@0.1.1";
+pub const HOST_IMPORT: &str = "runspore:runner/host@0.2.0";
 /// The interface a runner exports, at its newest version.
-pub const STEP_EXPORT: &str = "runspore:runner/step@0.1.1";
+pub const STEP_EXPORT: &str = "runspore:runner/step@0.2.0";
+/// The newest `host` and `step` of each track a runner may be built for, oldest first.
+const TRACKS: [(&str, &str); 2] = [
+    ("runspore:runner/host@0.1.1", "runspore:runner/step@0.1.1"),
+    (HOST_IMPORT, STEP_EXPORT),
+];
 
 /// Whether `name` is the interface `wanted` names, at its version or another patch of
 /// the same `0.<minor>` track, as Wasmtime matches them.
@@ -38,6 +43,7 @@ pub fn check(bytes: &[u8]) -> Result<(), Problem> {
         return Err(Problem::Invalid("it is not a WebAssembly file".into()));
     }
     let mut depth = 0usize;
+    let mut imported: Vec<String> = Vec::new();
     let mut exports = Vec::new();
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| Problem::Invalid(e.message().to_string()))?;
@@ -54,9 +60,13 @@ pub fn check(bytes: &[u8]) -> Result<(), Problem> {
             Payload::ComponentImportSection(imports) if depth == 0 => {
                 for import in imports {
                     let import = import.map_err(|e| Problem::Invalid(e.message().to_string()))?;
-                    if !on_track(import.name.name, HOST_IMPORT) {
+                    if !TRACKS
+                        .iter()
+                        .any(|(host, _)| on_track(import.name.name, host))
+                    {
                         return Err(Problem::Import(import.name.name.to_string()));
                     }
+                    imported.push(import.name.name.to_string());
                 }
             }
             Payload::ComponentExportSection(list) if depth == 0 => {
@@ -71,9 +81,17 @@ pub fn check(bytes: &[u8]) -> Result<(), Problem> {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(bytes)
         .map_err(|e| Problem::Invalid(e.message().to_string()))?;
-    if !exports.iter().any(|e| on_track(e, STEP_EXPORT)) {
+    let Some((host, step)) = TRACKS
+        .iter()
+        .find(|(_, step)| exports.iter().any(|e| on_track(e, step)))
+    else {
         return Err(Problem::Invalid(format!(
             "it does not export `{STEP_EXPORT}`"
+        )));
+    };
+    if let Some(other) = imported.iter().find(|i| !on_track(i, host)) {
+        return Err(Problem::Invalid(format!(
+            "it exports `{step}`'s track but imports `{other}`, of another track"
         )));
     }
     Ok(())
@@ -85,12 +103,13 @@ mod tests {
 
     #[test]
     fn a_patch_of_the_same_track_is_the_interface() {
+        let host_0_1 = TRACKS[0].0;
         for name in [
             "runspore:runner/host@0.1.0",
             "runspore:runner/host@0.1.1",
             "runspore:runner/host@0.1.12",
         ] {
-            assert!(on_track(name, HOST_IMPORT), "{name}");
+            assert!(on_track(name, host_0_1), "{name}");
         }
         for name in [
             "runspore:runner/host@0.2.0",
@@ -99,7 +118,9 @@ mod tests {
             "runspore:runner/step@0.1.1",
             "runspore:runner/host",
         ] {
-            assert!(!on_track(name, HOST_IMPORT), "{name}");
+            assert!(!on_track(name, host_0_1), "{name}");
         }
+        assert!(on_track("runspore:runner/host@0.2.3", HOST_IMPORT));
+        assert!(!on_track("runspore:runner/host@0.1.1", HOST_IMPORT));
     }
 }

@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use runspore_host::disk::DiskFull;
 use runspore_host::progress::{Change, Happened, Progress};
 use runspore_host::Cancelled;
-use runspore_host::{Arrival, Arrow, AsyncStep, CutOff, CutOffReason, HeldSlot, StepState};
+use runspore_host::{
+    Arrival, Arrow, AsyncStep, Candidate, CutOff, CutOffReason, HeldSlot, StepState,
+};
 use runspore_types::model::{InvocationPhase, State, OUTCOME_EXHAUSTED, OUTCOME_OK};
 use runspore_types::store::{
     Disposition, EventRecord, InvocationStatus, InvocationView, RunCancel, RunKey, RunView,
@@ -35,13 +37,14 @@ pub fn exit_for(view: &RunView, step: Option<&AsyncStep>) -> u8 {
 
 /// The `step` object of `status`: the async step the run is at, or the step this spore
 /// lacks a capability for, or null. Never its input or token.
-fn step_json(step: Option<&AsyncStep>) -> Value {
+fn step_json(step: Option<&AsyncStep>, now_ms: u64) -> Value {
     step.map_or(Value::Null, |s| {
         let mut json = json!({"kind": s.kind, "actor": s.actor, "state": s.state.as_str(),
                "attempt": s.attempt, "holder": s.holder,
                "deadlineMs": s.deadline_ms.map(|d| d.to_string()),
                "leaseUntilMs": s.lease_until_ms.map(|l| l.to_string()),
-               "missing": s.missing});
+               "missing": s.missing,
+               "candidate": candidate_json(s.candidate.as_ref(), now_ms)});
         if let Some(message) = &s.waits {
             json["waiting"] = json!("person");
             json["message"] = json!(message);
@@ -50,7 +53,28 @@ fn step_json(step: Option<&AsyncStep>) -> Value {
     })
 }
 
-fn step_text(step: Option<&AsyncStep>) -> String {
+/// A held attempt's candidate answer: its outcome, when it was stored and how long ago,
+/// or null. Never its output.
+pub fn candidate_json(candidate: Option<&Candidate>, now_ms: u64) -> Value {
+    candidate.map_or(Value::Null, |c| {
+        let (since, lasted) = since_json(Some(c.at_ms), now_ms);
+        json!({"outcome": c.outcome, "sinceMs": since, "forMs": lasted})
+    })
+}
+
+/// The `candidate` line of a step's text, or nothing.
+pub fn candidate_text(candidate: Option<&Candidate>, now_ms: u64) -> String {
+    candidate.map_or_else(String::new, |c| {
+        format!(
+            "candidate  {} since {}, for {}\n",
+            c.outcome,
+            utc_text(c.at_ms),
+            duration_text(now_ms.saturating_sub(c.at_ms))
+        )
+    })
+}
+
+fn step_text(step: Option<&AsyncStep>, now_ms: u64) -> String {
     let Some(s) = step else {
         return String::new();
     };
@@ -74,7 +98,7 @@ fn step_text(step: Option<&AsyncStep>) -> String {
     if let Some(message) = &s.waits {
         text += &format!("waiting    for a person{}\n", told(message));
     }
-    text
+    text + &candidate_text(s.candidate.as_ref(), now_ms)
 }
 
 /// A watch's message after a colon, or nothing when it gave none.
@@ -150,7 +174,7 @@ impl Shown {
     /// The `status` object of spec/cli.md.
     pub fn json(&self, view: &RunView) -> Value {
         let mut json = status_json(view, self);
-        json["step"] = step_json(self.step.as_ref());
+        json["step"] = step_json(self.step.as_ref(), self.now_ms);
         json["children"] = self.children.json();
         json["paused"] = paused_json(self.paused_for(view));
         json
@@ -159,7 +183,7 @@ impl Shown {
     pub fn text(&self, view: &RunView) -> String {
         let mut text = paused_text(self.paused_for(view))
             + &status_text(view, self)
-            + &step_text(self.step.as_ref());
+            + &step_text(self.step.as_ref(), self.now_ms);
         if !self.children.rows.is_empty() {
             text += "children\n";
             text += &self.children.text(1, self.now_ms);

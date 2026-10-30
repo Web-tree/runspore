@@ -34,7 +34,8 @@ that wrote a database (§3), an attempt's holder handle and deadline, a renewal 
 at the deadline, the reason of an expiry, the full reference of an invocation's latest
 attempt, an invocation's node `params` in every claim, the run's parent, the run's
 `updatedAtMs`, `hold_attempt`, the result channel picked for each async action,
-`cancel_run` and the run's cancel record, and scenarios S15 to S34; everything else is
+`cancel_run` and the run's cancel record, an attempt's candidate answer with
+`set_candidate` and `commit_candidate`, and scenarios S15 to S35; everything else is
 as in 0.1.
 
 ## 2. Operations
@@ -225,6 +226,37 @@ replayed receipt returns the historical record and writes nothing.
 The record is the store's to keep and the host's to read. An attempt that ends keeps
 whatever record it had.
 
+### set_candidate (0.2)
+
+`set_candidate(attempt, candidate)` stores the attempt's **candidate answer**, a result
+it may end with later (host §2, Candidate answers), or discards it with null. A
+candidate is the canonical body of an `ActivityResult` of status `success` whose
+`invocationId`, `attemptId` and `attempt` match the attempt (`conflict` /
+`result.invalid` otherwise), at most 64 KiB (`quota` / `candidate.too-large`).
+
+Predicate: as `heartbeat`, the attempt is `running`, its ID, owner, and fence match, and
+now < `leaseUntilMs` (`stale` / `lease.lost` for all of these). Writes the candidate,
+replacing any, and `candidateAtMs = now`, or clears both; nothing else, the lease
+included. Returns `{held, candidateAtMs}`: whether the attempt held a candidate before
+the call, and the new candidate's time, null when cleared. A replayed receipt returns
+the historical value and writes nothing.
+
+### commit_candidate (0.2)
+
+`commit_candidate(attempt, otherwise)` ends a running attempt with the candidate it
+holds, or with `otherwise`, a result as `finish_attempt` takes it, when it holds none
+and `otherwise` is given.
+
+Predicates: those of `finish_attempt` for the attempt (`stale` / `lease.lost`), and for
+`otherwise` (`conflict` / `result.invalid`). Writes, when the attempt holds a candidate:
+what `finish_attempt` writes, with the candidate as the result; else, with `otherwise`:
+what `finish_attempt` writes with it; else nothing but the receipt. Returns
+`{committed, resultSequence}`: `candidate`, `otherwise` or null, and the sequence of
+the appended result, null when nothing was. It is one transaction, so the candidate it
+commits is the one held at that moment: one discarded or replaced before is never
+committed. A replayed receipt returns the historical value and writes nothing; a
+caller that wants to look again sends a new request ID.
+
 ### finish_attempt
 
 Predicates: `result.body` decodes as `ActivityResult` whose `invocationId`,
@@ -235,7 +267,9 @@ Predicates: `result.body` decodes as `ActivityResult` whose `invocationId`,
 Writes: the attempt becomes `finished` with the result stored; the invocation becomes
 `settled`; an event with ID `ids::event_for_attempt(attemptId)`, kind
 `activity.result`, and the result body is appended under the `append_event` ordering
-rules. Returns its sequence.
+rules. Returns its sequence. **0.2:** every operation that ends an attempt
+(`finish_attempt`, `commit_candidate`, `expire_attempt`, `cancel_run`) clears its
+candidate answer.
 
 ### expire_attempt
 
@@ -337,10 +371,13 @@ quarantine. Read views show status `cancelled` and the cancel record.
   nulls before its first claim, so a host can act on an attempt it did not claim. The
   reference is a credential: a host never prints the fence (host §2, Steps outside the worker).
   **0.2:** a run shows its parent, or null. **0.2:** an invocation shows its latest
-  attempt's `claimedAtMs`, or null before its first claim. **0.2:** a run shows
+  attempt's `claimedAtMs`, or null before its first claim. **0.2:** an invocation
+  shows its latest attempt's candidate answer and `candidateAtMs`, null when it holds
+  none, as it does once the attempt has ended. **0.2:** a run shows
   `updatedAtMs`, the store time of its latest change: its creation, an appended event
   (a signal, a resolution, a result or an expiry), a commit, a claim, a quarantine and
-  a release each set it to now; a renewal, `set_process` and `hold_attempt` leave it.
+  a release each set it to now; a renewal, `set_process`, `hold_attempt` and
+  `set_candidate` leave it.
   **0.2:** an invocation shows its input and its `params` as scheduled, the values
   every claim returns, so a host can probe or watch an attempt it did not claim (host
   §3, Async commands). **0.2:** a run shows its `resultChannels`, `{}` when it has
@@ -411,7 +448,9 @@ quarantine. Read views show status `cancelled` and the cancel record.
   run's parent, null for runs created before; version 8 to 9 adds when an attempt was
   claimed, null for attempts claimed before; version 9 to 10 adds the run's result
   channels, `{}` for runs created before; version 10 to 11 adds the run's cancel
-  record, null for runs created before; version 11 to 12 adds the `workers` table.
+  record, null for runs created before; version 11 to 12 adds the `workers` table;
+  version 12 to 13 adds an attempt's candidate answer and its time, null for attempts
+  claimed before.
   The refusals happen before any other read or write, so a refused file is left
   exactly as it was.
 
@@ -435,7 +474,8 @@ quarantine. Read views show status `cancelled` and the cancel record.
 Around the transaction commit of each mutating operation:
 `store.<op>.before-commit` and `store.<op>.after-commit`, with `<op>` one of
 `create-run`, `append-event`, `commit-turn`, `claim-attempt`, `heartbeat`,
-`set-process` (0.2), `finish-attempt`, `expire-attempt`, `cancel-run` (0.2). **0.2:** `store.upgrade.after-step`
+`set-process` (0.2), `finish-attempt`, `expire-attempt`, `cancel-run` (0.2),
+`set-candidate` (0.2), `commit-candidate` (0.2). **0.2:** `store.upgrade.after-step`
 after each upgrade step of a migrate, before the transaction commits. Use
 `runspore_types::failpoint::hit`.
 
@@ -480,6 +520,7 @@ Written once, generic over a store factory and a manual clock, in
 | S32 | `cancel_run` while an attempt is held with a holder handle and a deadline (0.2) | The value lists the attempt's reference and its holder; the holder's `heartbeat`, `hold_attempt` and `finish_attempt` are `lease.lost`; the attempt is no `Lease` item of `scan_due` once its deadline passes |
 | S33 | Two `cancel_run` calls with two request IDs, from two instances at once (0.2) | Both succeed; exactly one is `applied` and writes a receipt; the run has one cancel record and every running attempt one `expired` result |
 | S34 | `cancel_run` on a completed run, a failed run, and a run that does not exist (0.2) | The ended runs are `duplicate`, keep their status and get no cancel record and no receipt; the missing run is `run.not-found` |
+| S35 | `set_candidate` on a held attempt, again with another candidate, with null, and with a body that is not its success result; `commit_candidate` with a candidate held, with none and an `otherwise` failure, with none and no `otherwise`; two `commit_candidate` calls with two request IDs at once; `set_candidate` and `commit_candidate` after the attempt ended; `expire_attempt` and `cancel_run` with a candidate held (0.2) | `list_invocations` shows the candidate and its time, the second replacing the first, and null after null; the bad body is `result.invalid`, writing nothing; the commit appends the candidate as the attempt's `finished` result, or the `otherwise` failure, or nothing with `committed` null and the attempt still running; of the two commits exactly one appends a result and the other is `lease.lost`; the late calls are `lease.lost`; an expiry or a cancel appends its `expired` result, and no ended attempt shows a candidate |
 
 SQLite-specific, in the adapter crate:
 
@@ -504,3 +545,4 @@ SQLite-specific, in the adapter crate:
 | Q17 | Migrate a version 11 file, then migrate it again (0.2) | Upgraded to the current version with the `workers` table; the migration reports version 11 and its writer; its runs are kept; the second migrate changes nothing |
 | Q18 | Open a version 11 file without migrating (0.2) | `schema.needs-migrate`; the message names the version, the writer, this `spore` and `spore migrate`; the file is unchanged |
 | Q19 | Migrate a version 11 file while one attempt is held under a live lease by `worker-old` and one by an actor; again once the lease has passed (0.2) | `migrate.workers-live` naming `worker-old`, its step and run, not the actor; the file is unchanged; then migrated |
+| Q20 | Migrate a version 12 file while an attempt is held (0.2) | Upgraded to the current version; the attempt is kept with no candidate; `set_candidate` then stores one |
