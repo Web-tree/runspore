@@ -1,6 +1,6 @@
 //! Adapter-independent conformance suite for `runspore_types::store::Store`.
 //!
-//! Scenarios S01 to S34 of `spec/store.md` section 4. An adapter implements
+//! Scenarios S01 to S35 of `spec/store.md` section 4. An adapter implements
 //! [`StoreFactory`] and invokes [`store_conformance_tests!`].
 
 use std::collections::BTreeMap;
@@ -269,6 +269,41 @@ pub fn finish(attempt: &AttemptRef, request_id: &str, number: u32) -> FinishAtte
         ),
         attempt: attempt.clone(),
         result,
+    }
+}
+
+/// A successful `ActivityResult` for the attempt with `output`, as evidence.
+pub fn success_with(attempt: &AttemptRef, number: u32, output: Value) -> Evidence {
+    let mut result: ActivityResult = canonical::decode(&success(attempt, number).body).unwrap();
+    result.output = output;
+    Evidence::encode(&result).expect("result")
+}
+
+/// A `set_candidate` with `candidate`, or none.
+pub fn set_candidate(
+    attempt: &AttemptRef,
+    request_id: &str,
+    candidate: Option<Evidence>,
+) -> SetCandidate {
+    let digest = candidate.as_ref().map(|c| c.digest.clone());
+    SetCandidate {
+        mutation: mutation("set_candidate", request_id, json!([attempt, digest])),
+        attempt: attempt.clone(),
+        candidate,
+    }
+}
+
+/// A `commit_candidate` with `otherwise`, or none.
+pub fn commit_candidate(
+    attempt: &AttemptRef,
+    request_id: &str,
+    otherwise: Option<Evidence>,
+) -> CommitCandidate {
+    let digest = otherwise.as_ref().map(|c| c.digest.clone());
+    CommitCandidate {
+        mutation: mutation("commit_candidate", request_id, json!([attempt, digest])),
+        attempt: attempt.clone(),
+        otherwise,
     }
 }
 
@@ -2310,6 +2345,259 @@ pub async fn s34_cancel_ended(factory: &dyn StoreFactory) {
     );
 }
 
+/// The results the run's events hold, in order.
+fn results(events: &[StoredEvent]) -> Vec<ActivityResult> {
+    events
+        .iter()
+        .filter(|e| e.kind == "activity.result")
+        .map(|e| canonical::decode(&e.body).unwrap())
+        .collect()
+}
+
+/// S35: an attempt's candidate answer is stored, replaced and discarded; a commit ends
+/// the attempt with the candidate held at that moment, or with `otherwise`, or does
+/// nothing; two commits end it once; an ended attempt holds none and takes none.
+pub async fn s35_candidate(factory: &dyn StoreFactory) {
+    let w = World::new(factory, "s35").await;
+    let invocation = w.scheduled(0).await;
+    let attempt = w
+        .store()
+        .claim_attempt(claim_held(&w.key, "claim", &invocation, 1_000, None, 5_000))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    let first = success_with(&attempt, 1, json!("first"));
+    let set = w
+        .store()
+        .set_candidate(set_candidate(&attempt, "set-1", Some(first.clone())))
+        .await
+        .unwrap();
+    assert_eq!(
+        set.value,
+        CandidateSet {
+            held: false,
+            candidate_at_ms: Some(1_000)
+        }
+    );
+    let shown = &w.invocations().await[0];
+    assert_eq!(
+        (&shown.candidate, shown.candidate_at_ms),
+        (&Some(first.body.clone()), Some(1_000))
+    );
+    let lease = shown.lease_until_ms;
+
+    w.clock.set(1_100);
+    let second = success_with(&attempt, 1, json!("second"));
+    let replaced = w
+        .store()
+        .set_candidate(set_candidate(&attempt, "set-2", Some(second.clone())))
+        .await
+        .unwrap();
+    assert!(replaced.value.held, "it replaced one");
+    let shown = &w.invocations().await[0];
+    assert_eq!(
+        (
+            &shown.candidate,
+            shown.candidate_at_ms,
+            shown.lease_until_ms
+        ),
+        (&Some(second.body.clone()), Some(1_100), lease),
+        "the second replaces the first and the lease is not extended"
+    );
+
+    // A body that is not this attempt's success result writes nothing.
+    let mut failed: ActivityResult = canonical::decode(&second.body).unwrap();
+    failed.status = AttemptStatus::Failure;
+    let mut other: ActivityResult = canonical::decode(&second.body).unwrap();
+    other.attempt_id = "att_other".into();
+    for bad in [failed, other] {
+        let r = w
+            .store()
+            .set_candidate(set_candidate(
+                &attempt,
+                "set-bad",
+                Some(Evidence::encode(&bad).unwrap()),
+            ))
+            .await;
+        assert_eq!(
+            failure(r),
+            (StoreFailureKind::Conflict, "result.invalid".into())
+        );
+    }
+    assert_eq!(
+        w.invocations().await[0].candidate,
+        Some(second.body.clone())
+    );
+
+    let cleared = w
+        .store()
+        .set_candidate(set_candidate(&attempt, "clear", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        cleared.value,
+        CandidateSet {
+            held: true,
+            candidate_at_ms: None
+        }
+    );
+    let shown = &w.invocations().await[0];
+    assert_eq!((&shown.candidate, shown.candidate_at_ms), (&None, None));
+
+    // With none held and no `otherwise`, a commit does nothing.
+    let nothing = w
+        .store()
+        .commit_candidate(commit_candidate(&attempt, "commit-none", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        nothing.value,
+        CandidateCommitted {
+            committed: None,
+            result_sequence: None
+        }
+    );
+    assert!(results(&w.events().await).is_empty());
+    assert_eq!(w.invocations().await[0].status, InvocationStatus::Running);
+
+    w.store()
+        .set_candidate(set_candidate(&attempt, "set-3", Some(first.clone())))
+        .await
+        .unwrap();
+    w.store()
+        .set_candidate(set_candidate(&attempt, "set-4", Some(second.clone())))
+        .await
+        .unwrap();
+    let mut no_answer: ActivityResult = canonical::decode(&second.body).unwrap();
+    no_answer.status = AttemptStatus::Failure;
+    no_answer.output = Value::Null;
+    let no_answer = Evidence::encode(&no_answer).unwrap();
+    let committed = w
+        .store()
+        .commit_candidate(commit_candidate(
+            &attempt,
+            "commit",
+            Some(no_answer.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.value.committed, Some(Committed::Candidate));
+    let found = results(&w.events().await);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].output, json!("second"), "the candidate held then");
+    let shown = &w.invocations().await[0];
+    assert_eq!(shown.status, InvocationStatus::Settled);
+    assert_eq!((&shown.candidate, shown.candidate_at_ms), (&None, None));
+    for r in [
+        failure(
+            w.store()
+                .set_candidate(set_candidate(&attempt, "set-late", Some(first.clone())))
+                .await,
+        ),
+        failure(
+            w.store()
+                .commit_candidate(commit_candidate(&attempt, "commit-late", None))
+                .await,
+        ),
+    ] {
+        assert_eq!(r, (StoreFailureKind::Stale, "lease.lost".into()));
+    }
+
+    // With none held, `otherwise` ends the attempt.
+    let w = World::new(factory, "s35-otherwise").await;
+    let invocation = w.scheduled(0).await;
+    let attempt = w
+        .store()
+        .claim_attempt(claim_held(&w.key, "claim", &invocation, 1_000, None, 5_000))
+        .await
+        .unwrap()
+        .value
+        .attempt;
+    let mut no_answer = success(&attempt, 1);
+    let mut result: ActivityResult = canonical::decode(&no_answer.body).unwrap();
+    result.status = AttemptStatus::Failure;
+    no_answer = Evidence::encode(&result).unwrap();
+    let committed = w
+        .store()
+        .commit_candidate(commit_candidate(&attempt, "commit", Some(no_answer)))
+        .await
+        .unwrap();
+    assert_eq!(committed.value.committed, Some(Committed::Otherwise));
+    assert_eq!(results(&w.events().await)[0].status, AttemptStatus::Failure);
+
+    // Two commits at once, from two instances: one result.
+    for n in 0..RACES {
+        let w = World::new(factory, &format!("s35-race-{n}")).await;
+        let invocation = w.scheduled(0).await;
+        let attempt = w
+            .store()
+            .claim_attempt(claim_held(&w.key, "claim", &invocation, 1_000, None, 5_000))
+            .await
+            .unwrap()
+            .value
+            .attempt;
+        w.store()
+            .set_candidate(set_candidate(&attempt, "set", Some(success(&attempt, 1))))
+            .await
+            .unwrap();
+        let (a, b) = (w.fixture.store.clone(), w.fixture.second(w.clock.clone()));
+        let (ca, cb) = (
+            commit_candidate(&attempt, "commit-a", None),
+            commit_candidate(&attempt, "commit-b", None),
+        );
+        let (ra, rb) = race(async move { a.commit_candidate(ca).await }, async move {
+            b.commit_candidate(cb).await
+        })
+        .await;
+        let won = [&ra, &rb].iter().filter(|r| r.is_ok()).count();
+        assert_eq!(won, 1, "exactly one commit applies: {ra:?} {rb:?}");
+        for r in [ra, rb].into_iter().filter(Result::is_err) {
+            assert_eq!(failure(r), (StoreFailureKind::Stale, "lease.lost".into()));
+        }
+        assert_eq!(results(&w.events().await).len(), 1);
+    }
+
+    // An expiry and a cancel commit nothing, and leave no candidate.
+    for how in ["abandon", "cancel"] {
+        let w = World::new(factory, &format!("s35-{how}")).await;
+        let invocation = w.scheduled(0).await;
+        let attempt = w
+            .store()
+            .claim_attempt(claim_held(&w.key, "claim", &invocation, 1_000, None, 5_000))
+            .await
+            .unwrap()
+            .value
+            .attempt;
+        w.store()
+            .set_candidate(set_candidate(&attempt, "set", Some(success(&attempt, 1))))
+            .await
+            .unwrap();
+        match how {
+            "abandon" => {
+                w.store()
+                    .expire_attempt(expire_for(&attempt, "abandon", ExpireReason::Abandoned))
+                    .await
+                    .unwrap();
+            }
+            _ => {
+                w.store()
+                    .cancel_run(cancel(&w.key, "cancel", None))
+                    .await
+                    .unwrap();
+            }
+        }
+        assert_eq!(expired_results(&w.events().await), 1, "{how}");
+        assert_eq!(results(&w.events().await).len(), 1, "{how}");
+        let shown = &w.invocations().await[0];
+        assert_eq!(
+            (&shown.candidate, shown.candidate_at_ms),
+            (&None, None),
+            "{how}"
+        );
+    }
+}
+
 /// Expands to one `#[tokio::test]` per scenario, run against `$factory`.
 #[macro_export]
 macro_rules! store_conformance_tests {
@@ -2324,7 +2612,7 @@ macro_rules! store_conformance_tests {
             s22_params s23_parent s24_claimed_at s25_updated_at
             s26_hold_attempt s27_result_channels s28_cancel_waiting s29_cancel_stuck
             s30_cancel_quarantined s31_cancel_running s32_cancel_held s33_cancel_race
-            s34_cancel_ended);
+            s34_cancel_ended s35_candidate);
     };
     (@each $factory:expr; $($name:ident)*) => {
         $(

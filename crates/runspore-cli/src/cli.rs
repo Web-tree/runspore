@@ -265,6 +265,18 @@ pub enum StepCommand {
     },
     /// Free the run's held async step at once.
     Abandon { run_id: String },
+    /// Check an answer as `complete` does and hold it as the attempt's candidate,
+    /// without completing the step: it completes the step once the action's probe says
+    /// the work has stopped.
+    Propose {
+        token: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Discard the attempt's candidate answer.
+    Withdraw { token: String },
     /// Describe the step a run is at, the only unfinished one by default, without
     /// claiming or changing anything.
     Show { run_id: Option<String> },
@@ -1775,6 +1787,7 @@ async fn step_show(engine: &Engine, db: &Path, run: Option<&str>) -> Result<Outp
         "outputSchemas": step.output_schemas,
         "files": path(&step.files), "instructions": path(&step.instructions),
         "from": from,
+        "candidate": view::candidate_json(step.candidate.as_ref(), now_ms()),
     });
     let mut text = format!(
         "step       {} ({}, {}) of run {}\n",
@@ -1795,6 +1808,7 @@ async fn step_show(engine: &Engine, db: &Path, run: Option<&str>) -> Result<Outp
             None => format!("{label:<10} {outcome}\n"),
         };
     }
+    text += &view::candidate_text(step.candidate.as_ref(), now_ms());
     if let Some(files) = &step.files {
         text += &format!("files      {}\n", files.display());
     }
@@ -1887,6 +1901,44 @@ async fn step(engine: &Engine, command: &StepCommand) -> Result<Output, Fail> {
         StepCommand::Abandon { run_id } => {
             let key = existing(engine, run_id).await?.key;
             reported(engine.abandon_step(&key).await?)
+        }
+        StepCommand::Propose {
+            token,
+            outcome,
+            output,
+        } => {
+            let output = output
+                .as_deref()
+                .map(|o| parse_json("--output", o))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let proposed = engine.propose_step(token, outcome, output).await?;
+            let candidate = &proposed.candidate;
+            done(
+                json!({"runId": proposed.key.run, "invocationId": proposed.invocation_id,
+                       "attempt": proposed.attempt,
+                       "candidate": {"outcome": candidate.outcome,
+                                     "sinceMs": candidate.at_ms.to_string()}}),
+                format!(
+                    "step {} attempt {} holds candidate {}",
+                    proposed.invocation_id, proposed.attempt, candidate.outcome
+                ),
+            )
+        }
+        StepCommand::Withdraw { token } => {
+            let withdrawn = engine.withdraw_step(token).await?;
+            let text = match withdrawn.withdrawn {
+                true => "withdrew its candidate",
+                false => "held no candidate",
+            };
+            done(
+                json!({"runId": withdrawn.key.run, "invocationId": withdrawn.invocation_id,
+                       "attempt": withdrawn.attempt, "withdrawn": withdrawn.withdrawn}),
+                format!(
+                    "step {} attempt {} {text}",
+                    withdrawn.invocation_id, withdrawn.attempt
+                ),
+            )
         }
         StepCommand::Show { .. } => unreachable!("handled by step_show"),
     }

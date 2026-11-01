@@ -167,7 +167,7 @@ pub struct Action {
     #[schemars(with = "Actor")]
     pub actor: Option<String>,
     /// `component`: the step runner, a WebAssembly component of world
-    /// `runspore:runner/runner@0.1.0` in the folder, sealed into the workflow artifact.
+    /// `runspore:runner/runner@0.1.1` in the folder, sealed into the workflow artifact.
     #[serde(default)]
     #[schemars(with = "FileRef")]
     pub module: Option<String>,
@@ -175,11 +175,17 @@ pub struct Action {
     #[serde(default)]
     #[schemars(with = "Grants")]
     pub grants: Option<Grants>,
+    /// `component`: whether the programs the step runner starts get the attempt's
+    /// token as `RUNSPORE_TOKEN`. Default true; with false the runner hands it on
+    /// itself, such as in a file it writes.
+    #[serde(default)]
+    #[schemars(with = "bool")]
+    pub pass_token: Option<bool>,
 }
 
 /// What a step runner may do, by kind. Each list is optional, default empty.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Grants {
     /// The programs it may start, each as `argv[0]`: a bare name looked up on the
     /// `PATH`, an absolute path, or `./<path>`, a file of the folder bundled with the
@@ -192,10 +198,16 @@ pub struct Grants {
     #[serde(default)]
     #[schemars(with = "Vec<Grant>")]
     pub sockets: Option<Vec<String>>,
-    /// The folders it may read, with everything below them, written as sockets are.
+    /// The folders it may read, with everything below them, written as sockets are;
+    /// `$RUNSPORE_WORK_DIR` is the step's work folder.
     #[serde(default)]
     #[schemars(with = "Vec<Grant>")]
     pub folders: Option<Vec<String>>,
+    /// The folders it may write files into, with everything below them, written as
+    /// `folders` are. Writing grants no reading.
+    #[serde(default)]
+    #[schemars(with = "Vec<Grant>")]
+    pub write_folders: Option<Vec<String>>,
 }
 
 /// One thing a step runner is granted, as it is written.

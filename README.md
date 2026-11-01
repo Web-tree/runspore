@@ -158,6 +158,12 @@ Inside a repository, `spore init` makes the project folder `.spore/`, which hold
 - [Watch a run, and get told when it needs you](docs/guide/watch-a-run.md): `spore worker` prints each change of each run, `spore list` shows the runs as a tree, `spore status` says what a run waits for and how to move it on, and `onIntervention` sends a notification when a run stops for a person or fails.
 - [A Claude step with plain spore](docs/guide/claude-step.md): a workflow step done by Claude Code, with nothing installed but `spore` and `claude`.
 
+## Spore Workflow Language (SWL)
+
+The independent [Spore Workflow Language specification](https://github.com/Web-tree/spore-workflow-language) is stewarded under WebTree → Runspore → SWL. Read its [layered specification on the Runspore website](https://runspore.com/docs) or directly in the public SWL repository. It defines interoperable workflow interfaces, notation, execution, invocation, and optional state/storage contracts without prescribing this runtime.
+
+**Compatibility note:** SWL is a working draft. Runspore's currently supported authoring dialect and package are implementation-specific; the separate SWL definition and notation are not yet claimed as directly executable by `spore`. A documented adapter and shared conformance tests are required before making that claim.
+
 ## Documentation
 
 Read the [architecture index](docs/README.md) and [delivery plan](docs/17-delivery-plan.md). `docs/` is the target architecture: Rust, Node, Bun, browser and Cloudflare profiles; typed graphs; effects; SQLite and PostgreSQL adapters; security; OpenTelemetry. [spec/](spec/README.md) is what `spore` does today, and wins where the two differ. The vocabulary is in [CONTEXT.md](CONTEXT.md). The Claude Code integration is the `ml-workflow` plugin in the `max-skills` repository, specified there.

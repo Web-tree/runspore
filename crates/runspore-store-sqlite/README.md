@@ -14,7 +14,7 @@ on one SQLite file. `SqliteStore::open(path)` uses `SystemClock`;
 - Failpoints `store.<op>.before-commit` and `store.<op>.after-commit` wrap the commit
   of the nine operations named in spec section 3.
 
-## Schema (version 12, in `PRAGMA user_version`)
+## Schema (version 13, in `PRAGMA user_version`)
 
 An empty file is initialized from `src/schema.sql`, and `meta` records the crate
 version that wrote the schema (`writer`). Opening a file an earlier 0.2 `spore` wrote
@@ -29,7 +29,8 @@ owned by an unregistered `worker-…` ID holds a live lease. The steps: version 
 `invocations.params`, version 7 to 8 adds `runs.parent_run_id` and
 `runs.parent_node_id`, version 8 to 9 adds `attempts.claimed_at_ms`, version 9 to 10
 adds `runs.result_channels`, version 10 to 11 adds `runs.cancel_reason`,
-`runs.cancel_at_ms` and `runs.cancel_request_id`, version 11 to 12 adds `workers`.
+`runs.cancel_at_ms` and `runs.cancel_request_id`, version 11 to 12 adds `workers`,
+version 12 to 13 adds `attempts.candidate` and `attempts.candidate_at_ms`.
 Two more files are refused with kind
 `incompatible` before anything else is read or written: version 1, which `spore` 0.1
 wrote, as `schema.too-old`, and a newer version as `schema.too-new`; both messages
@@ -45,7 +46,7 @@ name the version that wrote the file and the fix (spec/store.md §3).
 | `transitions` | `(tenant, run_id, revision)`; unique `(tenant, run_id, consumed_sequence)` | one commit per revision and per consumed event |
 | `commands` | `(tenant, run_id, command_id)` | a command ID exists once per run (I3) |
 | `invocations` | `(tenant, run_id, invocation_id)` | an invocation is scheduled once; `params` holds the node's canonical evaluated params, or null when it has none |
-| `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null; `holder` the canonical holder handle or null; `deadline_ms` the deadline `lease_until_ms` never passes, or null |
+| `attempts` | `(tenant, run_id, attempt_id)`; unique `(tenant, run_id, invocation_id, attempt_number)`; unique `(tenant, run_id, fence)` | one attempt per number; a fence is never reused within a run; `process` holds the canonical process record or null; `holder` the canonical holder handle or null; `deadline_ms` the deadline `lease_until_ms` never passes, or null; `candidate` the canonical `success` result body of its candidate answer and `candidate_at_ms` when it was stored, both null when it holds none and once it has ended |
 | `receipts` | `(tenant, run_id, request_id)` | one applied mutation per request ID |
 | `audit` | `audit_id` | append-only; `kind` is `late-evidence` or `attempt.expired` |
 | `workers` | `worker_id` | one row per worker that uses the file: its `spore` version, host, process ID, last heartbeat (`beat_at_ms`) and the time it stays fresh until (`until_ms`); written by `beat_worker` with `synchronous = OFF`, since the record is advisory and its fsync would hold the write lock while workers renew leases; removed by `end_worker` |

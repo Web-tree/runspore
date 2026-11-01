@@ -71,6 +71,45 @@ pub struct AsyncStep {
     /// While held: the message of the latest `needs` line a watch this engine runs
     /// printed, when the holder waits for a person (empty when the line had none).
     pub waits: Option<String>,
+    /// While held: the candidate answer the attempt holds.
+    pub candidate: Option<Candidate>,
+}
+
+/// A held attempt's candidate answer as `status` shows it: its outcome and when it was
+/// stored, never its output (spec/host.md §2, Candidate answers).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub outcome: String,
+    pub at_ms: u64,
+}
+
+impl Candidate {
+    /// The candidate an invocation's latest attempt holds, if any.
+    fn of(invocation: &InvocationView) -> Option<Self> {
+        let result: ActivityResult = canonical::decode(invocation.candidate.as_deref()?).ok()?;
+        Some(Self {
+            outcome: result.outcome?,
+            at_ms: invocation.candidate_at_ms?,
+        })
+    }
+}
+
+/// A candidate answer the store took.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepProposed {
+    pub key: RunKey,
+    pub invocation_id: String,
+    pub attempt: u32,
+    pub candidate: Candidate,
+}
+
+/// A withdrawal: whether the attempt held a candidate answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepWithdrawn {
+    pub key: RunKey,
+    pub invocation_id: String,
+    pub attempt: u32,
+    pub withdrawn: bool,
 }
 
 /// What an actor gets from a claim: everything needed to do the step.
@@ -138,6 +177,8 @@ pub struct StepDescription {
     /// The arrow that brought the run to the node, `None` at the start node's first
     /// activation.
     pub from: Option<Arrow>,
+    /// The candidate answer the step's held attempt holds.
+    pub candidate: Option<Candidate>,
 }
 
 /// What a claim hands the actor from the package.
@@ -157,6 +198,50 @@ struct Held {
     outcomes: Vec<String>,
     schemas: Value,
     deadline_ms: Option<u64>,
+}
+
+/// The `success` result an actor reports for `held`: an outcome the action declares and
+/// output in the canonical domain that fits the outcome's schema, or the refusal.
+fn success(held: &Held, outcome: &str, output: Value) -> Result<ActivityResult, HostError> {
+    if !held.outcomes.iter().any(|o| o == outcome) {
+        return Err(HostError::invalid(
+            "step.undeclared-outcome",
+            format!(
+                "step {} declares the outcomes {}, not \"{outcome}\"",
+                held.node_id,
+                held.outcomes.join(", ")
+            ),
+        ));
+    }
+    canonical::to_vec(&output)
+        .map_err(|e| HostError::invalid("step.output-not-canonical", e.to_string()))?;
+    if let Some(schema) = held.schemas.get(outcome) {
+        runspore_schema::fit(outcome, schema, &output).map_err(HostError::OutputInvalid)?;
+    }
+    Ok(ActivityResult {
+        invocation_id: held.attempt.invocation_id.clone(),
+        attempt_id: held.attempt.attempt_id.clone(),
+        attempt: held.number,
+        status: AttemptStatus::Success,
+        outcome: Some(outcome.to_string()),
+        output,
+        error: None,
+        retryable: true,
+    })
+}
+
+/// `evidence`, refused when its body is over 64 KiB.
+fn sized(evidence: Evidence) -> Result<Evidence, HostError> {
+    if evidence.body.len() > MAX_RESULT_BYTES {
+        return Err(HostError::invalid(
+            "step.output-too-large",
+            format!(
+                "the result is {} bytes; at most {MAX_RESULT_BYTES}",
+                evidence.body.len()
+            ),
+        ));
+    }
+    Ok(evidence)
 }
 
 /// Step files that could not be made, under the code a dispatch would quarantine with.
@@ -230,6 +315,7 @@ impl Engine {
         else {
             return Ok(None);
         };
+        let candidate = Candidate::of(&invocation);
         let mut step = AsyncStep {
             kind: kind.to_string(),
             actor,
@@ -243,6 +329,7 @@ impl Engine {
             lease_until_ms: None,
             missing: None,
             waits: None,
+            candidate: None,
         };
         // An async command is held only once its start has handed over: a pending one
         // waits for a worker, and a running one without a deadline is still starting
@@ -271,6 +358,7 @@ impl Engine {
                     .and_then(|bytes| canonical::parse(bytes).ok());
                 step.deadline_ms = invocation.deadline_ms;
                 step.lease_until_ms = invocation.lease_until_ms;
+                step.candidate = candidate;
             }
             // Its result is in and not yet applied: the run is about to move on.
             InvocationStatus::Settled => return Ok(None),
@@ -326,6 +414,15 @@ impl Engine {
             .await
             .map_err(unmade)?;
         let files = made.map(|(files, _lock)| files);
+        let candidate = match kind {
+            "activity" => self
+                .list_invocations(&view.key)
+                .await?
+                .iter()
+                .filter(|i| i.node_id == position.node_id && i.status == InvocationStatus::Running)
+                .find_map(Candidate::of),
+            _ => None,
+        };
         Ok(Some(StepDescription {
             key: view.key.clone(),
             node_id: position.node_id,
@@ -341,6 +438,7 @@ impl Engine {
             files: files.as_ref().map(|f| f.dir.clone()),
             instructions: files.and_then(|f| f.instructions),
             from: self.arrival(view).await?.from,
+            candidate,
         }))
     }
 
@@ -404,7 +502,7 @@ impl Engine {
         if let Some(run) = run {
             // A held step whose holder is gone frees the run's step for this claim.
             let key = self.key(run);
-            if self.probe_step(&key).await? == Some(Answer::Dead) {
+            if self.probe_step(&key).await?.is_some_and(Answer::ends) {
                 self.inner
                     .coordinate(&key, &mut TickReport::default())
                     .await?;
@@ -639,32 +737,80 @@ impl Engine {
         output: Value,
     ) -> Result<StepReport, HostError> {
         let held = self.held(token).await?;
-        if !held.outcomes.iter().any(|o| o == outcome) {
-            return Err(HostError::invalid(
-                "step.undeclared-outcome",
-                format!(
-                    "step {} declares the outcomes {}, not \"{outcome}\"",
-                    held.node_id,
-                    held.outcomes.join(", ")
-                ),
-            ));
-        }
-        canonical::to_vec(&output)
-            .map_err(|e| HostError::invalid("step.output-not-canonical", e.to_string()))?;
-        if let Some(schema) = held.schemas.get(outcome) {
-            runspore_schema::fit(outcome, schema, &output).map_err(HostError::OutputInvalid)?;
-        }
-        let result = ActivityResult {
-            invocation_id: held.attempt.invocation_id.clone(),
-            attempt_id: held.attempt.attempt_id.clone(),
-            attempt: held.number,
-            status: AttemptStatus::Success,
-            outcome: Some(outcome.to_string()),
-            output,
-            error: None,
-            retryable: true,
-        };
+        let result = success(&held, outcome, output)?;
         self.report(held, result).await
+    }
+
+    /// Checks an answer as `complete_step` does and holds it as the attempt's candidate
+    /// answer, replacing the one it held, without ending the attempt.
+    pub async fn propose_step(
+        &self,
+        token: &str,
+        outcome: &str,
+        output: Value,
+    ) -> Result<StepProposed, HostError> {
+        let held = self.held(token).await?;
+        let candidate = sized(evidence(&success(&held, outcome, output)?)?)?;
+        let attempt = &held.attempt;
+        let request = SetCandidate {
+            mutation: mutation(
+                "set_candidate",
+                self.inner
+                    .unique(&format!("propose/{}", attempt.attempt_id)),
+                json!([attempt, candidate.digest]),
+            )?,
+            attempt: attempt.clone(),
+            candidate: Some(candidate),
+        };
+        let set = self.set_candidate(request).await?;
+        Ok(StepProposed {
+            key: attempt.key.clone(),
+            invocation_id: attempt.invocation_id.clone(),
+            attempt: held.number,
+            candidate: Candidate {
+                outcome: outcome.to_string(),
+                at_ms: set.candidate_at_ms.unwrap_or_default(),
+            },
+        })
+    }
+
+    /// Discards the attempt's candidate answer; without one it changes nothing.
+    pub async fn withdraw_step(&self, token: &str) -> Result<StepWithdrawn, HostError> {
+        let held = self.held(token).await?;
+        let attempt = &held.attempt;
+        let request = SetCandidate {
+            mutation: mutation(
+                "set_candidate",
+                self.inner
+                    .unique(&format!("withdraw/{}", attempt.attempt_id)),
+                json!([attempt, Value::Null]),
+            )?,
+            attempt: attempt.clone(),
+            candidate: None,
+        };
+        let set = self.set_candidate(request).await?;
+        Ok(StepWithdrawn {
+            key: attempt.key.clone(),
+            invocation_id: attempt.invocation_id.clone(),
+            attempt: held.number,
+            withdrawn: set.held,
+        })
+    }
+
+    /// `set_candidate`; an attempt that has ended is `lease.lost`, and nothing is kept.
+    async fn set_candidate(&self, request: SetCandidate) -> Result<CandidateSet, HostError> {
+        match retry(true, || self.inner.store.set_candidate(request.clone())).await {
+            Ok(receipt) => Ok(receipt.value),
+            Err(f) if f.kind == StoreFailureKind::Stale => {
+                Err(HostError::Store(StoreFailure::new(
+                    f.kind,
+                    "lease.lost",
+                    "the attempt has already ended (committed, reported, expired, abandoned or \
+                 cancelled)",
+                )))
+            }
+            Err(f) => Err(f.into()),
+        }
     }
 
     /// Reports the step failed. `retryable` lets the kernel try again up to the
@@ -705,16 +851,7 @@ impl Engine {
     /// `finish_attempt` with an actor's result; one that lost to an expiry, an abandon
     /// or an earlier report is kept as late evidence and refused with `lease.lost`.
     async fn report(&self, held: Held, result: ActivityResult) -> Result<StepReport, HostError> {
-        let evidence = evidence(&result)?;
-        if evidence.body.len() > MAX_RESULT_BYTES {
-            return Err(HostError::invalid(
-                "step.output-too-large",
-                format!(
-                    "the result is {} bytes; at most {MAX_RESULT_BYTES}",
-                    evidence.body.len()
-                ),
-            ));
-        }
+        let evidence = sized(evidence(&result)?)?;
         let attempt = held.attempt;
         let request = FinishAttempt {
             mutation: mutation(

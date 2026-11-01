@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/Web-tree/runspore/compare/v0.8.0...v0.9.0) (2026-11-01)
+
+
+### Features
+
+* a held step holds a checked candidate answer, committed when its probe says the work stopped ([#293](https://github.com/Web-tree/runspore/issues/293)) ([fa5a05e](https://github.com/Web-tree/runspore/commit/fa5a05ebb898c93702e28aa586c00e74cab84c0c))
+
+## [0.8.0](https://github.com/Web-tree/runspore/compare/v0.7.2...v0.8.0) (2026-11-01)
+
+
+### Features
+
+* step runners write files into granted folders and start programs without the token ([#291](https://github.com/Web-tree/runspore/issues/291)) ([9191f99](https://github.com/Web-tree/runspore/commit/9191f99dc45942e203a1233cfd078197b328d7e0))
+
 ## [0.7.2](https://github.com/Web-tree/runspore/compare/v0.7.1...v0.7.2) (2026-10-25)
 
 

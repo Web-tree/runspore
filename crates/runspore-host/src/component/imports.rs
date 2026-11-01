@@ -3,10 +3,12 @@
 //! the call's deadline, or after the attempt was told to stop traps the runner; the
 //! store data keeps why, so the call ends with it whatever the runner does next.
 
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -25,7 +27,7 @@ use crate::process::{self, Seen};
 
 /// What `request` reads at most.
 const MAX_REPLY: usize = 1024 * 1024;
-/// What `read-file` reads at most.
+/// What `read-file` reads and `write-file` writes at most.
 const MAX_FILE: u64 = 16 * 1024 * 1024;
 /// How often a `sleep` looks whether the attempt was told to stop.
 const SLEEP_SLICE: Duration = Duration::from_millis(50);
@@ -48,6 +50,8 @@ pub(crate) struct State {
     pub deadline: Instant,
     /// Whether this is `start`: its programs get the attempt's token.
     pub start: bool,
+    /// Whether the action passes the token on to the programs `start` starts.
+    pub pass_token: bool,
     pub halt: Option<Halt>,
     pub max_memory_bytes: usize,
     /// Whether memory growth was ever refused.
@@ -143,9 +147,12 @@ impl Host for State {
         }
         match (&self.ctx.token, self.start) {
             (Some(token), true) => {
-                child
-                    .env("RUNSPORE_TOKEN", token)
-                    .env("RUNSPORE_RESULT_CHANNEL", &self.ctx.result_channel);
+                child.env("RUNSPORE_RESULT_CHANNEL", &self.ctx.result_channel);
+                if self.pass_token {
+                    child.env("RUNSPORE_TOKEN", token);
+                } else {
+                    child.env_remove("RUNSPORE_TOKEN");
+                }
             }
             _ => {
                 child
@@ -304,6 +311,146 @@ impl Host for State {
             Ok(names)
         };
         Ok(list())
+    }
+
+    fn write_file(&mut self, path: String, bytes: Vec<u8>) -> wasmtime::Result<Result<(), String>> {
+        self.live()?;
+        let granted = self.grants.write_file(&path, &self.places);
+        let file = self.granted(granted)?;
+        if bytes.len() as u64 > MAX_FILE {
+            return Ok(Err(format!("`{path}` would be over 16 MiB")));
+        }
+        Ok(replace(&file, &bytes).map_err(|e| format!("writing `{path}`: {e}")))
+    }
+}
+
+/// Writes `bytes` to a new file of mode `0600` beside `file`, then renames it over
+/// `file`, so a reader sees the old file or the new one and never part of one.
+fn replace(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let folder = file.parent().unwrap_or(Path::new("."));
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut tries = 0u32;
+    let (temp, mut out) = loop {
+        let mut salt = [0u8; 8];
+        getrandom::fill(&mut salt).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let salt: String = salt.iter().map(|b| format!("{b:02x}")).collect();
+        let temp = folder.join(format!(".{name}.{salt}.tmp"));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp)
+        {
+            Ok(out) => break (temp, out),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && tries < 8 => tries += 1,
+            Err(e) => return Err(e),
+        }
+    };
+    let written = out
+        .write_all(bytes)
+        .and_then(|()| out.sync_all())
+        .and_then(|()| std::fs::rename(&temp, file));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written?;
+    // The rename is durable once the folder is.
+    if let Ok(dir) = std::fs::File::open(folder) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
+/// The `host` of the 0.1 track: the same calls, its own copies of the same types.
+mod v0_1 {
+    use super::super::runspore::runner::host as new;
+    use super::super::v0_1::runspore::runner::host as old;
+    use super::State;
+
+    fn process(p: old::Process) -> new::Process {
+        new::Process {
+            program: p.program,
+            host: p.host,
+            boot: p.boot,
+            pgid: p.pgid,
+            started: p.started,
+        }
+    }
+
+    impl old::Host for State {
+        fn start_process(
+            &mut self,
+            spawn: old::Spawn,
+        ) -> wasmtime::Result<Result<old::Process, String>> {
+            let spawn = new::Spawn {
+                argv: spawn.argv,
+                cwd: spawn.cwd,
+                env: spawn.env,
+            };
+            Ok(
+                new::Host::start_process(self, spawn)?.map(|p| old::Process {
+                    program: p.program,
+                    host: p.host,
+                    boot: p.boot,
+                    pgid: p.pgid,
+                    started: p.started,
+                }),
+            )
+        }
+
+        fn process_alive(&mut self, p: old::Process) -> wasmtime::Result<old::Liveness> {
+            Ok(match new::Host::process_alive(self, process(p))? {
+                new::Liveness::Alive => old::Liveness::Alive,
+                new::Liveness::Dead => old::Liveness::Dead,
+                new::Liveness::Unknown => old::Liveness::Unknown,
+            })
+        }
+
+        fn signal_process(
+            &mut self,
+            p: old::Process,
+            signal: old::Signal,
+        ) -> wasmtime::Result<Result<bool, String>> {
+            let signal = match signal {
+                old::Signal::Term => new::Signal::Term,
+                old::Signal::Kill => new::Signal::Kill,
+                old::Signal::Interrupt => new::Signal::Interrupt,
+                old::Signal::Hangup => new::Signal::Hangup,
+            };
+            new::Host::signal_process(self, process(p), signal)
+        }
+
+        fn request(
+            &mut self,
+            socket: String,
+            body: Vec<u8>,
+            timeout_ms: u32,
+        ) -> wasmtime::Result<Result<Vec<u8>, String>> {
+            new::Host::request(self, socket, body, timeout_ms)
+        }
+
+        fn sleep(&mut self, ms: u32) -> wasmtime::Result<()> {
+            new::Host::sleep(self, ms)
+        }
+
+        fn read_file(&mut self, path: String) -> wasmtime::Result<Result<Vec<u8>, String>> {
+            new::Host::read_file(self, path)
+        }
+
+        fn list_folder(&mut self, path: String) -> wasmtime::Result<Result<Vec<String>, String>> {
+            new::Host::list_folder(self, path)
+        }
+
+        fn write_file(
+            &mut self,
+            path: String,
+            bytes: Vec<u8>,
+        ) -> wasmtime::Result<Result<(), String>> {
+            new::Host::write_file(self, path, bytes)
+        }
     }
 }
 
