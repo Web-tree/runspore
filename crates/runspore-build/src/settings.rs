@@ -733,7 +733,7 @@ fn diagnose(
             expected_value: options,
         } => {
             broken.add(at);
-            let choices: Vec<String> = match options {
+            let choices: Vec<String> = match &**options {
                 Value::Array(list) => list
                     .iter()
                     .filter_map(|v| v.as_str().map(String::from))
