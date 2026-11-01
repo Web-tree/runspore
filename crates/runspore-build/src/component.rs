@@ -10,8 +10,8 @@
 
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, ExportKind, ExportSection, Function,
-    FunctionSection, GlobalSection, GlobalType, Instruction as I, MemArg, MemorySection,
-    MemoryType, Module, TypeSection, ValType,
+    FunctionSection, GlobalSection, GlobalType, Instruction as I, MemArg, MemArgTarget,
+    MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 use wit_component::{ComponentEncoder, StringEncoding};
 use wit_parser::Resolve;
@@ -134,7 +134,8 @@ fn mem(offset: u64, align: u32) -> MemArg {
     MemArg {
         offset,
         align,
-        memory_index: 0,
+        target: MemArgTarget::Memory(0),
+        ordering: None,
     }
 }
 
