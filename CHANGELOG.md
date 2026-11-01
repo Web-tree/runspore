@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/Web-tree/runspore/compare/v0.9.0...v0.9.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate jsonschema to 0.60.0 ([#282](https://github.com/Web-tree/runspore/issues/282)) ([21c87f6](https://github.com/Web-tree/runspore/commit/21c87f676ade17514f0ee30fad62f74d86517cb6))
+* **deps:** update wasm-tools crates to 0.263.0 ([#294](https://github.com/Web-tree/runspore/issues/294)) ([06bf7b5](https://github.com/Web-tree/runspore/commit/06bf7b520600fa02dac33803575085852c0d174e))
+
 ## [0.9.0](https://github.com/Web-tree/runspore/compare/v0.8.0...v0.9.0) (2026-11-01)
 
 
