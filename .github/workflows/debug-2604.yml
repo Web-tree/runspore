@@ -1,0 +1,36 @@
+name: debug-2604
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: environment
+        run: |
+          grep PRETTY /etc/os-release; uname -r; nproc
+          echo "core_pattern=$(cat /proc/sys/kernel/core_pattern)"; ulimit -c
+          systemctl is-active apport systemd-coredump.socket || true
+          which apport-bug /usr/lib/systemd/systemd-coredump /usr/share/apport/apport || true
+      - run: cargo test -p runspore-cli --test coming_back --locked --no-run
+      - name: A default core handling, alone, 5 runs
+        run: |
+          for i in 1 2 3 4 5; do
+            /usr/bin/time -f "total %es" cargo test -q -p runspore-cli --test coming_back --locked killed_after_the_command -- --nocapture 2>&1 | grep -E 'DIAG|left:|right:|test result|total ' || true
+          done
+      - name: B core dumps off, alone, 5 runs
+        run: |
+          sudo sysctl -w kernel.core_pattern=core
+          ulimit -c 0
+          for i in 1 2 3 4 5; do
+            /usr/bin/time -f "total %es" cargo test -q -p runspore-cli --test coming_back --locked killed_after_the_command -- --nocapture 2>&1 | grep -E 'DIAG|left:|right:|test result|total ' || true
+          done
+      - name: journal
+        if: always()
+        run: sudo journalctl -n 30 --no-pager | grep -iE 'core|apport|dump' | cut -c1-220 || true

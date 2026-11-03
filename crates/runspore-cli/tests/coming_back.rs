@@ -506,16 +506,22 @@ fn killed_between_steps_runs_nothing_again() {
 fn killed_after_the_command_returned_runs_it_again() {
     let dir = project("back-after-effect");
     let run = start(&dir);
+    let t = std::time::Instant::now();
     crash(
         &dir,
         "host.attempt.after-effect",
         &["continue", &run, "--wait"],
     );
+    eprintln!("DIAG crash returned at {:?}", t.elapsed());
     assert!(
         results(&dir, &run).is_empty(),
         "the answer was not recorded"
     );
-    assert_eq!(needs(&dir), "working");
+    eprintln!("DIAG results returned at {:?}", t.elapsed());
+    let got = needs(&dir);
+    eprintln!("DIAG needs={got} at {:?}", t.elapsed());
+    eprintln!("DIAG running={}", status(&dir, &run)["running"]);
+    assert_eq!(got, "working");
 
     waits_at(&follow(&dir, &run), "approve/1", "test", "ok");
     let seen = calls(&dir);
