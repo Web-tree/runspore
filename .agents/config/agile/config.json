@@ -23,7 +23,7 @@
     "8": {
       "key": "#191",
       "title": "Keep the run database in ~/.spore, shared by every worktree",
-      "why": "15 files, +856/-217: design-level project-resolution change, new integration tests"
+      "why": "11 files, +835/-203: design-level project-resolution change, new integration tests"
     },
     "13": {
       "key": "#71",
