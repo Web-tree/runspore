@@ -39,7 +39,7 @@ None of them has a "needs a person" state inside a running task. Asking a person
 
 **Decision.** A decision is a signal, or a resolution of a stuck step. A held step's holder reports through what its action already has:
 - the probe (`alive`, `dead`, `unknown`, `stopped`);
-- the watch (a `needs` line, a result);
+- the watch (a `waits` line, a result);
 - `step complete` and `step fail`, and the candidate commands that hand in an answer.
 
 A report never becomes a signal.
@@ -96,4 +96,4 @@ The step the run comes back to reads the answer with `{"$get": ["from", "output"
 
 ## Open threads
 
-- A watch's `needs` line is kept only in the memory of the process running the watch, so `status` in another process does not show it (#299). Under L1 it is a report and stays one. #299 decides whether it is stored with the attempt or documented as process-local.
+- A watch's `waits` line is kept only in the memory of the process running the watch, so `status` in another process does not show it (#299). Under L1 it is a report and stays one. #299 decides whether it is stored with the attempt or documented as process-local.

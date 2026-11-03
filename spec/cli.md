@@ -254,7 +254,7 @@ the last. Missing output is `null`. It prints `{runId, invocationId, attempt,
 candidate}`, `candidate` being `{"outcome", "sinceMs"}`:
 
 ```json
-{"format": "runspore.cli/0.2", "runId": "run_…", "invocationId": "inv_…", "attempt": 1,
+{"format": "runspore.cli/0.3", "runId": "run_…", "invocationId": "inv_…", "attempt": 1,
  "candidate": {"outcome": "ok", "sinceMs": "1793330000000"}}
 ```
 
@@ -1019,7 +1019,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 ## JSON output
 
 Every object carries `"format": "runspore.cli/0.3"`, errors included; 0.1 wrote
-`runspore.cli/0.1` and 0.2 to 0.7 wrote `runspore.cli/0.2`. **0.3** renamed a `list`
+`runspore.cli/0.1` and 0.2 to 0.9 wrote `runspore.cli/0.2`. **0.3** renamed a `list`
 row's `since` to `updatedAtMs` and a cancel's `at` to `atMs`, put a held step's
 `waiting` and `message` into one `waits`, and added `needs` to `status`. A reader that
 does not know a `format` stops rather than guess at its fields. Revision, event-sequence

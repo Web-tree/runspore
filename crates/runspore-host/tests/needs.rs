@@ -51,6 +51,7 @@ fn step(state: StepState) -> AsyncStep {
         deadline_ms: None,
         lease_until_ms: None,
         missing: None,
+        candidate: None,
         waits: None,
     }
 }

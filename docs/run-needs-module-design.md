@@ -40,7 +40,8 @@ The bug fixes cluster in this rule:
 - **Decision.** The watch line that carries the detail names no one either. A watch prints `{"waits": "<text>"}` instead of `{"needs": "person", "message": "<text>"}`, and the text lands in `step.waits` unchanged. The old line is no longer recognised: the plugin, its only writer, ships in step with this release.
 - **Decision.** No output says "a person". A stuck step reads `needs resolving`, and `continue --wait` follows a run until it needs something from outside the worker or has ended.
 - **Precedent.** In Temporal, a pending activity stays pending, and its heartbeat details say what it is doing.
-- **Related backlog.** #234 (a running step can be marked), #272 (a wait node can put a question), #273 (notify when a run parks). All three plug into this module rather than adding a second rule.
+- **Fits the neutral engine.** [docs/design/neutral-engine.md](design/neutral-engine.md) rejects a new state on a step (#234 closed as not planned, and one holder status per attempt). This change adds none: `waits` is the watch's existing report under a neutral name, and `Need` has the same values as the spec's table.
+- **Related backlog.** #272 (a wait node can carry a prompt) and #273 (notify when a run parks) plug into this module rather than adding a second rule, if they pass the neutral engine's test (its L2). #299 decides whether a watch's report is stored or stays process-local.
 
 ### The JSON may change shape, and its format version moves to `runspore.cli/0.3`
 - **Decision.** Tidy the status and list JSON while rebuilding it from the typed run view. Every object carries `"format": "runspore.cli/0.3"`.
@@ -124,5 +125,5 @@ None. The JSON-shape and pull-request questions were deferred once and answered 
   - CONTEXT.md (`stuck` "waits for a person's decision", `unsafe` "waits for a person");
   - host.md §2 "Telling a person" and kernel.md §1;
   - the build catalogue's messages;
-  - backlog issues #234, #272 and #273, which are reframed as signals, actors and holders.
+  - backlog issues #272 and #273, which are reframed as signals, actors and holders.
 - **The plugin change.** It needs its own ticket in `max-skills`: read `updatedAtMs`, refuse an unknown `format`, print `{"waits": …}` from its watch, and say how its oldest supported spore relates to the new format.
