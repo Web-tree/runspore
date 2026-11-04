@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "schema": {
+    "version": 1,
+    "keys": {
+      "tracker": {
+        "description": "Where stories live. auto picks Jira when the Atlassian skill is configured, GitHub issues when the repo has a GitHub remote, and asks otherwise",
+        "layer": "repo",
+        "default": "auto",
+        "type": "string",
+        "enum": [
+          "auto",
+          "jira",
+          "github"
+        ]
+      },
+      "scale": {
+        "description": "The values a story may get, smallest first: numbers such as Fibonacci [1,2,3,5,8,13] or your own list, or ordered labels such as [\"XS\",\"S\",\"M\",\"L\",\"XL\"]. Changing it asks for a recalibration",
+        "layer": "repo",
+        "default": [
+          1,
+          2,
+          3,
+          5,
+          8,
+          13
+        ],
+        "type": "array",
+        "minItems": 2,
+        "uniqueItems": true,
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            }
+          },
+          {
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "referenceStories": {
+        "description": "The team's reference stories, one finished story per scale value, written by calibration once you confirm them. calibratedAt is when, as an ISO date",
+        "layer": "repo",
+        "default": {},
+        "type": "object",
+        "properties": {
+          "calibratedAt": {
+            "type": "string",
+            "description": "ISO date of the calibration that wrote these"
+          }
+        },
+        "additionalProperties": {
+          "$ref": "#/$defs/referenceStory"
+        }
+      },
+      "split.threshold": {
+        "description": "Stories sized at or above this scale value get a proposed split into smaller stories. Empty means the largest value on the scale",
+        "layer": "repo",
+        "default": "",
+        "type": [
+          "number",
+          "string"
+        ]
+      },
+      "sweep.max": {
+        "description": "How many stories one backlog sweep sizes; each costs three estimators. The rest are offered as the next batch",
+        "layer": "repo",
+        "default": 20,
+        "type": "integer",
+        "minimum": 1
+      },
+      "calibration.sample": {
+        "description": "How many recently closed stories calibration studies",
+        "layer": "repo",
+        "default": 40,
+        "type": "integer",
+        "minimum": 5
+      },
+      "calibration.staleDays": {
+        "description": "After this many days the skill suggests recalibrating the reference stories",
+        "layer": "repo",
+        "default": 90,
+        "type": "integer",
+        "minimum": 1
+      },
+      "github.project": {
+        "description": "GitHub Project board whose number field holds the size, as owner/number (e.g. Max-Levitskiy/3). Empty means sizes go in labels",
+        "layer": "repo",
+        "default": "",
+        "type": "string"
+      },
+      "github.field": {
+        "description": "Name of the Project's number field that holds the size",
+        "layer": "repo",
+        "default": "Size",
+        "type": "string"
+      },
+      "labelPrefix": {
+        "description": "Prefix of the size label, e.g. size: gives size:5 or size:M. Used on GitHub when no Project board is set, and on Jira when the scale is labels and no select field holds them",
+        "layer": "repo",
+        "default": "size:",
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "$defs": {
+      "referenceStory": {
+        "type": "object",
+        "required": [
+          "key",
+          "title",
+          "why"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Story",
+            "description": "Issue key or number, e.g. PROJ-42 or #118"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "why": {
+            "type": "string",
+            "title": "Why this size",
+            "description": "One line on the effort that makes it this value"
+          }
+        }
+      }
+    }
+  }
+}

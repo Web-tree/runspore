@@ -1,0 +1,36 @@
+{
+  "referenceStories": {
+    "1": {
+      "key": "#201",
+      "title": "Result mode accepts a result with an outcome and no output",
+      "why": "3 files, +18/-3: one-line host fix, one test, spec line; clean"
+    },
+    "2": {
+      "key": "#204",
+      "title": "spore continue never spends another run's try",
+      "why": "5 files, +91: small engine fix, tests, spec; clean"
+    },
+    "3": {
+      "key": "#140",
+      "title": "A command that fails keeps only the end of stderr in its error",
+      "why": "7 files, +313: host command + CLI view, tests, spec; clean"
+    },
+    "5": {
+      "key": "#217",
+      "title": "A worker takes the step that has waited longest",
+      "why": "17 files, +434: new queue module across engine, CLI, settings schema, spec; clean"
+    },
+    "8": {
+      "key": "#191",
+      "title": "Keep the run database in ~/.spore, shared by every worktree",
+      "why": "11 files, +835/-203: design-level project-resolution change, new integration tests"
+    },
+    "13": {
+      "key": "#71",
+      "title": "Async commands: start, holder handle, probe and watch",
+      "why": "29 files, +2389: new held/holder engine across host, store, schema; 8 commits, 3 reviews"
+    },
+    "calibratedAt": "2026-10-19"
+  },
+  "schemaVersion": 1
+}
