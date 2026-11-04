@@ -227,7 +227,7 @@ fn drive(dir: &Case, failpoint: Option<&str>, stage: usize, parked: bool) -> Res
 }
 
 fn aborted(out: &Out) -> bool {
-    out.status.signal() == Some(6) || out.status.signal() == Some(9)
+    out.status.signal() == Some(9)
 }
 
 struct Reference {

@@ -2,8 +2,12 @@
 //!
 //! `RUNSPORE_FAILPOINTS` holds a comma-separated list of `name` or `name:n`.
 //! When execution reaches a named point for the n-th time (default first), the
-//! process aborts without unwinding or flushing, as a power cut would. The
+//! process dies without unwinding or flushing, as a power cut would. The
 //! registered names are listed in `spec/host.md`.
+//!
+//! On Unix it dies by SIGKILL, not `abort`: SIGABRT runs the machine's core handler
+//! first, and the process is not reported dead until that ends. On Ubuntu 26.04 that
+//! takes longer than the short leases the crash tests set.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -28,7 +32,7 @@ fn plan() -> &'static Mutex<HashMap<String, u64>> {
     })
 }
 
-/// Aborts the process if `name` is armed and this is its configured hit.
+/// Ends the process if `name` is armed and this is its configured hit.
 pub fn hit(name: &str) {
     let mut plan = plan()
         .lock()
@@ -37,6 +41,8 @@ pub fn hit(name: &str) {
         *remaining -= 1;
         if *remaining == 0 {
             eprintln!("runspore: failpoint {name} hit, aborting");
+            #[cfg(unix)]
+            let _ = nix::sys::signal::raise(nix::sys::signal::SIGKILL);
             std::process::abort();
         }
     }
