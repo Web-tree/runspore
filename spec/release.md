@@ -127,7 +127,8 @@ It needs `curl`, `tar`, `ssh-keygen` (OpenSSH 8.1 or newer) and `sha256sum` or
 6. Extracts only `spore` and moves it into the install folder, creating the folder
    when missing. The move replaces an existing `spore` in one rename, so the folder
    never holds a partial file.
-7. Prints what `spore --version` prints. It warns when the install folder is not on
+7. Prints what `spore --version` prints, and what the `spore` it replaced printed when
+   that differs, so a second run is the update. It warns when the install folder is not on
    `PATH`, or when `command -v spore` finds another `spore` first.
 
 Any failure prints one line starting `install.sh: ` to standard error and exits 1,
@@ -177,7 +178,13 @@ credentials from AWS SSM through the role in `AWS_ROLE`, a secret of the `releas
 environment, which only `main` may deploy to.
 
 Merging the release PR is the release: the push of that merge makes release-please
-tag `v<version>` and create the GitHub release, with the PR's changelog as its notes.
+tag `v<version>` and create the GitHub release as a draft, with the PR's changelog as
+its notes. The release workflow publishes the draft once its assets are attached. The
+repository's releases are immutable: a published release takes no more assets, and its
+assets and tag never change. So a release is a draft until it is complete, and
+`releases/latest` never names a release without assets. `force-tag-creation` in the
+config makes release-please push the tag itself, since GitHub tags a draft only when it
+is published.
 The release PR merges itself: each run puts GitHub's auto-merge on it, so it squash-merges
 as soon as its required checks pass, and every releasable change is released. To hold a
 release, turn auto-merge off on the PR; the next push to `main` turns it on again.
@@ -188,7 +195,9 @@ release, turn auto-merge off on the PR; the next push to `main` turns it on agai
 on every push to `main`: with the new tag when release-please made a release, with no
 tag otherwise, so the release is built in the run that made it. The push of the tag
 the App made starts `release.yml` too, and that run skips every job. A tag `v*`
-pushed by hand also starts `release.yml`, for a release that has to be made again.
+pushed by hand also starts `release.yml`, and so does a manual run
+(`gh workflow run release.yml -f tag=v<version>`), for a release that has to be made
+again.
 
 With no tag, it builds each archive of §1 on a runner of its operating system and
 keeps them as workflow artifacts for 7 days; it signs and publishes nothing. It runs on
@@ -200,18 +209,23 @@ release day.
 
 With a tag, it builds the archives from the tagged commit and:
 
-1. stops if the tag's release already has assets, before it changes anything;
+1. stops if the tag's release is already published, before it changes anything;
 2. writes `SHA256SUMS` and signs it with `RELEASE_SIGNING_KEY`;
 3. makes the build-provenance attestations of the archives;
 4. runs `install.sh` against the assets with the pinned key, the attestation check
    included, and fails unless the installed `spore --version` names the tag's
    version;
-5. uploads the six assets to the tag's release, or creates the release with them when
-   there is none (a tag pushed by hand).
+5. uploads the six assets to the tag's draft release and publishes it, or creates the
+   release with them when there is none (a tag pushed by hand).
 
-A failure at any step uploads nothing. A release release-please made stays without
-assets, and `install.sh` cannot install it, until a run for its tag succeeds. To make
-a release again, delete its assets (or the release) and push the tag again.
+A failure at any step publishes nothing. A release release-please made stays a draft,
+which only people with write access see, and `install.sh` keeps installing the release
+before it, until a run for its tag succeeds. To make a release again, run `release.yml`
+by hand with its tag; it replaces any assets a failed run left on the draft. A published
+release cannot be made again: fix forward with the next version.
+
+Releases 0.7.1 to 0.9.2 were published before their assets were attached, so they have
+none, and `install.sh` cannot install them.
 
 ### Commit titles
 
@@ -244,6 +258,7 @@ throwaway key pinned into a copy of `install.sh`:
 
 - good assets install `spore` into `SPORE_INSTALL_DIR`, and into `$HOME/.local/bin`
   by default, and the installed binary runs;
+- an install over a `spore` of another version names the version it replaced;
 - each of these is refused with the install folder unchanged: a tampered archive; a
   tampered `SHA256SUMS`, including one that matches a tampered archive; a signature
   by another key; a missing signature; a failing attestation check when `gh` is

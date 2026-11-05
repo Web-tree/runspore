@@ -7,12 +7,47 @@ Graphviz installation is needed for the example.
 
 ## Install spore
 
-### From source
+### Release installer
 
-**Release availability, checked 2026-11-05:**
-[v0.9.1](https://github.com/Web-tree/runspore/releases/tag/v0.9.1), the latest release,
-has no attached binary archives or checksum files. Use a source build until those
-assets are published.
+```sh
+curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh | sh
+```
+
+The installer targets macOS and Linux on arm64 and x86_64; on Windows, run it in WSL.
+It needs `curl`, `tar`, `ssh-keygen` with SSH signature verification, and `sha256sum`
+or `shasum`. It checks the checksum file's signature and the archive's checksum before
+installing the newest release to `~/.local/bin`. If an authenticated `gh` CLI is
+available, it also verifies the build attestation.
+
+Run the same command again to update: it replaces the installed `spore` with the
+newest release and names the version it replaced.
+
+To pin a release or choose an installation directory, pass the variables to the shell
+that runs the script:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh \
+  | SPORE_VERSION=VERSION SPORE_INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+Replace `VERSION` with a release version. Releases 0.7.1 to 0.9.2 have no binary
+archives and cannot be installed this way. Do not bypass a signature or checksum
+failure. [Release verification](../../spec/release.md) documents the asset names and
+pinned release key.
+
+Make sure the installation directory is on `PATH`, then check the installation:
+
+```sh
+spore --version
+spore capabilities
+spore --help
+```
+
+`--version` identifies the installed software. `capabilities` reports its contract
+versions, action kinds, and asynchronous result channels. This guide uses the
+`runspore/0.2` workflow dialect; the software version is a separate number.
+
+### From source
 
 You need Git, Rust installed through `rustup`, and a native C compiler/linker for
 the bundled SQLite dependency. On macOS the compiler comes with the Xcode Command
@@ -27,45 +62,7 @@ cargo install --path crates/runspore-cli --locked
 ```
 
 Cargo puts the executable in `~/.cargo/bin` by default. Make sure that directory is
-on `PATH`, then check the installation:
-
-```sh
-spore --version
-spore capabilities
-spore --help
-```
-
-`--version` identifies the installed software. `capabilities` reports its contract
-versions, action kinds, and asynchronous result channels. This guide uses the
-`runspore/0.2` workflow dialect; the software version is a separate number.
-
-### Signed release installer
-
-Once a release has the archive for your platform, `SHA256SUMS`, and
-`SHA256SUMS.sig` attached, install it with:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh | sh
-```
-
-The installer targets macOS and Linux on arm64 and x86_64. It needs `curl`, `tar`,
-`ssh-keygen` with SSH signature verification, and `sha256sum` or `shasum`. It checks
-the checksum file's signature and the archive's checksum before installing to
-`~/.local/bin`. If an authenticated `gh` CLI is available, it also verifies the
-build attestation.
-
-To select a release with assets or choose an installation directory, pass the
-variables to the shell that runs the script:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh \
-  | SPORE_VERSION=VERSION_WITH_ASSETS SPORE_INSTALL_DIR="$HOME/.local/bin" sh
-```
-
-Replace `VERSION_WITH_ASSETS` with an actual release version. Do not bypass a
-signature or checksum failure. If the download reports a missing release asset,
-use the source build above. [Release verification](../../spec/release.md) documents
-the asset names and pinned release key.
+on `PATH`.
 
 ## Create a project
 

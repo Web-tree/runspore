@@ -1,8 +1,11 @@
 # Builds the four archives of spec/release.md. With a release tag it also signs,
-# attests and publishes them: release-please.yml calls it with the tag of the release
-# it just made, and a tag v* pushed by hand starts it too. The push of the tag
-# release-please made starts it as well, and that run does nothing. Called with no tag (every
-# other push to main), it builds and keeps the archives as workflow artifacts only.
+# attests and publishes them: release-please.yml calls it with the tag of the draft
+# release it just made, and this workflow attaches the assets and publishes the draft.
+# The repository's releases are immutable, so a release takes its assets before it is
+# published, never after. A tag v* pushed by hand starts it too, and so does a manual
+# run with a tag, which makes a release again after a failed run. The push of the tag
+# release-please made starts it as well, and that run does nothing. Called with no tag
+# (every other push to main), it builds and keeps the archives as workflow artifacts only.
 # The contract is spec/release.md; a failure at any step publishes nothing.
 name: release
 
@@ -12,6 +15,12 @@ on:
   # The release PR builds the archives too: its `archives` check is required, so a
   # target that fails to build stops the PR from merging itself. Other PRs skip the build.
   pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag of a release that is not published yet, to build and publish
+        type: string
+        required: true
   workflow_call:
     inputs:
       tag:
@@ -100,13 +109,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-      # A second run on a published tag stops here, before anything changes.
-      - name: Refuse a release that already has assets
+      # A published release is immutable. A second run on its tag stops here, before
+      # anything changes.
+      - name: Refuse a release that is already published
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if assets=$(gh release view "$TAG" --json assets --jq '.assets | length' 2>/dev/null) && [ "$assets" -ne 0 ]; then
-            echo "::error::release $TAG already has $assets assets; delete the release to make it again (spec/release.md section 8)"
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null) && [ "$draft" != true ]; then
+            echo "::error::release $TAG is published, and a published release cannot change (spec/release.md section 8)"
             exit 1
           fi
       - uses: actions/download-artifact@v8
@@ -142,13 +152,16 @@ jobs:
           echo "$out"
           echo "$out" | grep -qx 'attestation checked'
           test "$("$RUNNER_TEMP/bin/spore" --version)" = "spore ${TAG#v}"
-      # release-please made the release already; a tag pushed by hand may have none yet.
+      # release-please made the release as a draft; a tag pushed by hand has none. Either
+      # way the assets are on the release before it is published. An earlier run that
+      # failed part-way may have left some on the draft.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --draft=false
           else
             gh release create "$TAG" dist/* --verify-tag --title "$TAG" --generate-notes
           fi
