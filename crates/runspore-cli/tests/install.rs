@@ -278,6 +278,38 @@ fn good_assets_install_spore_and_it_runs() {
 }
 
 #[test]
+fn an_install_over_another_version_names_the_one_it_replaced() {
+    let release = Release::new("update");
+    let dir = release.install_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let installed = dir.join("spore");
+    std::fs::write(&installed, "#!/bin/sh\necho 'spore 0.0.1'\n").unwrap();
+    std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = release.install(&[]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains(&format!(
+            "installed {} at {}, replacing spore 0.0.1",
+            version(),
+            installed.display()
+        )),
+        "{stdout}"
+    );
+
+    // The same version again replaces nothing worth naming.
+    let again = release.install(&[]);
+    let stdout = String::from_utf8_lossy(&again.stdout);
+    assert!(again.status.success());
+    assert!(!stdout.contains("replacing"), "{stdout}");
+}
+
+#[test]
 fn installs_into_home_local_bin_by_default() {
     let release = Release::new("default-dir");
     let home = release.dir.file("home");
