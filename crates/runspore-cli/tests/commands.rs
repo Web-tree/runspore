@@ -59,7 +59,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
     let bad = dir.run(&["--json", "validate", "bad"]);
     assert_eq!(
         (bad.code(), bad.json()["format"].clone()),
-        (Some(2), json!("runspore.cli/0.2"))
+        (Some(2), json!("runspore.cli/0.3"))
     );
     assert_eq!(dir.run(&["frobnicate"]).code(), Some(2));
     assert_eq!(
@@ -106,7 +106,7 @@ fn every_command_in_text_and_json_with_its_exit_codes() {
             let out = dir.run(&all);
             assert_eq!(out.code(), Some(0), "{cmd:?}: {}", out.stderr);
             if !mode.is_empty() {
-                assert_eq!(out.json()["format"], "runspore.cli/0.2");
+                assert_eq!(out.json()["format"], "runspore.cli/0.3");
             }
         }
     }

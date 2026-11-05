@@ -200,7 +200,7 @@ async fn h31_a_start_command_hands_over_and_the_work_reports_with_its_token() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn h31_a_watch_says_its_holder_waits_then_delivers_the_result() {
     let watch = "cat > handle.json; \
-                 echo '{\"needs\": \"person\", \"message\": \"answer in pane 2\"}'; \
+                 echo '{\"waits\": \"answer in pane 2\"}'; \
                  while [ ! -f go ]; do sleep 0.02; done; \
                  echo '{\"outcome\": \"ok\", \"output\": {\"n\": 1}}'";
     let spec = json!({"timeoutMs": "60000", "watch": {"command": {"argv": sh(watch)}}});

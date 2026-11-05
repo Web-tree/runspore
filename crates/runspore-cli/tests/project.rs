@@ -112,7 +112,7 @@ fn init_creates_the_project_folder_once() {
     let spore_dir = root.join(".spore");
     assert_eq!(
         created,
-        json!({"format": "runspore.cli/0.2", "root": root,
+        json!({"format": "runspore.cli/0.3", "root": root,
                "created": [spore_dir, spore_dir.join("workflows")]})
     );
     assert!(spore_dir.join("workflows").is_dir());

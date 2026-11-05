@@ -21,7 +21,7 @@ spore --json step show "$RUN_ID"
 ```
 
 Set `RUN_ID` to an actual run ID before using these commands. Normal JSON command
-responses are one object on stdout. Each carries `"format":"runspore.cli/0.2"`;
+responses are one object on stdout. Each carries `"format":"runspore.cli/0.3"`;
 errors carry an `error` object with `code`, `message` and sometimes `details`.
 Revision and event-sequence values and timestamps are decimal strings. Attempt,
 visit and maximum-attempt counts are JSON numbers. Follow the type of each field
@@ -86,8 +86,8 @@ and text-mode `continue` already use the run's exit codes.
 | `130` | Interrupted after graceful shutdown |
 
 For `continue --wait`, a normally held async step is followed instead of returning
-6 immediately. It returns 6 for ready external work, a watch asking for a person,
-or a missing capability. Waiting for a signal is an expected state; decide whether
+6 immediately. It returns 6 for ready external work, a watch that says its holder
+waits (`step.waits`), or a missing capability. Waiting for a signal is an expected state; decide whether
 your CI should pause, notify someone or require a fully completed run.
 
 Here is a shell wrapper that saves both streams and preserves the code, including

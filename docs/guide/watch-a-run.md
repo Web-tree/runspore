@@ -182,7 +182,7 @@ position   deploy (deploy/1, from approve on approved)
 invocation inv_bb1f611bd6b72d3ac6f4ffaa08683f16 attempt 2 of 2 stuck
 error      command.exit: exit code 1
 stderr     cannot reach the api target
-needs      a person: step deploy gave up and has no failed arrow since 2026-10-14T22:53:44Z, for 0s
+needs      resolving: step deploy gave up and has no failed arrow since 2026-10-14T22:53:44Z, for 0s
 resolve    spore resolve run_69521f33daea0013880016867d12b6ab --retry
            spore resolve run_69521f33daea0013880016867d12b6ab --complete ok
            spore resolve run_69521f33daea0013880016867d12b6ab --fail <message>

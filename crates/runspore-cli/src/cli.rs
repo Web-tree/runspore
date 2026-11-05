@@ -1,13 +1,14 @@
 //! Argument parsing and the commands of spec/cli.md.
 
 use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use runspore_build::{Applicability, Machine, Report};
+use runspore_host::needs::{Need, Needs};
 use runspore_host::{
     validate_artifact, ActivityRegistry, Engine, EngineConfig, HeldSlot, HostError, NativeRunner,
     Observer, StartOutcome, StepClaim, StepReport, ARTIFACT_UNREADABLE, FILES_DIR_MISSING,
@@ -17,7 +18,7 @@ use runspore_kernel::NativeReducer;
 use runspore_store_sqlite::{Migration, SqliteStore, COMMIT_DATE, VERSION, VERSION_TEXT};
 use runspore_types::artifact::{Artifact, ArtifactError, Manifest};
 use runspore_types::digest;
-use runspore_types::model::{event_kind, ErrorInfo, Resolution, RunStatus, State};
+use runspore_types::model::{ErrorInfo, Resolution};
 use runspore_types::reducer::Reducer;
 use runspore_types::store::{
     Disposition, RunKey, RunParent, RunView, StoreFailure, StoreFailureKind,
@@ -26,10 +27,11 @@ use runspore_wasmtime::{load_artifact, ArtifactReader, WasmtimeReducer};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
-use crate::view::{Row, Shown, Tree};
+use crate::status::{self, Shown};
+use crate::view::{Row, Tree};
 use crate::{project, view};
 
-pub const FORMAT: &str = "runspore.cli/0.2";
+pub const FORMAT: &str = "runspore.cli/0.3";
 
 /// The version of each contract this `spore` implements (spec/cli.md, Capabilities).
 const CONTRACTS: [(&str, &str); 7] = [
@@ -163,11 +165,11 @@ pub enum Command {
         #[arg(long)]
         unfinished: bool,
     },
-    /// Do the next thing a run needs, then print what a person must type: the run's,
+    /// Do the next thing a run needs, then print what to type next: the run's,
     /// or the only unfinished one.
     Continue {
         run_id: Option<String>,
-        /// Follow the run past held async steps until it needs a person or has ended.
+        /// Follow the run past held async steps until it needs something from outside or has ended.
         #[arg(long)]
         wait: bool,
         /// With --wait --json, exit with the run's code (3, 4, 6, …) instead of 0.
@@ -1294,12 +1296,7 @@ impl StartRequest {
         let Some(view) = engine.get_run(&key).await? else {
             return Ok(None);
         };
-        let started = engine.list_events(&key, 0, 1).await?;
-        let input = started
-            .items
-            .first()
-            .and_then(|r| serde_json::from_slice::<Value>(&r.event.body).ok())
-            .map_or(Value::Null, |body| body["input"].clone());
+        let input = engine.start_input(&key).await?.unwrap_or(Value::Null);
         let mut differs = Vec::new();
         if input != self.input {
             differs.push("input");
@@ -1401,7 +1398,7 @@ async fn until_parked(engine: &Engine, key: &RunKey, db: &Path) -> Result<Output
     Ok(parked(&view, &shown, db, interrupted))
 }
 
-/// Works the run until it parks, or with `follow` until it needs a person or has ended
+/// Works the run until it parks, or with `follow` until it needs something from outside or has ended
 /// (`Engine::follow`); with `true` when an interrupt stopped it first.
 async fn work(engine: &Engine, key: &RunKey, follow: bool) -> Result<(RunView, bool), Fail> {
     let mut stop = Interrupts::install()?;
@@ -1428,7 +1425,7 @@ fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output
     let exit = if interrupted {
         EXIT_INTERRUPTED
     } else {
-        view::exit_for(view, shown.step.as_ref())
+        status::exit_for(view, shown.step())
     };
     let mut json = shown.json(view);
     json["db"] = json!(db);
@@ -1446,8 +1443,8 @@ fn parked(view: &RunView, shown: &Shown, db: &Path, interrupted: bool) -> Output
 
 /// `spore continue [<runId>] [--wait]` (spec/cli.md, What a run needs): with nothing
 /// unfinished the workflows to start; with several, the runs and exit 2; with one, the
-/// run worked until it parks (with `wait`, until it needs a person or has ended), unless
-/// it is quarantined or finished, then what a person must type. When another worker runs
+/// run worked until it parks (with `wait`, until it needs something from outside or has
+/// ended), unless it is quarantined or finished, then what to type next. When another worker runs
 /// the run's step, it says so: without `wait` it returns that, with `wait` it prints it
 /// on stderr and waits.
 async fn continue_run(
@@ -1465,36 +1462,36 @@ async fn continue_run(
             None => return Ok(nothing_to_continue(cwd)),
         },
     };
-    let (view, interrupted) = match view::needs(&view, None) {
-        Some("quarantined") | None => (view, false),
+    let (view, interrupted) = match engine.needs(&view, &[]).await?.need {
+        Some(Need::Quarantined) | None => (view, false),
         Some(_) => {
             let shown = Shown::read(engine, &view).await?;
             let worker = &engine.config().worker_id;
-            if let Some(slot) = view::elsewhere(&shown, &view.key.run, worker) {
+            if let Some(slot) = status::elsewhere(&shown, &view.key.run, worker) {
                 if !wait {
                     return Ok(running_elsewhere(&view, &shown, slot, db));
                 }
                 if json {
-                    let mut object = view::elsewhere_progress_json(slot, shown.now_ms);
+                    let mut object = status::elsewhere_progress_json(slot, shown.now_ms);
                     object["format"] = json!(FORMAT);
                     eprintln!("{object}");
                 } else {
-                    eprintln!("{}", view::elsewhere_progress_text(slot, shown.now_ms));
+                    eprintln!("{}", status::elsewhere_progress_text(slot, shown.now_ms));
                 }
             }
             work(engine, &view.key, wait).await?
         }
     };
     let shown = Shown::read(engine, &view).await?;
-    // A holder that waits for a person: its watch stops with its process group, and the
+    // A holder that waits: its watch stops with its process group, and the
     // attempt stays held for the next driver.
-    if shown.step.as_ref().is_some_and(|s| s.waits.is_some()) {
+    if shown.step().is_some_and(|s| s.waits.is_some()) {
         engine.shutdown().await;
     }
     let mut out = parked(&view, &shown, db, interrupted);
     if !interrupted {
         let mut next = shown.next(&view);
-        if next.needs == Some("child") {
+        if next.needs == Some(Need::Child) {
             below_next(engine, &shown, &mut next).await?;
         }
         out.json["needs"] = json!(next.needs);
@@ -1507,10 +1504,10 @@ async fn continue_run(
 /// For a run that waits on runs it started, what each unfinished run below it needs
 /// that is not itself such a wait, in `list`'s order: its text after the run's, and its
 /// commands as the run's, as `temporal workflow describe` lists pending children.
-async fn below_next(engine: &Engine, shown: &Shown, next: &mut view::Next) -> Result<(), Fail> {
+async fn below_next(engine: &Engine, shown: &Shown, next: &mut status::Next) -> Result<(), Fail> {
     let tree = &shown.children;
     for row in &tree.rows {
-        if matches!(row.needs, None | Some("child")) {
+        if matches!(row.needs, None | Some(Need::Child)) {
             continue;
         }
         let below = &tree.runs[row.index];
@@ -1528,10 +1525,10 @@ fn running_elsewhere(view: &RunView, shown: &Shown, slot: &HeldSlot, db: &Path) 
     let commands = vec![format!("spore continue {} --wait", view.key.run)];
     out.text = format!(
         "{}\n  {}\n",
-        view::elsewhere_text(slot, shown.now_ms),
+        status::elsewhere_text(slot, shown.now_ms),
         commands[0]
     );
-    out.json["needs"] = json!("working");
+    out.json["needs"] = json!(Need::Working);
     out.json["commands"] = json!(commands);
     out.exit = 0;
     out
@@ -1595,14 +1592,15 @@ fn none_unfinished(command: &str) -> Fail {
 
 impl Shown {
     async fn read(engine: &Engine, view: &RunView) -> Result<Self, Fail> {
-        let runs = all_runs(engine).await?;
+        let runs = engine.runs().await?;
         let now = now_ms();
         Ok(Self {
             arrival: engine.arrival(view).await?,
-            package: package(engine, view).await?,
+            state: view.state(),
+            workflow: engine.workflow(view).await?,
             invocations: engine.list_invocations(&view.key).await?,
-            step: engine.async_step(view).await?,
-            last_result: last_result(engine, view).await?,
+            needs: engine.needs(view, &runs).await?,
+            last_result: engine.last_result(view).await?,
             children: read_tree(engine, runs, Some(&view.key.run)).await?,
             slots: engine.held_slots(now).await?,
             slot_limit: engine.config().max_concurrent_activities,
@@ -1610,39 +1608,6 @@ impl Shown {
             paused: engine.disk_full(),
             now_ms: now,
         })
-    }
-}
-
-/// The payload of the latest `activity.result` of the outstanding invocation of a run
-/// that needs intervention: the error of an attempt whose outcome is unknown. `None`
-/// for any other run.
-async fn last_result(engine: &Engine, view: &RunView) -> Result<Option<Value>, Fail> {
-    let invocation = view
-        .snapshot
-        .as_deref()
-        .and_then(|s| serde_json::from_slice::<State>(s).ok())
-        .filter(|s| s.status == RunStatus::NeedsIntervention)
-        .and_then(|s| s.invocation);
-    let Some(invocation) = invocation else {
-        return Ok(None);
-    };
-    let (mut last, mut after) = (None, 0);
-    loop {
-        let page = engine.list_events(&view.key, after, 100).await?;
-        let Some(end) = page.items.last() else {
-            return Ok(last);
-        };
-        after = end.event.sequence;
-        for record in &page.items {
-            let event = &record.event;
-            if event.kind != event_kind::ACTIVITY_RESULT || record.consumed_revision.is_none() {
-                continue;
-            }
-            let payload: Value = serde_json::from_slice(&event.body).unwrap_or(Value::Null);
-            if payload["invocationId"] == invocation.invocation_id.as_str() {
-                last = Some(payload);
-            }
-        }
     }
 }
 
@@ -1659,31 +1624,16 @@ async fn read_tree(
         .enumerate()
         .map(|(i, r)| (r.key.run.as_str(), i))
         .collect();
-    let waited_on: HashSet<&str> = runs
-        .iter()
-        .filter(|r| !r.ended())
-        .filter_map(|r| r.parent.as_ref().map(|p| p.run_id.as_str()))
-        .collect();
     let mut names = HashMap::new();
     let mut rows = Vec::new();
-    let now = now_ms();
     for (run, depth) in view::tree(&runs, root) {
         let (node_id, since_ms) = whereabouts(engine, run).await?;
-        let step = engine.async_step(run).await?;
-        let child_unfinished = waited_on.contains(run.key.run.as_str());
-        let mut needs = view::needs_below(run, step.as_ref(), child_unfinished);
-        if needs == Some("working") && step.is_none() {
-            let invocations = engine.list_invocations(&run.key).await?;
-            let cut_off = view::cut_off_of(run, &invocations, now);
-            needs = view::needs_driver(needs, cut_off.as_ref());
-        }
+        let Needs { need, step, .. } = engine.needs(run, &runs).await?;
         let actor = step
-            .filter(|_| matches!(needs, Some("external-ready" | "held")))
+            .filter(|_| matches!(need, Some(Need::ExternalReady | Need::Held)))
             .and_then(|s| s.actor);
         if !names.contains_key(&run.package_digest) {
-            let name = package(engine, run)
-                .await?
-                .and_then(|p| p["name"].as_str().map(String::from));
+            let name = engine.workflow(run).await?.map(|w| w.name);
             names.insert(run.package_digest.clone(), name);
         }
         rows.push(Row {
@@ -1692,7 +1642,7 @@ async fn read_tree(
             node_id,
             since_ms,
             workflow: names[&run.package_digest].clone(),
-            needs,
+            needs: need,
             actor,
         });
     }
@@ -1706,7 +1656,7 @@ async fn read_tree(
 /// The unfinished runs alone, newest first, not as a tree (spec/cli.md, What a run
 /// needs).
 async fn unfinished(engine: &Engine) -> Result<Tree, Fail> {
-    let mut tree = read_tree(engine, all_runs(engine).await?, None).await?;
+    let mut tree = read_tree(engine, engine.runs().await?, None).await?;
     tree.rows.retain(|row| row.needs.is_some());
     let runs = &tree.runs;
     tree.rows.sort_by(|a, b| {
@@ -1726,11 +1676,8 @@ async fn whereabouts(
     engine: &Engine,
     view: &RunView,
 ) -> Result<(Option<String>, Option<u64>), Fail> {
-    let state: Option<State> = view
-        .snapshot
-        .as_deref()
-        .and_then(|bytes| serde_json::from_slice(bytes).ok());
-    let Some(position) = state
+    let Some(position) = view
+        .state()
         .filter(|s| !s.status.is_terminal() && !view.ended())
         .and_then(|s| s.position)
     else {
@@ -1787,7 +1734,7 @@ async fn step_show(engine: &Engine, db: &Path, run: Option<&str>) -> Result<Outp
         "outputSchemas": step.output_schemas,
         "files": path(&step.files), "instructions": path(&step.instructions),
         "from": from,
-        "candidate": view::candidate_json(step.candidate.as_ref(), now_ms()),
+        "candidate": step.candidate.as_ref().map(|c| status::CandidateJson::of(c, now_ms())),
     });
     let mut text = format!(
         "step       {} ({}, {}) of run {}\n",
@@ -1808,7 +1755,7 @@ async fn step_show(engine: &Engine, db: &Path, run: Option<&str>) -> Result<Outp
             None => format!("{label:<10} {outcome}\n"),
         };
     }
-    text += &view::candidate_text(step.candidate.as_ref(), now_ms());
+    text += &status::candidate_text(step.candidate.as_ref(), now_ms());
     if let Some(files) = &step.files {
         text += &format!("files      {}\n", files.display());
     }
@@ -1988,11 +1935,7 @@ fn claimed(claim: &StepClaim) -> Result<Output, Fail> {
 
 /// The ID of the run's outstanding invocation, which `resolve` answers by default.
 fn outstanding(view: &RunView) -> Result<String, Fail> {
-    let state: Option<State> = view
-        .snapshot
-        .as_deref()
-        .and_then(|bytes| serde_json::from_slice(bytes).ok());
-    state
+    view.state()
         .and_then(|state| state.invocation)
         .map(|invocation| invocation.invocation_id)
         .ok_or_else(|| {
@@ -2003,12 +1946,6 @@ fn outstanding(view: &RunView) -> Result<String, Fail> {
         })
 }
 
-/// The run's package as JSON, `None` if it is not stored.
-async fn package(engine: &Engine, view: &RunView) -> Result<Option<Value>, Fail> {
-    let bytes = engine.get_package(&view.package_digest).await?;
-    Ok(bytes.and_then(|bytes| serde_json::from_slice(&bytes).ok()))
-}
-
 async fn existing(engine: &Engine, run: &str) -> Result<RunView, Fail> {
     engine
         .get_run(&engine_key(engine, run))
@@ -2016,24 +1953,11 @@ async fn existing(engine: &Engine, run: &str) -> Result<RunView, Fail> {
         .ok_or_else(|| Fail::usage("run.not-found", format!("run {run} does not exist")))
 }
 
-async fn all_runs(engine: &Engine) -> Result<Vec<RunView>, Fail> {
-    let mut runs = Vec::new();
-    let mut cursor = None;
-    loop {
-        let page = engine.list_runs(cursor, 100).await?;
-        runs.extend(page.items);
-        match page.next {
-            Some(next) => cursor = Some(next),
-            None => return Ok(runs),
-        }
-    }
-}
-
 async fn list(engine: &Engine, db: &Path, unfinished_only: bool) -> Result<Output, Fail> {
     let tree = if unfinished_only {
         unfinished(engine).await?
     } else {
-        read_tree(engine, all_runs(engine).await?, None).await?
+        read_tree(engine, engine.runs().await?, None).await?
     };
     let paused = engine.disk_full();
     done(
@@ -2076,10 +2000,9 @@ async fn events(engine: &Engine, run: &str) -> Result<Output, Fail> {
     if let Some(cancel) = &run_view.cancel {
         text += &format!("\n{}", view::cancel_line(cancel));
     }
-    let cancel = run_view
-        .cancel
-        .as_ref()
-        .map(|c| json!({"reason": c.reason, "at": c.at_ms.to_string(), "requestId": c.request_id}));
+    let cancel = run_view.cancel.as_ref().map(
+        |c| json!({"reason": c.reason, "atMs": c.at_ms.to_string(), "requestId": c.request_id}),
+    );
     done(
         json!({"runId": key.run, "events": json, "cancel": cancel}),
         text,

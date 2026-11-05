@@ -98,24 +98,19 @@ pub(crate) async fn stop(
     }
 }
 
-/// The message of a `{"needs": "person", "message": "<text>"}` line, or `None` for any
-/// other line. A line without a message gives an empty one.
-fn needs(line: &[u8]) -> Option<String> {
+/// What a `{"waits": "<text>"}` line says its holder waits for, or `None` for any other
+/// line.
+fn waits(line: &[u8]) -> Option<String> {
     let value: Value = serde_json::from_slice(line).ok()?;
     let fields = value.as_object()?;
-    let only = fields.keys().all(|k| k == "needs" || k == "message");
-    if !only || fields.get("needs") != Some(&json!("person")) {
-        return None;
-    }
-    match fields.get("message") {
-        None => Some(String::new()),
-        Some(Value::String(message)) => Some(message.clone()),
-        Some(_) => None,
+    match (fields.len(), fields.get("waits")) {
+        (1, Some(Value::String(text))) => Some(text.clone()),
+        _ => None,
     }
 }
 
 /// Runs the watch on `handle` for at most `timeout` (its program's own `timeoutMs`
-/// first). Each `needs` line goes to `waits`. On exit 0 the rest of stdout is one
+/// first). What each `waits` line says goes to `told`. On exit 0 the rest of stdout is one
 /// result in result mode's shapes; an outcome the action does not declare is
 /// `command.undeclared-outcome`. Any other ending is `Lost`.
 pub(crate) async fn watch(
@@ -125,12 +120,12 @@ pub(crate) async fn watch(
     handle: &[u8],
     timeout: Duration,
     outcomes: &[String],
-    waits: Arc<Mutex<Option<String>>>,
+    told: Arc<Mutex<Option<String>>>,
 ) -> Watched {
     let timeout = program.timeout_ms.map_or(timeout, Duration::from_millis);
-    let take = move |line: &[u8]| match needs(line) {
-        Some(message) => {
-            *waits.lock().unwrap_or_else(|e| e.into_inner()) = Some(message);
+    let take = move |line: &[u8]| match waits(line) {
+        Some(text) => {
+            *told.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
             true
         }
         None => false,
@@ -161,20 +156,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_needs_line_is_told_apart() {
+    fn a_waits_line_is_told_apart() {
         assert_eq!(
-            needs(br#"{"needs": "person", "message": "answer in pane 3"}"#),
+            waits(br#"{"waits": "answer in pane 3"}"#),
             Some("answer in pane 3".into())
         );
-        assert_eq!(needs(b"{\"needs\":\"person\"}\n"), Some(String::new()));
+        assert_eq!(waits(b"{\"waits\":\"\"}\n"), Some(String::new()));
         for other in [
-            &br#"{"needs": "machine"}"#[..],
-            br#"{"needs": "person", "message": 7}"#,
-            br#"{"needs": "person", "extra": 1}"#,
+            &br#"{"needs": "person", "message": "answer in pane 3"}"#[..],
+            br#"{"waits": 7}"#,
+            br#"{"waits": "a review", "extra": 1}"#,
             br#"{"outcome": "ok", "output": null}"#,
             b"not json",
         ] {
-            assert_eq!(needs(other), None);
+            assert_eq!(waits(other), None);
         }
     }
 }

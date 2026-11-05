@@ -146,6 +146,13 @@ pub struct WorkflowLimits {
     pub max_activations: u32,
 }
 
+impl Workflow {
+    /// The kernel's policy of action `action_id`: its outcomes, effect and retry.
+    pub fn policy(&self, action_id: &str) -> Option<ActionPolicy> {
+        serde_json::from_value(self.actions.get(action_id)?.clone()).ok()
+    }
+}
+
 impl WorkflowLimits {
     fn default_max_visits_per_node() -> u32 {
         16
@@ -395,6 +402,19 @@ impl RunStatus {
             RunStatus::Completed => "completed",
             RunStatus::Failed => "failed",
         }
+    }
+
+    /// The status of a wire string; `None` for any other, such as a store's `created`.
+    pub fn parse(status: &str) -> Option<Self> {
+        [
+            RunStatus::Running,
+            RunStatus::Waiting,
+            RunStatus::NeedsIntervention,
+            RunStatus::Completed,
+            RunStatus::Failed,
+        ]
+        .into_iter()
+        .find(|s| s.as_str() == status)
     }
 }
 

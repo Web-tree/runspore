@@ -1292,10 +1292,7 @@ impl Store for SqliteStore {
             else {
                 return Ok(None);
             };
-            if view.quarantine.is_some()
-                || view.cancel.is_some()
-                || view.applied_sequence + 1 == view.next_sequence
-            {
+            if view.quarantine.is_some() || view.cancel.is_some() || !view.pending() {
                 return Ok(None);
             }
             let event = list_events(c, key, view.applied_sequence, 1)?

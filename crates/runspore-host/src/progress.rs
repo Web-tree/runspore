@@ -51,7 +51,7 @@ pub enum Change {
     },
     /// The run waits at an await-signal node for the signal `signal`.
     Waiting { node_id: String, signal: String },
-    /// The run waits for a person: a stuck step, or an unsafe step whose outcome is
+    /// The run needs resolving: a stuck step, or an unsafe step whose outcome is
     /// unknown.
     NeedsIntervention { node_id: String, reason: String },
     /// The run completed, at its complete node when known.

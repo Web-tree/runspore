@@ -33,6 +33,7 @@ use crate::error::{HostError, Unrouted};
 use crate::external;
 use crate::files::{self, FilesDir, StepFiles, Unmade};
 use crate::guard;
+use crate::needs::Need;
 use crate::process::{self, Leftover};
 use crate::progress::{self, Change, Happened, Progress};
 
@@ -459,12 +460,10 @@ fn snapshot_status(snapshot: &[u8]) -> Option<&'static str> {
 /// `None` unless its committed state is `waiting` there and no event is pending, so the
 /// next signal is taken by that node.
 fn waiter(view: &RunView, package: &Package, signal: &str) -> Option<(String, Vec<String>)> {
-    if view.status != RunStatus::Waiting.as_str() || view.applied_sequence + 1 != view.next_sequence
-    {
+    if view.status != RunStatus::Waiting.as_str() || view.pending() {
         return None;
     }
-    let state: State = canonical::decode(view.snapshot.as_deref()?).ok()?;
-    let node_id = state.position?.node_id;
+    let node_id = view.state()?.position?.node_id;
     let outcomes = package.signal_routes(&node_id, signal)?;
     Some((node_id, outcomes))
 }
@@ -524,22 +523,10 @@ fn activity_result(
     })
 }
 
-fn parked(view: &RunView) -> bool {
-    if view.quarantine.is_some() || view.ended() {
-        return true;
-    }
-    let pending = view.applied_sequence + 1 < view.next_sequence;
-    match serde_json::from_value::<RunStatus>(json!(view.status)) {
-        Ok(status) if status.is_terminal() => true,
-        Ok(RunStatus::Waiting | RunStatus::NeedsIntervention) => !pending,
-        _ => false,
-    }
-}
-
 /// Whether the run has no event left to apply, or has ended or is quarantined and
 /// applies none.
 fn applied(view: &RunView) -> bool {
-    view.ended() || view.quarantine.is_some() || view.applied_sequence + 1 >= view.next_sequence
+    view.ended() || view.quarantine.is_some() || !view.pending()
 }
 
 fn identity(reducer: &dyn Reducer, package_digest: &str) -> Identity {
@@ -1040,6 +1027,69 @@ impl Engine {
         Ok(self.inner.store.get_package(digest).await?)
     }
 
+    /// The run's workflow package, decoded; `None` when it is not stored.
+    pub async fn workflow(&self, view: &RunView) -> Result<Option<Workflow>, HostError> {
+        let bytes = self.get_package(&view.package_digest).await?;
+        Ok(bytes.and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+    }
+
+    /// Every run of this engine's tenant, in the store's order.
+    pub async fn runs(&self) -> Result<Vec<RunView>, HostError> {
+        let mut runs = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self.list_runs(cursor, PAGE).await?;
+            runs.extend(page.items);
+            cursor = page.next;
+            if cursor.is_none() {
+                return Ok(runs);
+            }
+        }
+    }
+
+    /// The input the run was started with, from its first event; `None` when it has
+    /// none.
+    pub async fn start_input(&self, key: &RunKey) -> Result<Option<Value>, HostError> {
+        let started = self.list_events(key, 0, 1).await?;
+        Ok(started
+            .items
+            .first()
+            .and_then(|r| serde_json::from_slice::<Value>(&r.event.body).ok())
+            .map(|body| body["input"].clone()))
+    }
+
+    /// The latest applied result of the outstanding invocation of a run that needs
+    /// intervention: the error of an attempt whose outcome is unknown. `None` for any
+    /// other run.
+    pub async fn last_result(&self, view: &RunView) -> Result<Option<ActivityResult>, HostError> {
+        let Some(invocation) = view
+            .state()
+            .filter(|s| s.status == RunStatus::NeedsIntervention)
+            .and_then(|s| s.invocation)
+        else {
+            return Ok(None);
+        };
+        let (mut last, mut after) = (None, 0);
+        loop {
+            let page = self.list_events(&view.key, after, PAGE).await?;
+            let Some(end) = page.items.last() else {
+                return Ok(last);
+            };
+            after = end.event.sequence;
+            for record in &page.items {
+                let event = &record.event;
+                if event.kind != event_kind::ACTIVITY_RESULT || record.consumed_revision.is_none() {
+                    continue;
+                }
+                let result = serde_json::from_slice::<ActivityResult>(&event.body).ok();
+                if let Some(result) = result.filter(|r| r.invocation_id == invocation.invocation_id)
+                {
+                    last = Some(result);
+                }
+            }
+        }
+    }
+
     /// The workflow artifact bytes stored under `digest`.
     pub async fn get_artifact(&self, digest: &str) -> Result<Option<Vec<u8>>, HostError> {
         Ok(self.inner.store.get_artifact(digest).await?)
@@ -1308,10 +1358,10 @@ impl Engine {
         self.until(key, false).await
     }
 
-    /// Ticks as `run_until_parked`, but goes on past a held async step whose holder does
-    /// not wait for a person: returns only when the run has ended, or when each run of
+    /// Ticks as `run_until_parked`, but goes on past a held async step whose holder has
+    /// not said it waits: returns only when the run has ended, or when each run of
     /// its tree has ended, waits for a signal, needs intervention or is quarantined, or
-    /// is at an async step that needs someone (spec/host.md §2, `follow`).
+    /// is at an async step that needs something from outside (spec/host.md §2, `follow`).
     pub async fn follow(&self, key: &RunKey) -> Result<RunView, HostError> {
         self.until(key, true).await
     }
@@ -1337,7 +1387,7 @@ impl Engine {
                 stops = stops
                     && match tree[0].ended() {
                         true => applied(view),
-                        false => self.stops(view, follow).await?,
+                        false => self.stops(view, &tree, follow).await?,
                     };
             }
             if !busy && stops {
@@ -1350,29 +1400,39 @@ impl Engine {
         }
     }
 
-    /// Whether `until` stops at this run: it is parked, or with `follow` needs someone,
-    /// else waits outside this engine.
-    async fn stops(&self, view: &RunView, follow: bool) -> Result<bool, HostError> {
-        Ok(parked(view)
-            || match follow {
-                true => self.needs_someone(view).await?,
-                false => self.waits_outside(view).await?,
-            })
+    /// Whether `until` stops at this run: it has ended, or needs what no worker of this
+    /// engine gives it (a signal, a resolution, a release, an actor or a host that can
+    /// run its step), or is at a held step: with `follow` one whose holder reported a
+    /// wait, else one this engine does not watch. `tree` holds the runs it started.
+    async fn stops(
+        &self,
+        view: &RunView,
+        tree: &[RunView],
+        follow: bool,
+    ) -> Result<bool, HostError> {
+        let needs = self.needs(view, tree).await?;
+        Ok(match needs.need {
+            None
+            | Some(
+                Need::Quarantined
+                | Need::Signal
+                | Need::Child
+                | Need::Stuck
+                | Need::ExternalReady
+                | Need::CapabilityMissing,
+            ) => true,
+            Some(Need::Held) => needs.step.as_ref().is_some_and(|step| match follow {
+                true => step.waits.is_some(),
+                false => !self.watches(&view.key, &step.invocation_id, step.attempt),
+            }),
+            Some(Need::Working | Need::Driver) => false,
+        })
     }
 
     /// The run, then the runs below it as `spore list` shows them: each run whose
     /// parent is the run or a run below it.
     async fn tree(&self, key: &RunKey) -> Result<Vec<RunView>, HostError> {
-        let mut runs = Vec::new();
-        let mut cursor = None;
-        loop {
-            let page = self.list_runs(cursor, PAGE).await?;
-            runs.extend(page.items);
-            cursor = page.next;
-            if cursor.is_none() {
-                break;
-            }
-        }
+        let mut runs = self.runs().await?;
         let root = runs
             .iter()
             .position(|view| &view.key == key)

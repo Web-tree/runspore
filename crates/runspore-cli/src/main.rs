@@ -4,6 +4,7 @@
 
 mod cli;
 mod project;
+mod status;
 mod view;
 
 use std::process::ExitCode;

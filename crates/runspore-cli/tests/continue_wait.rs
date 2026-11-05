@@ -1,7 +1,7 @@
 //! `spore continue --wait` through the compiled binary (spec/cli.md, What a run needs):
-//! it follows a run past a held async step until the run needs a person or has ended. A
+//! it follows a run past a held async step until the run needs something from outside or has ended. A
 //! report from elsewhere is picked up within one poll, a cancel from elsewhere ends it
-//! with 7, a watch's `needs` line makes it return 6 with the watch's message, and an
+//! with 7, a watch's `waits` line makes it return 6 with what it waits for, and an
 //! interrupt leaves the attempt held. With `--json` it exits 0 whenever it printed the
 //! run's status, unless `--exit-status` asks for the run's exit code.
 
@@ -193,9 +193,9 @@ fn a_cancel_from_elsewhere_ends_it_with_7() {
 }
 
 #[test]
-fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
+fn a_watch_that_says_its_holder_waits_returns_with_what_it_waits_for() {
     let watch = "cat > /dev/null; echo $$ >> watch.pids; \
-                 echo '{\"needs\": \"person\", \"message\": \"answer in pane 2\"}'; \
+                 echo '{\"waits\": \"answer in pane 2\"}'; \
                  exec sleep 600";
     let dir = watched("wait-needs", watch);
     let run = start(&dir);
@@ -206,8 +206,7 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
     assert_eq!(code, Some(0), "{waits}");
     assert_eq!(waits["needs"], "held", "{waits}");
     assert_eq!(waits["step"]["state"], "held", "{waits}");
-    assert_eq!(waits["step"]["waiting"], "person", "{waits}");
-    assert_eq!(waits["step"]["message"], "answer in pane 2", "{waits}");
+    assert_eq!(waits["step"]["waits"], "answer in pane 2", "{waits}");
     assert_eq!(
         waits["commands"],
         json!([format!("spore step abandon {run}")])
@@ -222,7 +221,11 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
         (&json!("held"), &json!(1)),
         "{status}"
     );
-    assert_eq!(status["step"].get("waiting"), None, "{status}");
+    assert_eq!(status["step"]["waits"], json!(null), "{status}");
+    assert_eq!(
+        status["needs"], "held",
+        "status says what the run needs: {status}"
+    );
     // Text output keeps the run's exit code.
     let again = dir.run(&args(&[
         "--stop-grace-ms",
@@ -235,7 +238,7 @@ fn a_watch_that_says_its_holder_waits_for_a_person_returns_with_its_message() {
     assert!(
         again
             .stdout
-            .contains("; it waits for a person: answer in pane 2"),
+            .contains("; its holder waits: answer in pane 2"),
         "{}",
         again.stdout
     );

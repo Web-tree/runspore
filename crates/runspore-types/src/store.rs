@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::canonical::{self, CanonError};
 use crate::digest::{self, Digest};
-use crate::model::u64_str;
+use crate::model::{u64_str, State};
 use crate::reducer::{Command, Diagnostic};
 
 pub const STORE_PROTOCOL: &str = "0.2";
@@ -668,6 +668,16 @@ impl RunView {
             self.status.as_str(),
             "completed" | "failed" | STATUS_CANCELLED
         )
+    }
+
+    /// Whether the run has accepted an event it has not applied yet.
+    pub fn pending(&self) -> bool {
+        self.applied_sequence + 1 < self.next_sequence
+    }
+
+    /// The run's committed state; `None` before its first commit.
+    pub fn state(&self) -> Option<State> {
+        canonical::decode(self.snapshot.as_deref()?).ok()
     }
 }
 

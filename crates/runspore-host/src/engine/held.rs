@@ -52,11 +52,11 @@ pub(super) struct HeldAttempt {
     package: Arc<Package>,
 }
 
-/// What a watch of a held attempt tells while it runs: the message of its latest
-/// `needs` line, if any.
+/// What a watch of a held attempt tells while it runs: the text of its latest `waits`
+/// line, if any.
 pub(super) type Waits = Arc<Mutex<Option<String>>>;
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
@@ -548,8 +548,8 @@ impl Engine {
         Ok(None)
     }
 
-    /// The message of the latest `needs` line a running watch of the run printed: its
-    /// holder waits for a person. `None` when no watch of the run says so.
+    /// What the latest `waits` line a running watch of the run printed says its holder
+    /// waits for. `None` when no watch of the run says so.
     pub fn holder_waits(&self, key: &RunKey) -> Option<String> {
         lock(&self.inner.watching)
             .iter()
@@ -558,7 +558,7 @@ impl Engine {
     }
 
     /// Whether this engine watches the attempt `invocation_id`/`attempt` of the run and
-    /// its watch has not said that the holder waits for a person.
+    /// its watch has not said that the holder waits.
     pub(super) fn watches(&self, key: &RunKey, invocation_id: &str, attempt: u32) -> bool {
         let slot = (key.clone(), ids::attempt(invocation_id, attempt));
         lock(&self.inner.watching)

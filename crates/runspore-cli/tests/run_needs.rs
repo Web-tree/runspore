@@ -442,7 +442,7 @@ fn list_unfinished_gives_workflow_node_needs_since_and_actor_newest_first() {
         )
     );
     for r in &listed {
-        let since: u64 = r["since"].as_str().unwrap().parse().unwrap();
+        let since: u64 = r["updatedAtMs"].as_str().unwrap().parse().unwrap();
         assert!(since > 0, "{r}");
         assert_eq!(r["depth"], 0);
     }
@@ -458,7 +458,7 @@ fn list_unfinished_gives_workflow_node_needs_since_and_actor_newest_first() {
         .clone();
     assert_eq!(finished["needs"], Value::Null);
     assert_eq!(finished["workflow"], "loop");
-    assert!(finished["since"].is_string());
+    assert!(finished["updatedAtMs"].is_string());
 
     let text = dir.run(&args(&["list", "--unfinished"]));
     let lines: Vec<&str> = text.stdout.lines().collect();

@@ -212,9 +212,10 @@ An async action can also declare:
 | `stop` | Ask the work to stop when the run is cancelled |
 
 `spore continue "$RUN_ID" --wait` follows held work until the run ends or needs an
-answer. It may run the declared watch. The current watch protocol can report
-`{"needs":"person","message":"Review the proposed change"}`; that line returns
-control to the driver without completing the held step. See
+answer. It may run the declared watch. A watch can report what its holder waits for
+with a line such as `{"waits":"Review the proposed change"}`; that line returns
+control to the driver without completing the held step, and the text shows as
+`step.waits`. See
 [Automation](automation.md) for exit-code handling and
 [the async command contract](../../spec/host.md#async-commands-02) for the full
 start/probe/watch/stop interfaces.
