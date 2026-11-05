@@ -154,7 +154,7 @@ Ordinary `continue` also returns 0 if another worker is already working the run.
 `--exit-status` is supplied. Invalid commands and internal failures keep their
 error codes.
 
-Normal command JSON carries `"format":"runspore.cli/0.2"`. Use the JSON fields,
+Normal command JSON carries `"format":"runspore.cli/0.3"`. Use the JSON fields,
 not human-readable output, in scripts. With `--json`, progress lines on stderr are
 JSON objects too; do not mix stderr into stdout when consuming the final result.
 `worker` is a long-running process, not a single-result query.
