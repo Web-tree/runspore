@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0](https://github.com/Web-tree/runspore/compare/v0.9.2...v0.10.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* JSON output is format runspore.cli/0.3. status gains needs; a list row's since is updatedAtMs; a cancel's at is atMs; a held step's waiting and message are one waits. A watch's {"needs": "person", "message"} line is no longer recognised; print {"waits": "<text>"}. ml-workflow must follow (Max-Levitskiy/skills#167).
+
+### Features
+
+* one host module decides what a run needs; JSON format runspore.cli/0.3 ([#308](https://github.com/Web-tree/runspore/issues/308)) ([75662b8](https://github.com/Web-tree/runspore/commit/75662b821e39ba8c6279b9a58d14c5c383a6929a))
+
+
+### Bug Fixes
+
+* errors print their code once, with a sentence ([#315](https://github.com/Web-tree/runspore/issues/315)) ([361580c](https://github.com/Web-tree/runspore/commit/361580c3e4f83685fa17119d94cb52cb8185049d)), closes [#300](https://github.com/Web-tree/runspore/issues/300)
+
 ## [0.9.2](https://github.com/Web-tree/runspore/compare/v0.9.1...v0.9.2) (2026-11-05)
 
 
