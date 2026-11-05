@@ -188,7 +188,8 @@ often.
 
 **`step claim [<runId>] [--actor <label>] [--holder <json>]`.** With `<runId>`, claims
 that run's ready external step; a run that has none exits 2 with `step.not-ready`.
-Without it, claims the oldest ready matching step in the database, like a task queue;
+Without it, claims a ready matching step in the database in descending action
+priority, then oldest due first among equal priorities, like a task queue;
 when there is none it exits 0 and prints `{"claimed": false}` (text: `nothing to
 claim`). Without `--actor` it takes only steps whose action has no `actor`; with
 `--actor <label>`, only steps with that label. `--holder` is the holder handle,
@@ -1018,7 +1019,8 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 ## JSON output
 
 Every object carries `"format": "runspore.cli/0.2"`, errors included; 0.1 wrote
-`runspore.cli/0.1`. Counters and timestamps are decimal strings. `status` output:
+`runspore.cli/0.1`. Revision, event-sequence and timestamp values are decimal strings;
+attempt, visit and maximum-attempt counts are JSON numbers. `status` output:
 
 ```json
 {"format": "runspore.cli/0.2", "runId": "run_…", "status": "needs-intervention",

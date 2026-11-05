@@ -99,7 +99,7 @@ The kernel's answer to one event: the run's next state and the commands to carry
 _Avoid_: "decision" for a person's reply
 
 **Supported setup**:
-One machine, one OS user, one database per checkout. Several machines on one database, two repositories sharing one database on purpose, and other OS users are not supported and not detected. Whoever can write the database file may do anything to its runs: file permissions are the only boundary.
+One machine and one OS user, with a SQLite database shared by a repository's worktrees and clones by default. Database lookup uses `--db`, then `RUNSPORE_DB`, then an existing `.spore/runspore.db`, then `$SPORE_HOME/db/<repository key>/runspore.db`; `SPORE_HOME` defaults to `~/.spore`. Several machines on one database, unrelated repositories sharing one on purpose, and other OS users are not supported. Whoever can write the database file may do anything to its runs: file permissions are the only boundary.
 _Avoid_: multi-user, shared database
 
 **Leftover command**:
@@ -159,7 +159,7 @@ The shape of the input a workflow accepts, declared with the workflow and checke
 _Avoid_: parameters (node parameters belong to one node), arguments
 
 **Project folder**:
-The `.spore/` folder at a repository's root. It holds the repository's workflows, which are committed, and its run database, which is not.
+The `.spore/` folder at a repository's root. It holds the repository's workflows and optional worker settings, which can be committed. New run databases normally live outside the checkout under `$SPORE_HOME/db/`; an existing `.spore/runspore.db` remains supported and must not be committed.
 _Avoid_: workspace, config dir
 
 **Base folder**:

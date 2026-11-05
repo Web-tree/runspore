@@ -388,8 +388,9 @@ quarantine. Read views show status `cancelled` and the cancel record.
 ## 3. SQLite adapter
 
 - One database file. Several processes on one host may open it at once.
-- **Supported setup (0.2).** One machine, one OS user, one database per checkout.
-  Several machines on one database, two repositories sharing one database on
+- **Supported setup (0.2).** One machine, one OS user, with a repository's worktrees
+  and clones sharing one database by default (cli.md §Project folder).
+  Several machines on one database, unrelated repositories sharing one database on
   purpose (`--db` or `RUNSPORE_DB`), and processes of another OS user are not
   supported, and nothing detects them, as for a network filesystem. They share one
   tenant, so one start-key namespace, and a process record they leave cannot be

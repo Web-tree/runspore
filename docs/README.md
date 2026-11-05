@@ -1,4 +1,28 @@
-# Architecture documentation
+# Runspore documentation
+
+## User guide
+
+Start with the [Runspore user guide](guide/README.md), also published at
+[runspore.com/docs](https://runspore.com/docs). It covers the implemented CLI:
+installation, workflow authoring, running and recovering work, external actors,
+automation, project settings, and command reference.
+
+- [Getting started](guide/getting-started.md)
+- [Authoring workflows](guide/authoring-workflows.md)
+- [Running workflows](guide/running-workflows.md)
+- [External and asynchronous steps](guide/external-steps.md)
+- [Automation](guide/automation.md)
+- [Projects and settings](guide/project-settings.md)
+- [CLI reference](guide/cli-reference.md)
+
+## Reference and standards
+
+The [implementation specifications](../spec/README.md) define the current Runspore
+contracts. The [SWL chapter](https://runspore.com/docs/swl) covers the independent
+Spore Workflow Language working draft; its notation is not currently a drop-in
+input format for `spore`.
+
+## Architecture and design
 
 Design revision 0.1 — 2026-10-05.
 
