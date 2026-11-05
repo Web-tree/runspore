@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/Web-tree/runspore/compare/v0.9.1...v0.9.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate libproc to 0.15.0 ([#311](https://github.com/Web-tree/runspore/issues/311)) ([096ef61](https://github.com/Web-tree/runspore/commit/096ef61eb9f06e27e2079f73a039c6524772f714))
+
 ## [0.9.1](https://github.com/Web-tree/runspore/compare/v0.9.0...v0.9.1) (2026-11-01)
 
 
