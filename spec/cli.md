@@ -1004,7 +1004,7 @@ send it with a new `--id`, or without one; `details` are `{runId, id}`.
 ## Errors
 
 A command that fails prints one error and exits with the code below. In text mode
-the error is one line on stderr, the code once and then the message:
+the error goes to stderr and starts with one line, the code once and then the message:
 
 ```
 spore: lease.lost: the attempt has ended or its lease is no longer held
@@ -1018,8 +1018,13 @@ person: a sentence that says what happened and, where there is one, what to do. 
 never repeats the code, and it names no layer of `spore` that the error came through.
 Its wording may change between versions.
 
-A workflow folder that does not build prints its report instead of the one line
-(§Validation).
+Three messages go on below their first line, and the lines are part of the same
+error, not errors of their own: `output.invalid` and `input.invalid` list what does
+not fit, one per line, and `signal.outcome-unrouted` lists the outcomes the node
+accepts (§Commands, §Validation). Only the first line of an error starts with
+`spore: `.
+
+A workflow folder that does not build prints its report instead (§Validation).
 
 ## Exit codes
 
