@@ -7,10 +7,17 @@ commands below were run in this order against a release build; each output block
 what they printed. Run IDs are random, so yours differ, and `...` marks lines left
 out.
 
+For a first workflow without a source checkout, use the
+[getting-started guide](../docs/guide/getting-started.md). The examples below also
+exercise interruption and recovery; their output blocks are captured transcripts.
+
 ## Setup
 
 From the repository root, build the binary and work in a scratch directory with copies
-of the examples. The database is `./runspore.db` there.
+of the examples. With no explicit database selection, runs are stored under
+`~/.spore/db/<scratch-folder-path>/runspore.db`, outside that directory.
+`spore list --json` shows the actual path. See
+[Projects and settings](../docs/guide/project-settings.md#where-runs-live) for overrides.
 
 ```sh
 cargo build --release -p runspore-cli

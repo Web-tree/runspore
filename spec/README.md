@@ -47,9 +47,10 @@ secrets, telemetry, blobs, history compaction, run migration, package signing. E
 additive under a later semantics version. 0.2 took cancellation, input and output
 schema checks, and the DOT frontend off this list; 0.1 had none of them.
 
-The supported setup is one machine, one OS user and one database per checkout
-([store.md](store.md) §3). Several machines on one database, two repositories sharing
-one on purpose, and other OS users are unsupported and not detected. There is no
+The supported setup is one machine and one OS user, with a database shared by a
+repository's worktrees and clones by default ([cli.md](cli.md), Project folder;
+[store.md](store.md) §3). Several machines on one database, unrelated repositories
+sharing one on purpose, and other OS users are unsupported and not detected. There is no
 authorization: an actor label is a filter, not a permission, and whoever can write
 the database file may claim, signal, resolve, abandon or cancel. Authenticated
 approvals belong to the target architecture of a multi-user host (`docs/11`).
