@@ -112,8 +112,12 @@ pub enum StoreFailureKind {
     NotFound,
 }
 
+/// A store operation that was refused or could not be done. `kind` and `code` are for
+/// programs to match on. `message` is for a person: a sentence saying what happened,
+/// never the code again. The failure displays as its message alone, so whoever reports
+/// it decides how to show the code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[error("{kind:?} {code}: {message}")]
+#[error("{message}")]
 pub struct StoreFailure {
     pub kind: StoreFailureKind,
     /// Stable code from `spec/store.md`.
@@ -133,9 +137,123 @@ impl StoreFailure {
             message: message.into(),
         }
     }
+
+    /// A failure whose message is what `code` [means](meaning). For the codes of
+    /// `spec/store.md` that need no detail of the request to be understood.
+    pub fn of(kind: StoreFailureKind, code: &str) -> Self {
+        debug_assert!(
+            MEANINGS.iter().any(|(known, _)| *known == code),
+            "{code} has no sentence in MEANINGS"
+        );
+        Self::new(kind, code, meaning(code))
+    }
 }
 
 pub type StoreResult<T> = Result<T, StoreFailure>;
+
+/// What each failure code of `spec/store.md` means, as the sentence a person reads.
+/// Every adapter says the same thing for the same code.
+const MEANINGS: &[(&str, &str)] = &[
+    (
+        "artifact.digest-mismatch",
+        "the artifact's digest does not match its bytes",
+    ),
+    ("attempt.not-found", "the attempt does not exist"),
+    (
+        "candidate.too-large",
+        "the candidate answer is larger than the store keeps",
+    ),
+    (
+        "command.id-conflict",
+        "a command of the turn has an ID the run already uses",
+    ),
+    (
+        "command.payload-invalid",
+        "a command of the turn has a payload that does not fit its kind",
+    ),
+    ("cursor.invalid", "the cursor was not issued by this store"),
+    (
+        "event.id-conflict",
+        "the event ID already names another event of the run",
+    ),
+    (
+        "event.mismatch",
+        "the event is not the next one the run has to apply",
+    ),
+    (
+        "event.reserved-kind",
+        "events of this kind are written by the store alone",
+    ),
+    (
+        "event.too-large",
+        "the event is larger than the store keeps",
+    ),
+    (
+        "evidence.digest-mismatch",
+        "the evidence's digest does not match its body",
+    ),
+    (
+        "holder.too-large",
+        "the holder handle is larger than the store keeps",
+    ),
+    ("invocation.exists", "the invocation already exists"),
+    (
+        "invocation.not-claimable",
+        "the invocation is not waiting to be claimed",
+    ),
+    ("invocation.not-due", "the invocation is not due yet"),
+    ("invocation.not-found", "the invocation does not exist"),
+    (
+        "invocation.retry-invalid",
+        "the retry does not follow the invocation's last attempt",
+    ),
+    (
+        "lease.lost",
+        "the attempt has ended or its lease is no longer held",
+    ),
+    ("lease.not-due", "the attempt's lease has not run out yet"),
+    (
+        "package.digest-mismatch",
+        "the package's digest does not match the package",
+    ),
+    (
+        "request.digest-mismatch",
+        "the request ID was already used for another request",
+    ),
+    (
+        "result.invalid",
+        "the result is not one the attempt can report",
+    ),
+    ("revision.mismatch", "the run has changed since it was read"),
+    ("run.cancelled", "the run is cancelled"),
+    (
+        "run.exists",
+        "the run already exists with another start key, package or input",
+    ),
+    ("run.not-found", "the run does not exist"),
+    ("run.quarantined", "the run is quarantined"),
+    (
+        "run.start-key-mismatch",
+        "the start key already names another run",
+    ),
+    (
+        "snapshot.digest-mismatch",
+        "the snapshot's digest does not match the snapshot",
+    ),
+    (
+        "snapshot.too-large",
+        "the snapshot is larger than the store keeps",
+    ),
+];
+
+/// The sentence for a failure code of `spec/store.md`. A code the contract does not
+/// name gets a sentence that says only that the store refused.
+pub fn meaning(code: &str) -> &'static str {
+    MEANINGS
+        .iter()
+        .find(|(known, _)| *known == code)
+        .map_or("the store refused the request", |(_, sentence)| sentence)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -809,4 +927,41 @@ pub trait Store: Send + Sync {
 /// The store's authority for "now". Injected so lease and backoff rules are testable.
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failure_displays_as_its_message_alone() {
+        let failure = StoreFailure::of(StoreFailureKind::Stale, "lease.lost");
+        assert_eq!(
+            failure.to_string(),
+            "the attempt has ended or its lease is no longer held"
+        );
+        assert_eq!(
+            (failure.kind, failure.code.as_str()),
+            (StoreFailureKind::Stale, "lease.lost")
+        );
+    }
+
+    /// Each code has one sentence, and no sentence is, or carries, its code.
+    #[test]
+    fn every_code_means_a_sentence() {
+        for (n, (code, sentence)) in MEANINGS.iter().enumerate() {
+            assert!(
+                MEANINGS[..n].iter().all(|(earlier, _)| earlier != code),
+                "{code} is listed twice"
+            );
+            assert_eq!(meaning(code), *sentence);
+            assert!(sentence.contains(' '), "{code}: {sentence}");
+            assert!(!sentence.contains(code), "{code}: {sentence}");
+            assert!(
+                sentence.starts_with(char::is_lowercase) && !sentence.ends_with('.'),
+                "{code}: {sentence}"
+            );
+        }
+        assert_eq!(meaning("no.such-code"), "the store refused the request");
+    }
 }

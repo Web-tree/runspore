@@ -60,9 +60,16 @@ pub trait StoreFactory: Send + Sync {
     fn fresh(&self, clock: Arc<dyn Clock>) -> Fixture;
 }
 
-/// The failure kind and code of `result`, which must be an error.
+/// The failure kind and code of `result`, which must be an error. Its message must be
+/// a sentence for a person, not the code again (`spec/store.md` §1).
 pub fn failure<T: Debug>(result: StoreResult<T>) -> (StoreFailureKind, String) {
     let error = result.expect_err("expected a store failure");
+    assert!(
+        error.message.contains(' ') && !error.message.contains(&error.code),
+        "the message of {} must be a sentence without the code: {:?}",
+        error.code,
+        error.message
+    );
     (error.kind, error.code)
 }
 

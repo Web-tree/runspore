@@ -27,6 +27,10 @@ a scan cursor the store did not issue.
 
 Failure codes are part of the contract. `kind` is in parentheses.
 
+A failure also carries a `message` for a person: a sentence that says what the code
+means for this request. It is never the code itself, and its wording is not part of
+the contract.
+
 Protocol 0.2 adds `find_run`, an attempt's process record with `set_process`, the
 audit record of an expiry, the run's base folder, the artifact table with
 `get_artifact` and the run's artifact digest, the schema guard that names the version
