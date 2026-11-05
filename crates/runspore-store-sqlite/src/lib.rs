@@ -238,11 +238,19 @@ fn live_workers(conn: &Connection, version: i64, now: u64) -> R<Vec<String>> {
 }
 
 fn conflict(code: &str) -> StoreFailure {
-    fail(StoreFailureKind::Conflict, code, code)
+    StoreFailure::of(StoreFailureKind::Conflict, code)
 }
 
 fn stale(code: &str) -> StoreFailure {
-    fail(StoreFailureKind::Stale, code, code)
+    StoreFailure::of(StoreFailureKind::Stale, code)
+}
+
+fn quota(code: &str) -> StoreFailure {
+    StoreFailure::of(StoreFailureKind::Quota, code)
+}
+
+fn not_found(code: &str) -> StoreFailure {
+    StoreFailure::of(StoreFailureKind::NotFound, code)
 }
 
 fn db(error: rusqlite::Error) -> StoreFailure {
@@ -366,8 +374,7 @@ fn run_row(c: &Connection, key: &RunKey) -> R<Option<RunRow>> {
 }
 
 fn existing_run(c: &Connection, key: &RunKey) -> R<RunRow> {
-    run_row(c, key)?
-        .ok_or_else(|| fail(StoreFailureKind::NotFound, "run.not-found", "run.not-found"))
+    run_row(c, key)?.ok_or_else(|| not_found("run.not-found"))
 }
 
 /// Appends an event at the run's next sequence with `acceptedAtMs = max(now, previous)`.
@@ -851,11 +858,7 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
         return Err(conflict("snapshot.digest-mismatch"));
     }
     if q.snapshot.len() > MAX_SNAPSHOT_BYTES {
-        return Err(fail(
-            StoreFailureKind::Quota,
-            "snapshot.too-large",
-            "snapshot.too-large",
-        ));
+        return Err(quota("snapshot.too-large"));
     }
     for (n, command) in q.commands.iter().enumerate() {
         let taken: bool = c
@@ -961,7 +964,10 @@ fn apply_commit(c: &Connection, q: &CommitTurn, now: u64) -> R<CommitReceipt> {
                 return Err(fail(
                     StoreFailureKind::Incompatible,
                     "command.unknown-kind",
-                    command.kind.clone(),
+                    format!(
+                        "this store does not know commands of kind {:?}",
+                        command.kind
+                    ),
                 ));
             }
         }
@@ -1009,11 +1015,7 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
         node_params,
     )) = row
     else {
-        return Err(fail(
-            StoreFailureKind::NotFound,
-            "invocation.not-found",
-            "invocation.not-found",
-        ));
+        return Err(not_found("invocation.not-found"));
     };
     let run = existing_run(c, &q.key)?;
     if run.cancelled {
@@ -1032,11 +1034,7 @@ fn apply_claim(c: &Connection, q: &ClaimAttempt, now: u64) -> R<Claim> {
         .as_ref()
         .is_some_and(|h| h.len() > MAX_HOLDER_BYTES)
     {
-        return Err(fail(
-            StoreFailureKind::Quota,
-            "holder.too-large",
-            "holder.too-large",
-        ));
+        return Err(quota("holder.too-large"));
     }
     let fence = run.fence + 1;
     let attempt_id = ids::attempt(&q.invocation_id, number);
@@ -1240,11 +1238,7 @@ impl Store for SqliteStore {
                     return Err(conflict("event.reserved-kind"));
                 }
                 if q.body.body.len() > MAX_EVENT_BYTES {
-                    return Err(fail(
-                        StoreFailureKind::Quota,
-                        "event.too-large",
-                        "event.too-large",
-                    ));
+                    return Err(quota("event.too-large"));
                 }
                 let prior = c
                     .query_row(
@@ -1400,7 +1394,7 @@ impl Store for SqliteStore {
                 _ => return Err(stale("lease.lost")),
             }
             if q.holder.len() > MAX_HOLDER_BYTES {
-                return Err(fail(StoreFailureKind::Quota, "holder.too-large", "holder.too-large"));
+                return Err(quota("holder.too-large"));
             }
             let deadline_ms = now.saturating_add(q.deadline_duration_ms);
             let lease_until_ms = capped(now.saturating_add(q.lease_duration_ms), Some(deadline_ms));
@@ -1478,11 +1472,7 @@ impl Store for SqliteStore {
                 if let Some(candidate) = &q.candidate {
                     verify(candidate)?;
                     if candidate.body.len() > MAX_CANDIDATE_BYTES {
-                        return Err(fail(
-                            StoreFailureKind::Quota,
-                            "candidate.too-large",
-                            "candidate.too-large",
-                        ));
+                        return Err(quota("candidate.too-large"));
                     }
                     let result: ActivityResult = canonical::decode(&candidate.body)
                         .map_err(|_| conflict("result.invalid"))?;
@@ -1587,11 +1577,7 @@ impl Store for SqliteStore {
             &q.mutation,
             |c, now| {
                 let Some(row) = attempt_row(c, &q.attempt)? else {
-                    return Err(fail(
-                        StoreFailureKind::NotFound,
-                        "attempt.not-found",
-                        "attempt.not-found",
-                    ));
+                    return Err(not_found("attempt.not-found"));
                 };
                 if row.status != "running" {
                     return Err(stale("lease.lost"));
@@ -1626,7 +1612,7 @@ impl Store for SqliteStore {
                 )
                 .map_err(db)?;
             if !exists {
-                return Err(fail(StoreFailureKind::NotFound, "attempt.not-found", "attempt.not-found"));
+                return Err(not_found("attempt.not-found"));
             }
             let id = insert_audit(c, a, "late-evidence", &q.evidence, now)?;
             Ok(Outcome::Applied(AuditRecorded { audit_id: format!("audit_{id}") }))

@@ -63,6 +63,12 @@ fn json(dir: &Dir, extra: &[&str]) -> (Option<i32>, Value) {
     (out.code(), out.json())
 }
 
+/// `spore …` in text mode: the exit code and what it printed on stderr.
+fn text(dir: &Dir, extra: &[&str]) -> (Option<i32>, String) {
+    let out = dir.run(&args(extra));
+    (out.code(), out.stderr)
+}
+
 /// Starts `flow` under `key` and works it until it parks at the review step.
 fn at_review(dir: &Dir, key: &str) -> String {
     let (code, status) = json(
@@ -254,6 +260,52 @@ fn abandon_frees_the_step_and_a_late_report_is_refused() {
     assert_eq!(
         (code, &bad["error"]["code"]),
         (Some(2), &json!("step.token-invalid"))
+    );
+}
+
+/// An error is one line, the code once and then a sentence (spec/cli.md §Errors):
+/// the store's sentence for `step renew`, the engine's, which says what happened to
+/// the report, for `step complete`. JSON mode carries the same message.
+#[test]
+fn a_refused_token_is_one_line_with_the_code_once() {
+    let dir = folder("ext-stale", "60000");
+    let run = at_review(&dir, "k");
+    let (_, claim) = json(&dir, &["step", "claim", &run, "--actor", "reviewer"]);
+    let token = claim["token"].as_str().unwrap();
+    let (code, _) = json(&dir, &["step", "abandon", &run]);
+    assert_eq!(code, Some(0));
+
+    const LOST: &str = "the attempt has ended or its lease is no longer held";
+    assert_eq!(
+        text(&dir, &["step", "renew", token]),
+        (Some(2), format!("spore: lease.lost: {LOST}\n"))
+    );
+    let (code, refused) = json(&dir, &["step", "renew", token]);
+    assert_eq!(code, Some(2));
+    assert_eq!(
+        refused["error"],
+        json!({"code": "lease.lost", "message": LOST})
+    );
+
+    const LATE: &str = "the attempt has already ended (abandoned, expired or reported); \
+                        the report is kept as late evidence";
+    let complete = ["step", "complete", token, "--outcome", "approved"];
+    assert_eq!(
+        text(&dir, &complete),
+        (Some(2), format!("spore: lease.lost: {LATE}\n"))
+    );
+    let (_, refused) = json(&dir, &complete);
+    assert_eq!(
+        refused["error"],
+        json!({"code": "lease.lost", "message": LATE})
+    );
+
+    assert_eq!(
+        text(&dir, &["step", "fail", "not-a-token", "--error", "x"]),
+        (
+            Some(2),
+            "spore: step.token-invalid: not a step token\n".to_string()
+        )
     );
 }
 

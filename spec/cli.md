@@ -1001,6 +1001,26 @@ resolution is `resolve.id-reused`; **0.2:** `cancel --id` with an ID it took for
 cancel with another reason is `cancel.id-reused`. The message names the run and the ID and says to
 send it with a new `--id`, or without one; `details` are `{runId, id}`.
 
+## Errors
+
+A command that fails prints one error and exits with the code below. In text mode
+the error is one line on stderr, the code once and then the message:
+
+```
+spore: lease.lost: the attempt has ended or its lease is no longer held
+```
+
+In JSON mode it is `{"format", "error": {"code", "message"}}` on stdout, with the
+same code and the same message, and `details` where a section above says so.
+
+The **code** is stable, and it is what a program matches on. The **message** is for a
+person: a sentence that says what happened and, where there is one, what to do. It
+never repeats the code, and it names no layer of `spore` that the error came through.
+Its wording may change between versions.
+
+A workflow folder that does not build prints its report instead of the one line
+(§Validation).
+
 ## Exit codes
 
 | Code | Meaning |

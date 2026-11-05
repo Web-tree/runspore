@@ -91,8 +91,10 @@ pub enum FailureKind {
 }
 
 /// A transition that produced no decision. Nothing may be committed for it.
+/// `kind` and `code` are for programs; the failure displays as `details` alone, the
+/// sentence for a person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[error("{kind:?} {code}: {details}")]
+#[error("{details}")]
 pub struct Failure {
     pub kind: FailureKind,
     pub code: String,
