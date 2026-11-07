@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/Web-tree/runspore/compare/v0.10.0...v0.10.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **release:** attach the assets before a release is published ([#314](https://github.com/Web-tree/runspore/issues/314)) ([894dae6](https://github.com/Web-tree/runspore/commit/894dae6401244c66c8062741cb2f586aeea67018))
+
 ## [0.10.0](https://github.com/Web-tree/runspore/compare/v0.9.2...v0.10.0) (2026-11-05)
 
 
