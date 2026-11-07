@@ -1,5 +1,6 @@
 //! The release cycle (spec/release.md section 8): release-please bumps every version
-//! `spore --version` and `cargo --locked` read, and the PR title check refuses a title
+//! `spore --version` and `cargo --locked` read and makes each release as a draft the
+//! release workflow publishes, and the PR title check refuses a title
 //! that is not a conventional commit only when `PR_TITLE_STRICT` is true.
 
 use std::path::{Path, PathBuf};
@@ -53,6 +54,20 @@ fn release_please_bumps_the_workspace_version_and_every_local_package_in_cargo_l
     assert_eq!(
         got, want,
         "release-please-config.json must bump each workspace package in Cargo.lock"
+    );
+}
+
+/// Releases are immutable, so a release published before its assets never gets them:
+/// 0.7.1 to 0.9.2 went out that way. release-please makes a draft, with its tag.
+#[test]
+fn release_please_makes_a_draft_release_and_its_tag() {
+    let config: serde_json::Value =
+        serde_json::from_str(&read("release-please-config.json")).unwrap();
+    let package = &config["packages"]["."];
+    assert_eq!(package["draft"], true);
+    assert_eq!(package["force-tag-creation"], true);
+    assert!(
+        read(".github/workflows/release.yml").contains("gh release edit \"$TAG\" --draft=false")
     );
 }
 

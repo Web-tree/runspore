@@ -11,25 +11,30 @@ and continue after a process stops. A workflow is a folder containing
 
 ## Install
 
-**Release availability, checked 2026-11-05:** the latest release,
-[v0.9.1](https://github.com/Web-tree/runspore/releases/tag/v0.9.1), has no attached
-binary assets. Use the source installation below until the signed archives are
-published. A GitHub source archive is not an installable `spore` binary.
+On macOS or Linux (or WSL on Windows), on arm64 or x86_64:
 
-On macOS or Linux, with Git, Rust managed by `rustup`, and a native C toolchain:
+```sh
+curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh | sh
+spore --version
+```
+
+The installer puts the newest release in `~/.local/bin`, after checking the release
+key's signature and the archive's checksum. Run it again to update. The
+[installation guide](docs/guide/getting-started.md#install-spore) covers its options
+and prerequisites.
+
+To build from source instead, with Git, Rust managed by `rustup`, and a native C
+toolchain:
 
 ```sh
 git clone https://github.com/Web-tree/runspore.git
 cd runspore
 cargo install --path crates/runspore-cli --locked
-spore --version
-spore capabilities
 ```
 
 Running Cargo from the checkout selects the toolchain and WebAssembly target in
 `rust-toolchain.toml`. Cargo installs `spore` in `~/.cargo/bin`; add that folder to
-your `PATH` if needed. The [installation guide](docs/guide/getting-started.md#install-spore)
-covers prerequisites and the signed installer once release assets are available.
+your `PATH` if needed.
 
 The release key pinned in `install.sh` is:
 
@@ -39,8 +44,7 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGy3mjvtp10UZgB9Y8u3KNBOh66DHPo3bdbZEszh9b1k
 
 ## Try a workflow
 
-If you installed from the checkout above, the included `hello` workflow is ready
-to run:
+From a checkout of this repository, the included `hello` workflow is ready to run:
 
 ```sh
 spore validate examples/hello

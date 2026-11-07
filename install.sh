@@ -4,6 +4,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Web-tree/runspore/main/install.sh | sh
 #
+# Run it again to update: it replaces the installed spore with the newest release.
+#
 # SPORE_VERSION       release to install (default: the newest)
 # SPORE_INSTALL_DIR   install folder (default: $HOME/.local/bin)
 # SPORE_DOWNLOAD_URL  folder holding the release assets, for a mirror
@@ -104,9 +106,17 @@ if ! { cp "$tmp/spore" "$part" && chmod 0755 "$part"; }; then
 	die "cannot write into $dir"
 fi
 version=$("$part" --version) || die "the downloaded spore does not run on this machine"
+was=
+if [ -x "$dir/spore" ]; then
+	was=$("$dir/spore" --version 2>/dev/null) || was=
+fi
 mv -f "$part" "$dir/spore" || die "cannot write into $dir"
 
-echo "installed $version at $dir/spore"
+if [ -n "$was" ] && [ "$was" != "$version" ]; then
+	echo "installed $version at $dir/spore, replacing $was"
+else
+	echo "installed $version at $dir/spore"
+fi
 case ":$PATH:" in
 *":$dir:"*)
 	found=$(command -v spore 2>/dev/null || true)
