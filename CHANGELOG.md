@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/Web-tree/runspore/compare/v0.10.1...v0.10.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate jsonschema to 0.61.0 ([#319](https://github.com/Web-tree/runspore/issues/319)) ([e5a83fe](https://github.com/Web-tree/runspore/commit/e5a83fecb236312b804ac81c58bfb9db822516aa))
+
 ## [0.10.1](https://github.com/Web-tree/runspore/compare/v0.10.0...v0.10.1) (2026-11-07)
 
 
