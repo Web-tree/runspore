@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-build"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "jsonschema",
  "runspore-schema",
@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-cli"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "clap",
  "hex",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-component"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "runspore-kernel",
  "runspore-types",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-conformance-export"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "hex",
  "runspore-kernel",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-host"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "async-trait",
  "getrandom 0.4.3",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-kernel"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "runspore-trace",
  "runspore-types",
@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-schema"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "runspore-types",
  "serde_json",
@@ -1523,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-store-conformance"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "runspore-types",
  "serde_json",
@@ -1532,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-store-sqlite"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "async-trait",
  "runspore-store-conformance",
@@ -1545,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-test-runner"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "serde_json",
  "wit-bindgen 0.63.0",
@@ -1553,7 +1553,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-trace"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "runspore-kernel",
  "runspore-types",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-types"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "async-trait",
  "hex",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "runspore-wasmtime"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "runspore-build",
  "runspore-kernel",
