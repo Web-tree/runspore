@@ -19,7 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-nix = { version = "0.31.3", features = ["signal", "process", "fs", "hostname"] }
+nix = { version = "0.32.0", features = ["signal", "process", "fs", "hostname"] }
 getrandom = "0.4.3"
 wasmtime = { version = "50.0.0", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
 
