@@ -43,7 +43,7 @@ binary and is shown to produce byte-identical decisions in Node and Bun.
 Timers, fork and join, child workflows, compensation, `reconcilable` effects, JSON
 Schema beyond the subset of [schema.md](schema.md), a YAML frontend, PostgreSQL, a JS
 host or SDK, browser and Cloudflare profiles, approvals and capability brokering,
-secrets, telemetry, blobs, history compaction, run migration, package signing. Each is
+secrets, telemetry, blobs, history compaction, run migration, spore signing. Each is
 additive under a later semantics version. 0.2 took cancellation, input and output
 schema checks, and the DOT frontend off this list; 0.1 had none of them.
 

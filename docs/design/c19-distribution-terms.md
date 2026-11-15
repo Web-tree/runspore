@@ -2,7 +2,7 @@
 
 Design record of the first ticket on the spore distribution map (#240), held on 2026-11-15. It fixes the vocabulary every later ticket on that map uses: what a spore is, what it exports for steps to call, the two manifests and the lock, and where spores come from and are kept. **A spore is the versioned unit of distribution. The reusable WebAssembly piece it exports is a Wasm action, always written in full, because "action" alone keeps meaning the binding in a settings file.** The entries themselves live in `CONTEXT.md` under *Distribution*; this record keeps why each name was picked and what it was picked over.
 
-No existing term changes meaning. Two wordings in other entries are narrowed: the **Plugin** entry now says "the `max-skills` Claude Code marketplace", and the **Release key** entry says "signing spores" for what it called "package signing", since **Package** is the workflow document and is never signed on its own.
+No existing term changes meaning. Two wordings in other entries are narrowed: the **Plugin** entry now says "the `max-skills` Claude Code marketplace", and the **Release key** entry says "signing spores" for what it called "package signing", since **Package** now names only the workflow document, and what a publisher would sign is a spore version (whether they do is #245's). The MVP scope line in `spec/README.md` is reworded the same way.
 
 ## Locked decisions
 

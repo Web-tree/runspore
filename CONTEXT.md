@@ -285,7 +285,7 @@ _Avoid_: action (alone), function, step runner, plugin, module
 _Avoid_: manifest (alone), artifact manifest, config, Cargo.toml
 
 **Artifact manifest**:
-The list inside a workflow artifact of its package and every file it holds, each by path and digest (`spec/artifact.md` §2). A build writes it; nobody edits it. It is neither an author manifest nor a lock.
+The list inside a workflow artifact of its package, named by digest, and every file it holds, each by path and digest (`spec/artifact.md` §2). A build writes it; nobody edits it. It is neither an author manifest nor a lock.
 _Avoid_: manifest (alone), lockfile
 
 **Lock**:
