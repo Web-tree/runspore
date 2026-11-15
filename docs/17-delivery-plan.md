@@ -12,7 +12,7 @@ The dependency chain is protocol and fixtures, then kernel and packaging, then S
 | M3 Production server | PostgreSQL, remote claims, child runs, compensation, audit and OTel | Model review, soak, restore and security gates pass |
 | M4 Agent integration | The `ml-workflow` plugin in `max-skills` (mod, helper, skills) over the `spore` CLI; the reference coding loop | The reference loop survives a kill at every point and comes back (spec/host.md H37); it opens no PR |
 | M5 Browser and edge | IndexedDB and Cloudflare profiles, export and handover | Real target tests and documented liveness limits |
-| M6 Ecosystem | WIT store plugins, activity SDK, registry and import frontends | Third-party implementation passes public conformance |
+| M6 Ecosystem | WIT store plugins, activity SDK, registry and import frontends; spores, Wasm actions and their registries (spore distribution map, #240; names in [C19](design/c19-distribution-terms.md)) | Third-party implementation passes public conformance |
 
 ## Tickets that should exist before implementation starts
 
@@ -24,4 +24,4 @@ Each ticket needs a concrete acceptance fixture, including failures, before impl
 
 Plan roughly 6 to 10 engineer-weeks for the spikes and useful local alpha, and 20 to 35 engineer-weeks total for a narrowly supported production release with PostgreSQL, security controls, conformance, and operations. Browser and Cloudflare plus a polished mod are additional work, plausibly 8 to 14 engineer-weeks. These are planning estimates for experienced Rust, TypeScript, and database engineers, not schedule commitments. Re-estimate after M0; audit and platform surprises can dominate.
 
-The first public promise should be small: one graph semantics implementation, SQLite local recovery, explicit effect guarantees, Rust and JS APIs, and a conformance suite. Multi-region execution, arbitrary custom reducers everywhere, full OWS or SCXML import, live provider swapping, generalized runtime code generation, and a marketplace remain out of the first release.
+The first public promise should be small: one graph semantics implementation, SQLite local recovery, explicit effect guarantees, Rust and JS APIs, and a conformance suite. Multi-region execution, arbitrary custom reducers everywhere, full OWS or SCXML import, live provider swapping, generalized runtime code generation, and the spore marketplace website remain out of the first release.
