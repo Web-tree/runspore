@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/Web-tree/runspore/compare/v0.10.3...v0.10.4) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate nix to 0.32.0 ([#327](https://github.com/Web-tree/runspore/issues/327)) ([0d09f7e](https://github.com/Web-tree/runspore/commit/0d09f7e8473a475633aecf7a759ac7551f392dbd))
+
 ## [0.10.3](https://github.com/Web-tree/runspore/compare/v0.10.2...v0.10.3) (2026-11-12)
 
 
