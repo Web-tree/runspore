@@ -40,7 +40,7 @@ _Avoid_: kernel artifact, certified artifact, kernel bundle, "the wasm"
 
 **Step runner**:
 A WebAssembly component of world `runspore:runner/runner@0.2.0`, or of the 0.1 track (`0.1.1` and before), that a `component` action names as its `module`: its exports start, probe and stop the step's work, and it reaches the machine only through the host imports the action's grants allow. The build seals it into the workflow artifact, so a run keeps the runner it started with.
-_Avoid_: plugin, extension, wasm helper, "the module" alone (an artifact is a component too)
+_Avoid_: plugin, extension, wasm helper, Wasm action (a compute component a spore exports), "the module" alone (an artifact is a component too)
 
 **Grant**:
 One thing a step runner may do, listed under the action's `grants` by kind: a program it may start, a socket it may reach, a folder it may read, a folder it may write into. The host enforces the list and never asks; a call outside it fails the step.
@@ -179,7 +179,7 @@ A concrete change to the author's files that removes a diagnostic, marked safe, 
 _Avoid_: suggestion, quick fix, autofix
 
 **Decision record**:
-One map ticket's decisions, in `docs/design/` (C02, C03, C06–C17), with rule IDs such as C13 R2 (L locked, R routine). The architecture decisions A01–A12 are in `docs/02` and the freeze decisions M01–M12 in `spec/README.md`.
+One map ticket's decisions, in `docs/design/` (C02, C03, C06–C19), with rule IDs such as C13 R2 (L locked, R routine). The architecture decisions A01–A12 are in `docs/02` and the freeze decisions M01–M12 in `spec/README.md`.
 _Avoid_: ADR for a C record, "M12 in docs/02"
 
 ### Steps and their actors
@@ -268,11 +268,55 @@ _Avoid_: frontmatter, flags, options
 The shape of a step's whole answer when its program names the outcome itself: one of the outcomes the step may end with, and output that fits that outcome's output schema. A workflow asks for it with `{"$resultSchema": {}}`, which the build replaces from the step's output schemas.
 _Avoid_: response format, answer type
 
+### Distribution
+
+These terms name how workflows and Wasm actions are shared and installed (C19). "Package" keeps its meaning above.
+
+**Spore**:
+A versioned unit of distribution that provides workflows, Wasm actions, or both, under one name and version. A person installs it from a registry; its author describes it in an author manifest. Written in code, `spore` is the CLI and never the unit.
+_Avoid_: package (the workflow document), crate, bundle, plugin, module
+
+**Wasm action**:
+A pure WebAssembly component that a spore exports for steps to call: input and node parameters go in, an outcome and output come back, and it starts and supervises nothing. An action in a settings file names it. "Action" alone always means that binding, never the component, so this term is always written in full. A step runner is a different component that supervises processes.
+_Avoid_: action (alone), function, step runner, plugin, module
+
+**Author manifest**:
+`spore.toml`, the TOML file an author writes to describe a spore, or a project that only consumes spores: what it is, what it exports and what it depends on.
+_Avoid_: manifest (alone), artifact manifest, config, Cargo.toml
+
+**Artifact manifest**:
+The list inside a workflow artifact of its package, named by digest, and every file it holds, each by path and digest (`spec/artifact.md` §2). A build writes it; nobody edits it. It is neither an author manifest nor a lock.
+_Avoid_: manifest (alone), lockfile
+
+**Lock**:
+`spore.lock`, which resolution writes: the exact version, digest and real source of every spore in the dependency graph. Changing it never changes an unfinished run.
+_Avoid_: lockfile (alone), artifact manifest, pin file
+
+**Registry**:
+A Git repository holding an index of spores: for each version, its dependencies and where its built artifact is, with its digest. The official registry is the default; a person adds a custom one explicitly, by name. A dependency resolves from exactly one named registry.
+_Avoid_: marketplace, kind registry (C18's table of CLI kinds), feed, index (one part of a registry)
+
+**Publisher namespace**:
+The `@publisher` part of a spore's name, such as `@acme` in `@acme/images`: who may publish under that name. It belongs to the registry and is not a GitHub organization or user.
+_Avoid_: org, owner, scope, account
+
+**Listing**:
+What a registry and the marketplace show about a spore so people can find it, such as its description, keywords and links. Resolution and installation never read it.
+_Avoid_: catalog metadata (the **Catalogue** holds diagnostics' words), metadata (alone), manifest
+
+**Marketplace**:
+The planned website where people find and publish spores, with accounts linked to GitHub. It reads registries and is not one. The Claude Code marketplace that ships the plugin is a different thing and is always named in full.
+_Avoid_: registry, store, hub
+
+**Spore cache**:
+The user-level folder, outside every repository and apart from run databases, where installation keeps verified spore content for reuse. Cleaning it never breaks a run: an unfinished run keeps what it needs.
+_Avoid_: installed store, store (the run database), vendor folder
+
 ### Releases
 
 **Release key**:
 The Ed25519 key that signs every release's checksum list. Its public half is pinned in `install.sh` and the README; an installer trusts a downloaded `spore` only when the checksum list carries its signature and the archive matches the list.
-_Avoid_: signing key (ambiguous with package signing), GPG key
+_Avoid_: signing key (ambiguous with signing spores), GPG key
 
 ### Claude Code integration
 
@@ -291,7 +335,7 @@ The Claude Code extension through which a person starts, follows and resumes run
 _Avoid_: module, plugin (a plugin is the package a mod ships in)
 
 **Plugin**:
-The Claude Code package, `ml-workflow` in the `max-skills` marketplace, that ships the mod, the authoring interview and the helper. It lives outside this repository.
+The Claude Code package, `ml-workflow` in the `max-skills` Claude Code marketplace (not the spore marketplace), that ships the mod, the authoring interview and the helper. It lives outside this repository.
 _Avoid_: extension, addon
 
 **Sub-skill**:
