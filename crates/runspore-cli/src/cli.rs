@@ -780,13 +780,13 @@ fn workflows(cwd: &Path) -> Result<Output, Fail> {
     )
 }
 
-/// The `inputSchema` of the workflow folder's `settings.json`; null when it has none
-/// or the file cannot be read. `validate` reports what is wrong with the file.
+/// The schema `start` checks the folder's input against: the built package's
+/// `inputSchema`, read from its file when `settings.json` names one. Null when the
+/// workflow has none or does not build; `validate` reports what is wrong with it.
 fn input_schema(folder: &Path) -> Value {
-    std::fs::read(folder.join(runspore_build::SETTINGS_FILE))
+    Source::folder(folder)
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .and_then(|mut settings| settings.get_mut("inputSchema").map(Value::take))
+        .and_then(|source| source.input_schema())
         .unwrap_or(Value::Null)
 }
 

@@ -348,6 +348,17 @@ fn workflows_lists_what_start_takes_by_name_with_each_input_schema() {
     let mut with_input: Value = serde_json::from_str(&read(&settings)).unwrap();
     with_input["inputSchema"] = schema.clone();
     std::fs::write(&settings, serde_json::to_vec(&with_input).unwrap()).unwrap();
+    // A schema kept in a file is listed as the schema, not as the file's name.
+    workflow(&workflows.join("filed"), "filed", "true", None);
+    std::fs::write(
+        workflows.join("filed/input.json"),
+        serde_json::to_vec(&schema).unwrap(),
+    )
+    .unwrap();
+    let settings = workflows.join("filed/settings.json");
+    let mut from_file: Value = serde_json::from_str(&read(&settings)).unwrap();
+    from_file["inputSchema"] = json!("input.json");
+    std::fs::write(&settings, serde_json::to_vec(&from_file).unwrap()).unwrap();
     // A folder with no workflow.dot is no workflow.
     std::fs::create_dir_all(workflows.join("empty")).unwrap();
 
@@ -357,6 +368,7 @@ fn workflows_lists_what_start_takes_by_name_with_each_input_schema() {
         listed["workflows"],
         json!([
             {"name": "coding-loop", "folder": workflows.join("loop"), "inputSchema": null},
+            {"name": "filed", "folder": workflows.join("filed"), "inputSchema": schema},
             {"name": "review", "folder": workflows.join("other"), "inputSchema": schema},
         ])
     );

@@ -104,9 +104,9 @@ project folder whose `workflow.dot` has a graph id, sorted by name, each with it
 folder. A workflow is listed whether or not it validates. With no project folder, or
 none with a workflow, it says so and exits 0. It opens no database. JSON:
 `{"project", "workflows": [{"name", "folder", "inputSchema"}]}`. `project` is the
-folder holding `.spore/`, or null. `inputSchema` is the `inputSchema` of the folder's
-`settings.json` as written, the schema `start --input` is checked against; null when
-the settings have none or cannot be read.
+folder holding `.spore/`, or null. `inputSchema` is the schema `start --input` is checked against: the built
+workflow's, read from its file when `settings.json` names one; null when the workflow
+has none or does not build.
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
 **0.2:** the loop works its one run only, with the runs below it in `list`'s tree
