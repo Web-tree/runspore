@@ -31,7 +31,7 @@ fn local_packages() -> Vec<String> {
 }
 
 #[test]
-fn release_please_bumps_the_workspace_version_and_every_local_package_in_cargo_lock() {
+fn release_please_bumps_every_workspace_version_in_cargo_toml_and_cargo_lock() {
     let config: serde_json::Value =
         serde_json::from_str(&read("release-please-config.json")).unwrap();
     let files = config["packages"]["."]["extra-files"].as_array().unwrap();
@@ -42,7 +42,36 @@ fn release_please_bumps_the_workspace_version_and_every_local_package_in_cargo_l
             .map(|f| f["jsonpath"].as_str().unwrap().to_string())
             .collect()
     };
-    assert_eq!(paths("Cargo.toml"), ["$.workspace.package.version"]);
+    // The workspace version, and the version of each workspace dependency that has one:
+    // the crates published to crates.io (spec/release.md section 7).
+    let manifest = read("Cargo.toml");
+    let dependencies = manifest
+        .split("[workspace.dependencies]")
+        .nth(1)
+        .unwrap()
+        .split("\n[")
+        .next()
+        .unwrap();
+    let mut want_toml: Vec<String> = dependencies
+        .lines()
+        .filter(|l| l.starts_with("runspore-") && l.contains("version = "))
+        .map(|l| {
+            let name = l.split_whitespace().next().unwrap();
+            format!("$.workspace.dependencies['{name}'].version")
+        })
+        .chain(["$.workspace.package.version".to_string()])
+        .collect();
+    let mut got_toml = paths("Cargo.toml");
+    want_toml.sort();
+    got_toml.sort();
+    assert!(
+        want_toml.len() > 1,
+        "no versioned workspace dependencies in Cargo.toml"
+    );
+    assert_eq!(
+        got_toml, want_toml,
+        "release-please-config.json must bump the workspace version and each versioned workspace dependency"
+    );
     let mut want: Vec<String> = local_packages()
         .iter()
         .map(|name| format!("$.package[?(@.name.value === '{name}')].version"))

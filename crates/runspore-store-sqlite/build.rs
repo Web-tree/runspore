@@ -1,7 +1,7 @@
 //! The version `spore --version` and `spore capabilities` print (spec/release.md
 //! section 1), and the one this adapter records as a database's writer and names in its
-//! messages, so all of them agree (spec/store.md §3). A build of the commit the tag `v<version>` names is that release and
-//! prints `<version>`. Any other build is a pre-release of the next minor version,
+//! messages, so all of them agree (spec/store.md §3). A build of the commit the tag `v<version>` names, or of the published crate, is that
+//! release and prints `<version>`. Any other build is a pre-release of the next minor version,
 //! named by its commit and dated by it, as rustc names a nightly:
 //! `0.4.0-dev+a65d8d1 (2026-10-16)`. Without git it is `0.4.0-dev`.
 
@@ -55,8 +55,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     watch(&dir);
 
-    let release = git(&dir, &["tag", "--points-at", "HEAD"])
-        .is_some_and(|tags| tags.lines().any(|t| t == format!("v{version}")));
+    // A published crate (`cargo package` wrote `.cargo_vcs_info.json`) is the source of
+    // the release its version names: only the release workflow publishes, from the tag.
+    let published = dir.join(".cargo_vcs_info.json").exists();
+    let release = published
+        || git(&dir, &["tag", "--points-at", "HEAD"])
+            .is_some_and(|tags| tags.lines().any(|t| t == format!("v{version}")));
     let commit = git(&dir, &["rev-parse", "--short=7", "HEAD"]);
     let date = git(&dir, &["log", "-1", "--format=%cs", "HEAD"]);
     let (semver, text) = match (release, commit, date) {

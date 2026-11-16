@@ -4,11 +4,13 @@ description = "Reducer that runs the Runspore kernel component through Wasmtime,
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+publish = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 build = "build/main.rs"
+# `prebuilt/` is ignored by git but goes into the published crate (build/main.rs).
+include = ["/src", "/build", "/wit", "/prebuilt", "/README.md"]
 
 [dependencies]
 runspore-types.workspace = true

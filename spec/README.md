@@ -98,7 +98,7 @@ crates/runspore-store-sqlite  Store on SQLite
 crates/runspore-host          Engine: coordinator, dispatcher, sweeper, activity runners
 crates/runspore-build         Build: workflow folder (DOT and settings) to package and workflow artifact
 crates/runspore-schema        Schemas: the subset, its checks, data checks for outputs and input
-crates/runspore-cli           the spore binary and crash-recovery tests
+crates/runspore-cli           the spore binary and crash-recovery tests (package `runspore`)
 conformance/traces            golden kernel traces
 conformance/js                Node and Bun trace runners
 examples                      sample workflows

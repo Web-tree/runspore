@@ -34,7 +34,7 @@ use imports::{Halt, State};
 use runspore_wasmtime::ArtifactReader;
 
 wasmtime::component::bindgen!({
-    path: "../../contracts/wit/runner",
+    path: "wit/runner",
     world: "runner",
     imports: { default: trappable },
 });
@@ -43,7 +43,7 @@ wasmtime::component::bindgen!({
 /// `host`, and a probe that never answers `stopped`.
 pub(crate) mod v0_1 {
     wasmtime::component::bindgen!({
-        path: "../../contracts/wit/runner-0.1",
+        path: "wit/runner-0.1",
         world: "runner",
         imports: { default: trappable },
     });
