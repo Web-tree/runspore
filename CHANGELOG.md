@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.5](https://github.com/Web-tree/runspore/compare/v0.10.4...v0.10.5) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate rusqlite to 0.43.0 ([#329](https://github.com/Web-tree/runspore/issues/329)) ([0944bfe](https://github.com/Web-tree/runspore/commit/0944bfe1f8438344f4aa19617494db42de6a4a0b))
+
 ## [0.10.4](https://github.com/Web-tree/runspore/compare/v0.10.3...v0.10.4) (2026-11-15)
 
 
