@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/Web-tree/runspore/compare/v0.10.5...v0.11.0) (2026-11-16)
+
+
+### Features
+
+* **cli:** spore workflows lists what start takes by name, with each input schema ([#335](https://github.com/Web-tree/runspore/issues/335)) ([94a5d46](https://github.com/Web-tree/runspore/commit/94a5d467f86ae3562e06b6efa1655f47bf284042))
+
 ## [0.10.5](https://github.com/Web-tree/runspore/compare/v0.10.4...v0.10.5) (2026-11-16)
 
 
