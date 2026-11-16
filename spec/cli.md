@@ -49,6 +49,7 @@ marked **0.2** below are new since 0.1.
 | `step propose <token> --outcome <o> [--output <json>]` | **0.2.** Checks an answer as `step complete` does and holds it as the attempt's candidate, without completing the step |
 | `step withdraw <token>` | **0.2.** Discards the attempt's candidate answer |
 | `step show [<runId>]` | **0.2.** Describes the step the run is at, without claiming, probing or changing anything (§What a run needs) |
+| `workflows` | **0.2.** Lists the workflows `start` takes by name, each with its folder and the schema of its input |
 | `capabilities` | **0.2.** Prints what this `spore` runs: its version, the version of each contract, and its capability set (§Capabilities) |
 | `migrate` | **0.2.** Upgrades a database an earlier 0.2 `spore` wrote to this `spore`'s schema; refused while a worker of another `spore` uses it (§Databases from another version) |
 
@@ -97,6 +98,15 @@ project folder found by walking up from the current folder (§Project folder) wh
 `workflow.dot` has that graph id. No project folder, or no folder with that graph id,
 is `workflow.not-found`; two folders with it are `workflow.ambiguous`. Both exit 2,
 and `workflow.not-found` lists the names that exist.
+
+**`workflows`.** Lists those names: every folder under `.spore/workflows/` of the
+project folder whose `workflow.dot` has a graph id, sorted by name, each with its
+folder. A workflow is listed whether or not it validates. With no project folder, or
+none with a workflow, it says so and exits 0. It opens no database. JSON:
+`{"project", "workflows": [{"name", "folder", "inputSchema"}]}`. `project` is the
+folder holding `.spore/`, or null. `inputSchema` is the schema `start --input` is checked against: the built
+workflow's, read from its file when `settings.json` names one; null when the workflow
+has none or does not build.
 
 `run` and `worker --until-parked` are the same loop; `run` on an existing key resumes it.
 **0.2:** the loop works its one run only, with the runs below it in `list`'s tree
@@ -817,7 +827,7 @@ read-only commands `status`, `list`, `events` and `step show` treat a missing da
 as empty: `list` shows no runs, `status`, `events` and `step show <runId>` exit 2 with
 `run.not-found`, and `step show` alone finds no unfinished run. `continue` on a
 missing database has nothing to continue, and says so as below. None of them creates
-the file. `validate` and `init` open no database.
+the file. `validate`, `workflows` and `init` open no database.
 
 **Steps reach the run's database.** Every program the host starts gets `RUNSPORE_DB`,
 the absolute path of the database the worker uses (host.md §3). A `spore` call from

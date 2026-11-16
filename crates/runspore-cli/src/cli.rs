@@ -226,6 +226,9 @@ pub enum Command {
     /// What this spore runs: its version, the contract versions, the action kinds, those
     /// it runs async, and its result channels.
     Capabilities,
+    /// The workflows of the project folder that `start` takes by name, each with its
+    /// folder and the schema of its input.
+    Workflows,
     /// Upgrade a database an earlier 0.2 spore wrote to this spore's schema. Refused
     /// while a worker of another spore uses it.
     Migrate,
@@ -451,6 +454,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         }
         Command::Explain { code } => return explain(code.as_deref()),
         Command::Capabilities => return capabilities(),
+        Command::Workflows => return workflows(&cwd),
         Command::Build {
             folder,
             output,
@@ -526,6 +530,7 @@ pub async fn execute(cli: &Cli) -> Result<Output, Fail> {
         | Command::Validate { .. }
         | Command::Explain { .. }
         | Command::Capabilities
+        | Command::Workflows
         | Command::Migrate
         | Command::Build { .. }
         | Command::Start(_)
@@ -746,6 +751,43 @@ fn capabilities() -> Result<Output, Fail> {
         object["commitDate"] = json!(date);
     }
     done(object, text)
+}
+
+/// `workflows`: the workflows of the project folder found by walking up from `cwd`,
+/// by name. It reads no database. A workflow is listed when its name can be read,
+/// whether or not it validates.
+fn workflows(cwd: &Path) -> Result<Output, Fail> {
+    let found = project::workflows(cwd);
+    let text = if found.is_empty() {
+        "no workflows in a project folder (.spore/workflows/) here\n".to_string()
+    } else {
+        let width = found.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
+        let rows: String = found
+            .iter()
+            .map(|(name, folder)| format!("{name:<width$}  {}\n", folder.display()))
+            .collect();
+        rows + "start one with spore start <name>\n"
+    };
+    let listed: Vec<Value> = found
+        .iter()
+        .map(|(name, folder)| {
+            json!({"name": name, "folder": folder, "inputSchema": input_schema(folder)})
+        })
+        .collect();
+    done(
+        json!({"project": project::find(cwd), "workflows": listed}),
+        text,
+    )
+}
+
+/// The schema `start` checks the folder's input against: the built package's
+/// `inputSchema`, read from its file when `settings.json` names one. Null when the
+/// workflow has none or does not build; `validate` reports what is wrong with it.
+fn input_schema(folder: &Path) -> Value {
+    Source::folder(folder)
+        .ok()
+        .and_then(|source| source.input_schema())
+        .unwrap_or(Value::Null)
 }
 
 /// The options of `validate`.

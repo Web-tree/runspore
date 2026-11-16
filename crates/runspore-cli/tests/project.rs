@@ -328,6 +328,63 @@ fn start_finds_a_workflow_by_its_graph_id() {
     );
 }
 
+#[test]
+fn workflows_lists_what_start_takes_by_name_with_each_input_schema() {
+    let repo = Repo::new("workflows");
+    let root = &repo.root;
+    let none = ok(&repo.spore(root, &["--json", "workflows"]));
+    assert_eq!(
+        none,
+        json!({"format": "runspore.cli/0.3", "project": null, "workflows": []})
+    );
+
+    ok(&repo.spore(root, &["init"]));
+    let workflows = root.join(".spore/workflows");
+    workflow(&workflows.join("loop"), "coding-loop", "true", None);
+    workflow(&workflows.join("other"), "review", "true", None);
+    let schema = json!({"type": "object", "required": ["task"],
+                        "properties": {"task": {"type": "string"}}});
+    let settings = workflows.join("other/settings.json");
+    let mut with_input: Value = serde_json::from_str(&read(&settings)).unwrap();
+    with_input["inputSchema"] = schema.clone();
+    std::fs::write(&settings, serde_json::to_vec(&with_input).unwrap()).unwrap();
+    // A schema kept in a file is listed as the schema, not as the file's name.
+    workflow(&workflows.join("filed"), "filed", "true", None);
+    std::fs::write(
+        workflows.join("filed/input.json"),
+        serde_json::to_vec(&schema).unwrap(),
+    )
+    .unwrap();
+    let settings = workflows.join("filed/settings.json");
+    let mut from_file: Value = serde_json::from_str(&read(&settings)).unwrap();
+    from_file["inputSchema"] = json!("input.json");
+    std::fs::write(&settings, serde_json::to_vec(&from_file).unwrap()).unwrap();
+    // A folder with no workflow.dot is no workflow.
+    std::fs::create_dir_all(workflows.join("empty")).unwrap();
+
+    let listed = ok(&repo.spore(&root.join("a/b"), &["--json", "workflows"]));
+    assert_eq!(listed["project"], json!(root));
+    assert_eq!(
+        listed["workflows"],
+        json!([
+            {"name": "coding-loop", "folder": workflows.join("loop"), "inputSchema": null},
+            {"name": "filed", "folder": workflows.join("filed"), "inputSchema": schema},
+            {"name": "review", "folder": workflows.join("other"), "inputSchema": schema},
+        ])
+    );
+
+    let text = repo.spore(root, &["workflows"]);
+    assert_eq!(text.code(), Some(0));
+    assert!(text.stdout.contains("coding-loop  "), "{}", text.stdout);
+    assert!(
+        text.stdout.contains("spore start <name>"),
+        "{}",
+        text.stdout
+    );
+    // It opens no database.
+    assert!(!repo.home.exists());
+}
+
 /// The `where` workflow appends the folder its command runs in to `log`.
 fn where_flow(root: &Path, log: &Path) {
     let script = format!("pwd -P >> '{}'", log.display());

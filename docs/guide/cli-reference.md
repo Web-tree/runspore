@@ -16,6 +16,7 @@ requires a source folder or an artifact.
 | Command | Options | Purpose |
 | --- | --- | --- |
 | `spore init` | None | Creates the project folder and workflow directory; opens no database |
+| `spore workflows` | None | Lists the workflows under `.spore/workflows/` that `start` takes by name, with the schema of each one's input |
 | `spore validate WORKFLOW` | `--short`, `--strict`, `--fix` | Validates without running actions; `--fix` applies safe source edits |
 | `spore explain [CODE]` | None | Explains a diagnostic offline; without a code lists the catalogue |
 | `spore build FOLDER` | `-o FILE` / `--output FILE`, `--strict`, `--composed` | Builds a source folder or its `workflow.dot` into a workflow artifact |
