@@ -23,7 +23,14 @@ key's signature and the archive's checksum. Run it again to update. The
 [installation guide](docs/guide/getting-started.md#install-spore) covers its options
 and prerequisites.
 
-To build from source instead, with Git, Rust managed by `rustup`, and a native C
+Or with Homebrew, or from crates.io with your own Rust toolchain:
+
+```sh
+brew install web-tree/tap/runspore
+cargo install runspore --locked
+```
+
+To build from a checkout instead, with Git, Rust managed by `rustup`, and a native C
 toolchain:
 
 ```sh

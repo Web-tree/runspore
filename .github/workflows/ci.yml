@@ -22,6 +22,19 @@ jobs:
       - run: cargo test --workspace --locked
       - run: shellcheck install.sh scripts/*.sh
 
+  # The crates `cargo install runspore` builds package and build on their own, without
+  # the workspace (spec/release.md section 7).
+  crates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/stage-crates.sh
+      - run: >-
+          cargo package --locked
+          -p runspore-types -p runspore-schema -p runspore-kernel -p runspore-build
+          -p runspore-wasmtime -p runspore-host -p runspore-store-sqlite -p runspore
+
   actionlint:
     runs-on: ubuntu-latest
     steps:
@@ -35,4 +48,4 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p runspore-cli --test install --locked
+      - run: cargo test -p runspore --test install --locked

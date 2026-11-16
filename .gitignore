@@ -9,3 +9,5 @@ dist/
 *.db-shm
 .DS_Store
 .claude/worktrees/
+# The kernel components scripts/stage-crates.sh puts into the published crate.
+crates/runspore-wasmtime/prebuilt/

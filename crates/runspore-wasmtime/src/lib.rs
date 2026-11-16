@@ -21,7 +21,7 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, ResourceLimiter, Store, Trap, WasmBacktraceDetails};
 
 wasmtime::component::bindgen!({
-    path: "../../contracts/wit/machine",
+    path: "wit/machine",
     world: "machine",
 });
 
