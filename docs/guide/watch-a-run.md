@@ -310,7 +310,9 @@ step is stuck, and sends the answer with the commands of this page: `signal`,
 
 Install it in Orca under Settings → Plugins → Add plugin → From a Git URL, with
 `https://github.com/Web-tree/orca-runspore`. It needs `spore` installed; it ships no
-binary of its own.
+binary of its own. Starting a run from the panel needs spore 0.11.0 or later, the first
+release with `spore workflows`; with an older spore the panel shows no workflows to start
+and everything else works.
 
 ## Reference
 
