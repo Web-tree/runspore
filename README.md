@@ -72,6 +72,7 @@ integration are required.
 | Choose the database, base folder, worker settings, or upgrade path | [Projects and settings](docs/guide/project-settings.md) |
 | Find a command or option | [CLI reference](docs/guide/cli-reference.md) |
 | Follow runs and send notifications | [Watch a run](docs/guide/watch-a-run.md) |
+| See and answer runs inside the Orca IDE | [Runspore for Orca](https://github.com/Web-tree/orca-runspore) |
 | Run Claude Code as an ordinary command step | [A Claude step](docs/guide/claude-step.md) |
 
 ## Current scope

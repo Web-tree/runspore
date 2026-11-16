@@ -23,6 +23,7 @@ architecture before using it.
 | Find a run, understand its database, or configure a worker | [Projects and settings](project-settings.md) |
 | Look up a command, flag, or exit code | [CLI reference](cli-reference.md) |
 | See progress across runs and get a notification | [Watch a run](watch-a-run.md) |
+| See and answer runs inside the Orca IDE | [Runspore for Orca](https://github.com/Web-tree/orca-runspore) |
 | Use Claude Code in a workflow | [A Claude step](claude-step.md) |
 | Fix a workflow that does not validate | [Validation guide](../validation.md) and [diagnostic catalogue](../codes/README.md) |
 | Try an existing workflow | [Example catalogue](../../examples/README.md) |

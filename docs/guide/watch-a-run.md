@@ -299,6 +299,19 @@ A Slack or Teams incoming webhook takes a JSON body of its own: have the action 
 small script that reads stdin and posts that body. `onIntervention` plays the part of
 n8n's Error Workflow and Argo's `onExit`.
 
+## In an editor: Runspore for Orca
+
+[Runspore for Orca](https://github.com/Web-tree/orca-runspore) is a plugin for the
+[Orca](https://orca.dev) IDE that shows the same runs in a side panel. It reads them
+with `spore --json list` and `status`, notifies you when a run waits for a signal or a
+step is stuck, and sends the answer with the commands of this page: `signal`,
+`resolve`, `release` and `cancel`. It can also start a run of a workflow that
+`spore workflows` lists, and keep a `spore worker` running while Orca is open.
+
+Install it in Orca under Settings → Plugins → Add plugin → From a Git URL, with
+`https://github.com/Web-tree/orca-runspore`. It needs `spore` installed; it ships no
+binary of its own.
+
 ## Reference
 
 - [spec/cli.md](../../spec/cli.md): §Progress for the worker's lines and their JSON
