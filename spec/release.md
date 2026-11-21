@@ -170,7 +170,9 @@ A published crate is built without the workspace, so:
 
 - `runspore-wasmtime` cannot build the kernel component. `scripts/stage-crates.sh`
   copies the components the tagged checkout builds (`kernel.wasm`, `test-runner.wasm`)
-  into `crates/runspore-wasmtime/prebuilt/`, which git ignores and the crate includes,
+  into `crates/runspore-wasmtime/prebuilt/`, which git ignores and the crate includes
+  (cargo counts them as uncommitted changes, so packaging passes `--allow-dirty` once
+  `git status` shows no others),
   and the build script of a published crate copies them instead of building them. The
   guest build is reproducible, so a crates.io build runs the same kernel bytes as the
   release archives.

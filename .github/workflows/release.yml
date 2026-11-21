@@ -195,6 +195,9 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           test -n "$CARGO_REGISTRY_TOKEN" || { echo "::error::secret CARGO_REGISTRY_TOKEN is not set (spec/release.md section 7)"; exit 1; }
+          # Cargo counts the staged components, which git ignores, as uncommitted
+          # changes; git sees no others, so --allow-dirty lets only them through.
+          test -z "$(git status --porcelain)" || { git status --porcelain; exit 1; }
           version=${TAG#v}
           # Dependencies first.
           for crate in runspore-types runspore-schema runspore-kernel runspore-build \
@@ -203,6 +206,6 @@ jobs:
               "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is on crates.io already"
             else
-              cargo publish --locked -p "$crate"
+              cargo publish --locked --allow-dirty -p "$crate"
             fi
           done
