@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/Web-tree/runspore/compare/v0.11.0...v0.11.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate wasmtime to v51 ([#342](https://github.com/Web-tree/runspore/issues/342)) ([1413802](https://github.com/Web-tree/runspore/commit/141380213c6986832fb1017561f9cec54d47f035))
+
 ## [0.11.0](https://github.com/Web-tree/runspore/compare/v0.10.5...v0.11.0) (2026-11-16)
 
 
