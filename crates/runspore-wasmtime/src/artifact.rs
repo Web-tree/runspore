@@ -13,7 +13,7 @@ use crate::{deterministic_config, new_store, Bounds, Guards};
 
 mod bindings {
     wasmtime::component::bindgen!({
-        path: "../../contracts/wit/artifact",
+        path: "wit/artifact",
         world: "artifact",
     });
 }

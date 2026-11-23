@@ -145,7 +145,7 @@ only when the release key signed them.
 
 ## 7. Building from source
 
-`cargo install --git https://github.com/Web-tree/runspore --locked runspore-cli`
+`cargo install --git https://github.com/Web-tree/runspore --locked runspore`
 builds and installs `spore` from the repository, with no signature checks.
 
 Only a build of the commit a release tag names is that release. The build asks git:
@@ -156,6 +156,34 @@ after 0.3.0, `spore 0.4.0-dev+a65d8d1 (2026-10-16)`. A build outside a git check
 knows no commit and prints `spore 0.4.0-dev`. A pre-release sorts after the release
 it follows, so a minimum of 0.3.0 accepts it, and it never equals a release, so a
 doctor or a bug report can tell the two apart.
+
+### crates.io
+
+`cargo install runspore --locked` builds a release from crates.io. The CLI package is
+`runspore` (folder `crates/runspore-cli`); the release workflow publishes it with the
+seven crates it builds from, at the workspace version: `runspore-types`,
+`runspore-schema`, `runspore-kernel`, `runspore-build`, `runspore-wasmtime`,
+`runspore-host` and `runspore-store-sqlite`. Every other crate stays `publish = false`.
+Their Rust APIs are not a stable interface.
+
+A published crate is built without the workspace, so:
+
+- `runspore-wasmtime` cannot build the kernel component. `scripts/stage-crates.sh`
+  copies the components the tagged checkout builds (`kernel.wasm`, `test-runner.wasm`)
+  into `crates/runspore-wasmtime/prebuilt/`, which git ignores and the crate includes
+  (cargo counts them as uncommitted changes, so packaging passes `--allow-dirty` once
+  `git status` shows no others),
+  and the build script of a published crate copies them instead of building them. The
+  guest build is reproducible, so a crates.io build runs the same kernel bytes as the
+  release archives.
+- The WIT files a crate reads are symbolic links in its `wit/` folder to
+  `contracts/wit/`; `cargo package` stores the files.
+- A published crate is the source of the release its version names, so its
+  `spore --version` prints `spore <version>`. The build knows it from the
+  `.cargo_vcs_info.json` that `cargo package` writes.
+
+The `crates` check of CI packages the eight crates and builds each from its package on
+every change.
 
 ## 8. The release cycle
 
@@ -217,6 +245,12 @@ With a tag, it builds the archives from the tagged commit and:
    version;
 5. uploads the six assets to the tag's draft release and publishes it, or creates the
    release with them when there is none (a tag pushed by hand).
+6. once the release is published, runs `scripts/stage-crates.sh` and publishes the
+   crates of §7 to crates.io with `CARGO_REGISTRY_TOKEN`, dependencies first, skipping
+   a crate whose version is there already. A crates.io version cannot be deleted, so
+   this comes last, and only once the release is published. A run again for the tag
+   stops at step 1 but still runs this step, which publishes the crates a failed run
+   left out.
 
 A failure at any step publishes nothing. A release release-please made stays a draft,
 which only people with write access see, and `install.sh` keeps installing the release

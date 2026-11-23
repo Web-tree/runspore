@@ -35,6 +35,28 @@ archives and cannot be installed this way. Do not bypass a signature or checksum
 failure. [Release verification](../../spec/release.md) documents the asset names and
 pinned release key.
 
+### Homebrew
+
+```sh
+brew install web-tree/tap/runspore
+```
+
+The [Web-tree tap](https://github.com/Web-tree/homebrew-tap) installs the same release
+archives on macOS and Linux. It writes its formula from a release's `SHA256SUMS` only
+after checking the release key's signature, and follows a new release within six hours.
+Update with `brew upgrade runspore`.
+
+### crates.io
+
+```sh
+cargo install runspore --locked
+```
+
+This builds the release's source with your Rust toolchain (1.96 or newer) and needs a
+native C compiler for the bundled SQLite. No WebAssembly target is needed: the
+published crate carries the kernel component the release builds. Cargo puts `spore`
+in `~/.cargo/bin`.
+
 Make sure the installation directory is on `PATH`, then check the installation:
 
 ```sh

@@ -20,7 +20,7 @@ of the examples. With no explicit database selection, runs are stored under
 [Projects and settings](../docs/guide/project-settings.md#where-runs-live) for overrides.
 
 ```sh
-cargo build --release -p runspore-cli
+cargo build --release -p runspore
 export PATH="$PWD/target/release:$PATH"
 demo=$(mktemp -d) && cp -R examples/hello examples/review-loop examples/unsafe-deploy "$demo" && cd "$demo"
 ```

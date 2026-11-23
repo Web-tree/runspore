@@ -16,7 +16,7 @@ use wasm_encoder::{
 use wit_component::{ComponentEncoder, StringEncoding};
 use wit_parser::Resolve;
 
-const WIT: &str = include_str!("../../../contracts/wit/artifact/artifact.wit");
+const WIT: &str = include_str!("../wit/artifact/artifact.wit");
 const INTERFACE: &str = "runspore:artifact/reader@0.1.0";
 
 /// The 12-byte return area of both exports.

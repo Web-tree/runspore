@@ -14,9 +14,15 @@ homepage = "https://runspore.com"
 # Shared pins. A crate that needs anything else declares it in its own
 # Cargo.toml with an explicit version; do not add entries here from a package branch.
 [workspace.dependencies]
-runspore-types = { path = "crates/runspore-types" }
-runspore-kernel = { path = "crates/runspore-kernel" }
-runspore-schema = { path = "crates/runspore-schema" }
+# The crates `cargo install runspore` builds (spec/release.md section 7). Their
+# versions follow the workspace version; release-please bumps them.
+runspore-types = { path = "crates/runspore-types", version = "0.11.1" }
+runspore-kernel = { path = "crates/runspore-kernel", version = "0.11.1" }
+runspore-schema = { path = "crates/runspore-schema", version = "0.11.1" }
+runspore-build = { path = "crates/runspore-build", version = "0.11.1" }
+runspore-wasmtime = { path = "crates/runspore-wasmtime", version = "0.11.1" }
+runspore-host = { path = "crates/runspore-host", version = "0.11.1" }
+runspore-store-sqlite = { path = "crates/runspore-store-sqlite", version = "0.11.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
